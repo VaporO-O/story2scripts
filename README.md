@@ -133,3 +133,11 @@ ruff check .
 - 右侧展示生成后的 YAML 剧本
 - 支持 YAML 校验
 - 支持下载 `screenplay.yaml`
+
+## Schema 文档
+
+YAML Schema 设计说明见：
+
+```text
+docs/YAML_SCHEMA.md
+```
