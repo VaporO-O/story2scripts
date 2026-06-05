@@ -7,11 +7,14 @@ from fastapi.staticfiles import StaticFiles
 from .api_models import ChapterPreviewItem
 from .api_models import ChapterPreviewRequest
 from .api_models import ChapterPreviewResponse
+from .api_models import CharacterProfileRequest
+from .api_models import CharacterProfileResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
 from .api_models import ExampleNovelResponse
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
+from .character_profiles import extract_character_profiles
 from .converter import DemoConverter
 from .examples import load_example_novel
 from .parser import parse_chapters
@@ -60,6 +63,16 @@ async def preview_chapters(request: ChapterPreviewRequest) -> ChapterPreviewResp
             for index, chapter in enumerate(chapters, start=1)
         ],
     )
+
+
+@app.post("/api/characters/profiles", response_model=CharacterProfileResponse)
+async def analyze_character_profiles(request: CharacterProfileRequest) -> CharacterProfileResponse:
+    try:
+        chapters = parse_chapters(request.novel_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return CharacterProfileResponse(profiles=extract_character_profiles(chapters))
 
 
 @app.get("/api/screenplay/schema")
