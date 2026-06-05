@@ -134,6 +134,7 @@ ruff check .
 - 支持 YAML 校验
 - 支持下载 `screenplay.yaml`
 
+<<<<<<< HEAD
 ## 人物小传提取
 
 接口：`POST /api/characters/profiles`
@@ -149,3 +150,12 @@ ruff check .
 - `key_change`：关键变化
 
 当前版本使用规则提取，适合本地演示和稳定测试；后续可在不改变接口结构的前提下接入 AI 增强。
+=======
+## Schema 文档
+
+YAML Schema 设计说明见：
+
+```text
+docs/YAML_SCHEMA.md
+```
+>>>>>>> origin/main
