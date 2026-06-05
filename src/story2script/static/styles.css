@@ -82,7 +82,7 @@ main {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  padding-bottom: 40px;
+  padding-bottom: 18px;
 }
 
 .panel {
@@ -244,6 +244,85 @@ textarea {
   display: none;
 }
 
+.profile-panel {
+  margin-bottom: 42px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.section-heading div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-heading span {
+  color: var(--accent);
+}
+
+.section-heading p,
+.profile-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.profile-empty {
+  padding: 28px 0 6px;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  padding-top: 18px;
+}
+
+.profile-card {
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.profile-card h3 {
+  margin: 0;
+  padding: 14px 16px;
+  color: var(--green);
+  border-bottom: 1px solid var(--line);
+  font: 700 18px Georgia, "Songti SC", serif;
+}
+
+.profile-card table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.profile-card th,
+.profile-card td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.profile-card th {
+  width: 96px;
+  color: var(--muted);
+  font-weight: 700;
+  background: #faf7f0;
+}
+
 @media (max-width: 900px) {
   .workspace {
     grid-template-columns: 1fr;
@@ -255,6 +334,11 @@ textarea {
 
   .hero h1 {
     letter-spacing: -1px;
+  }
+
+  .section-heading {
+    align-items: start;
+    flex-direction: column;
   }
 }
 

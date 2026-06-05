@@ -5,6 +5,9 @@ const yamlOutput = document.querySelector("#yamlOutput");
 const emptyState = document.querySelector("#emptyState");
 const message = document.querySelector("#message");
 const convertButton = document.querySelector("#convertButton");
+const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
+const profileGrid = document.querySelector("#profileGrid");
+const profileEmptyState = document.querySelector("#profileEmptyState");
 
 function setMessage(text, isError = false) {
   message.textContent = text;
@@ -14,6 +17,28 @@ function setMessage(text, isError = false) {
 function updateChapterCount() {
   const chapters = novelInput.value.match(/^\s*(第.+章.*|chapter\s+\d+.*)$/gim) || [];
   document.querySelector("#chapterCount").textContent = `已识别 ${chapters.length} 个章节`;
+}
+
+function renderProfiles(profiles) {
+  profileGrid.innerHTML = "";
+  profileEmptyState.classList.toggle("hidden", profiles.length > 0);
+
+  profiles.forEach((profile) => {
+    const card = document.createElement("article");
+    card.className = "profile-card";
+    card.innerHTML = `
+      <h3>${profile.name}</h3>
+      <table>
+        <tr><th>角色定位</th><td>${profile.role}</td></tr>
+        <tr><th>性格</th><td>${profile.personality}</td></tr>
+        <tr><th>目标</th><td>${profile.goal}</td></tr>
+        <tr><th>与他人的关系</th><td>${profile.relationships.join("；")}</td></tr>
+        <tr><th>出场章节</th><td>${profile.appearance_chapters.join("、")}</td></tr>
+        <tr><th>关键变化</th><td>${profile.key_change}</td></tr>
+      </table>
+    `;
+    profileGrid.appendChild(card);
+  });
 }
 
 async function loadExample() {
@@ -63,6 +88,31 @@ async function convertNovel() {
   }
 }
 
+async function analyzeCharacters() {
+  analyzeCharactersButton.disabled = true;
+  setMessage("正在分析人物小传……");
+
+  try {
+    const response = await fetch("/api/characters/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ novel_text: novelInput.value }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "人物分析失败");
+    }
+
+    renderProfiles(data.profiles);
+    setMessage(`已提取 ${data.profiles.length} 个人物小传。`);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    analyzeCharactersButton.disabled = false;
+  }
+}
+
 async function validateYaml() {
   if (!yamlOutput.value) {
     setMessage("请先生成或输入 YAML 剧本。", true);
@@ -102,6 +152,7 @@ document.querySelector("#loadExampleButton").addEventListener("click", () => {
   loadExample().catch((error) => setMessage(error.message, true));
 });
 document.querySelector("#convertButton").addEventListener("click", convertNovel);
+document.querySelector("#analyzeCharactersButton").addEventListener("click", analyzeCharacters);
 document.querySelector("#validateButton").addEventListener("click", validateYaml);
 document.querySelector("#downloadButton").addEventListener("click", downloadYaml);
 novelInput.addEventListener("input", updateChapterCount);

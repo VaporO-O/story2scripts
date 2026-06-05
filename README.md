@@ -133,6 +133,7 @@ ruff check .
 - 右侧展示生成后的 YAML 剧本
 - 支持 YAML 校验
 - 支持下载 `screenplay.yaml`
+- 支持展示人物小传表
 
 ## 人物小传提取
 
