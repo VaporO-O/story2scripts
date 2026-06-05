@@ -21,10 +21,12 @@ def test_character_profiles_api() -> None:
     )
 
     assert response.status_code == 200
-    profile = response.json()["profiles"][0]
+    profiles = response.json()["profiles"]
+    profile = profiles[0]
     assert profile["name"] == "林澈"
     assert profile["role"] == "主角"
     assert profile["relationships"] == ["是林晚的弟弟"]
+    assert "失踪真相" not in {item["name"] for item in profiles}
 
 
 def test_character_profiles_api_rejects_short_novel() -> None:
