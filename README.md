@@ -172,6 +172,31 @@ ruff check .
 后续会扩展：
 
 - `ai`：调用外部 LLM，智能识别心理描写、场景改编和人物信息
+
+### 外部 LLM 配置
+
+项目已预留 OpenAI-compatible Chat Completions 接口。你确定服务商后，参考 `.env.example` 填写：
+
+```bash
+CONVERTER_MODE=ai
+AI_API_KEY=your-api-key
+AI_BASE_URL=https://your-provider.example/v1
+AI_MODEL=your-model-name
+AI_TIMEOUT_SECONDS=120
+```
+
+随后调用 `/api/convert` 时传入：
+
+```json
+{
+  "mode": "ai",
+  "title": "作品标题",
+  "genre": "悬疑",
+  "novel_text": "第一章 ...\n第二章 ...\n第三章 ..."
+}
+```
+
+如果暂时没有配置 API Key，继续使用默认 `demo` 模式即可。
 ## Schema 文档
 
 YAML Schema 设计说明见：
