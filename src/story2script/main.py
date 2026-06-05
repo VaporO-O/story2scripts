@@ -1,5 +1,24 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
+
+from .parser import parse_chapters
+
+
+class ChapterPreviewRequest(BaseModel):
+    novel_text: str = Field(min_length=1)
+
+
+class ChapterPreviewItem(BaseModel):
+    index: int
+    title: str
+    character_count: int
+    preview: str
+
+
+class ChapterPreviewResponse(BaseModel):
+    chapter_count: int
+    chapters: list[ChapterPreviewItem]
 
 
 app = FastAPI(
@@ -34,3 +53,23 @@ async def index() -> str:
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "Story2Script"}
 
+
+@app.post("/api/chapters/preview", response_model=ChapterPreviewResponse)
+async def preview_chapters(request: ChapterPreviewRequest) -> ChapterPreviewResponse:
+    try:
+        chapters = parse_chapters(request.novel_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return ChapterPreviewResponse(
+        chapter_count=len(chapters),
+        chapters=[
+            ChapterPreviewItem(
+                index=index,
+                title=chapter.title,
+                character_count=len(chapter.content),
+                preview=chapter.content[:80],
+            )
+            for index, chapter in enumerate(chapters, start=1)
+        ],
+    )
