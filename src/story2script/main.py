@@ -6,6 +6,7 @@ from .converter import DemoConverter
 from .parser import parse_chapters
 from .screenplay import Screenplay
 from .screenplay import screenplay_json_schema
+from .yaml_export import screenplay_to_yaml
 
 
 class ChapterPreviewRequest(BaseModel):
@@ -32,6 +33,7 @@ class ConvertRequest(BaseModel):
 
 class ConvertResponse(BaseModel):
     screenplay: Screenplay
+    yaml_text: str
     mode: str
 
 
@@ -106,4 +108,4 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
         title=request.title,
         genre=request.genre,
     )
-    return ConvertResponse(screenplay=screenplay, mode="demo")
+    return ConvertResponse(screenplay=screenplay, yaml_text=screenplay_to_yaml(screenplay), mode="demo")
