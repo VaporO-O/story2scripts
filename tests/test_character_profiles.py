@@ -53,3 +53,21 @@ def test_example_character_profiles_ignore_relation_descriptions() -> None:
 
     assert not any("失踪" in profile["name"] for profile in profiles)
 
+
+def test_relation_prefix_candidates_require_name_evidence() -> None:
+    chapters = parse_chapters(
+        "第1章 暗号\n"
+        "周远说：“先查码头。”周远寻找母亲旧信暗号。老师张宁说：“别急。”\n"
+        "第2章 追查\n"
+        "答案是故事的核心。周远继续调查。\n"
+        "第3章 回声\n"
+        "张宁说：“看这里。”"
+    )
+
+    names = {profile["name"] for profile in extract_character_profiles(chapters)}
+
+    assert "旧信暗号" not in names
+    assert "故事" not in names
+    assert "老师张宁" not in names
+    assert "张宁" in names
+
