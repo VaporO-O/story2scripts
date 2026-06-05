@@ -32,6 +32,7 @@ class Dialogue(StrictModel):
     character: str = Field(description="Character id")
     parenthetical: str
     text: str = Field(min_length=1)
+    emotion: str = ""
 
 
 class Action(StrictModel):
@@ -52,6 +53,7 @@ class Scene(StrictModel):
     summary: str = Field(min_length=1)
     characters: list[str] = Field(description="Character ids in this scene")
     elements: list[SceneElement] = Field(min_length=1)
+    camera_hints: list[str] = Field(default_factory=list)
 
 
 class Screenplay(StrictModel):
