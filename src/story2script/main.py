@@ -15,7 +15,7 @@ from .api_models import ExampleNovelResponse
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
 from .character_profiles import extract_character_profiles
-from .converter import DemoConverter
+from .converter import get_converter
 from .examples import load_example_novel
 from .parser import parse_chapters
 from .screenplay import screenplay_json_schema
@@ -92,12 +92,21 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    screenplay = DemoConverter().convert(
+    try:
+        converter = get_converter(request.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    screenplay = converter.convert(
         chapters=chapters,
         title=request.title,
         genre=request.genre,
     )
-    return ConvertResponse(screenplay=screenplay, yaml_text=screenplay_to_yaml(screenplay), mode="demo")
+    return ConvertResponse(
+        screenplay=screenplay,
+        yaml_text=screenplay_to_yaml(screenplay),
+        mode=converter.mode,
+    )
 
 
 @app.post("/api/yaml/validate", response_model=ValidateYamlResponse)

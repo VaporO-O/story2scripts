@@ -1,7 +1,15 @@
 import re
+from typing import Protocol
 
 from .parser import Chapter
 from .screenplay import Action, Character, Dialogue, Scene, Screenplay, SourceInfo
+
+
+class Converter(Protocol):
+    mode: str
+
+    def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
+        raise NotImplementedError
 
 
 def _first_sentence(text: str, limit: int = 100) -> str:
@@ -45,6 +53,8 @@ def _inner_state_from_text(text: str) -> tuple[str, list[str], str, str, list[st
 
 class DemoConverter:
     """Deterministic converter used for offline demos and repeatable tests."""
+
+    mode = "demo"
 
     def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
         character_names: list[str] = []
@@ -136,4 +146,10 @@ class DemoConverter:
             characters=characters,
             scenes=scenes,
         )
+
+
+def get_converter(mode: str = "demo") -> Converter:
+    if mode == "demo":
+        return DemoConverter()
+    raise ValueError(f"Unsupported converter mode: {mode}")
 
