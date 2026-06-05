@@ -19,24 +19,38 @@ function updateChapterCount() {
   document.querySelector("#chapterCount").textContent = `已识别 ${chapters.length} 个章节`;
 }
 
+function createProfileRow(label, value) {
+  const row = document.createElement("tr");
+  const heading = document.createElement("th");
+  const cell = document.createElement("td");
+
+  heading.textContent = label;
+  cell.textContent = value;
+  row.append(heading, cell);
+
+  return row;
+}
+
 function renderProfiles(profiles) {
   profileGrid.innerHTML = "";
   profileEmptyState.classList.toggle("hidden", profiles.length > 0);
 
   profiles.forEach((profile) => {
     const card = document.createElement("article");
+    const name = document.createElement("h3");
+    const table = document.createElement("table");
+
     card.className = "profile-card";
-    card.innerHTML = `
-      <h3>${profile.name}</h3>
-      <table>
-        <tr><th>角色定位</th><td>${profile.role}</td></tr>
-        <tr><th>性格</th><td>${profile.personality}</td></tr>
-        <tr><th>目标</th><td>${profile.goal}</td></tr>
-        <tr><th>与他人的关系</th><td>${profile.relationships.join("；")}</td></tr>
-        <tr><th>出场章节</th><td>${profile.appearance_chapters.join("、")}</td></tr>
-        <tr><th>关键变化</th><td>${profile.key_change}</td></tr>
-      </table>
-    `;
+    name.textContent = profile.name;
+    table.append(
+      createProfileRow("角色定位", profile.role),
+      createProfileRow("性格", profile.personality),
+      createProfileRow("目标", profile.goal),
+      createProfileRow("与他人的关系", profile.relationships.join("；")),
+      createProfileRow("出场章节", profile.appearance_chapters.join("、")),
+      createProfileRow("关键变化", profile.key_change),
+    );
+    card.append(name, table);
     profileGrid.appendChild(card);
   });
 }
