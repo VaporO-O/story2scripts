@@ -19,3 +19,9 @@ def test_index_page() -> None:
     assert response.status_code == 200
     assert "Story2Script" in response.text
 
+
+def test_static_assets_are_served() -> None:
+    response = client.get("/static/app.js")
+
+    assert response.status_code == 200
+    assert "convertNovel" in response.text

@@ -124,3 +124,12 @@ Schema 的剧本对象。
 pytest
 ruff check .
 ```
+
+## Web 工作台
+
+项目首页 `http://127.0.0.1:8000` 提供左右对照工作台：
+
+- 左侧输入或填入示例小说
+- 右侧展示生成后的 YAML 剧本
+- 支持 YAML 校验
+- 支持下载 `screenplay.yaml`
