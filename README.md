@@ -21,10 +21,31 @@ uvicorn story2script.main:app --reload
 - API 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/api/health>
 
+## 已支持功能
+
+### 章节识别
+
+接口：`POST /api/chapters/preview`
+
+支持识别中文章节标题和英文章节标题：
+
+- `第一章 雾中的信`
+- `第1章 雾中的信`
+- `Chapter 1 The Letter`
+
+请求示例：
+
+```json
+{
+  "novel_text": "第一章 开始\n内容一\n第二章 转折\n内容二\n第三章 结局\n内容三"
+}
+```
+
+当识别出的有效章节少于 3 个时，接口会返回校验错误。
+
 ## 测试
 
 ```bash
 pytest
 ruff check .
 ```
-
