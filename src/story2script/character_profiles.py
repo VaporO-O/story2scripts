@@ -17,25 +17,18 @@ PERSONALITY_KEYWORDS = [
     "理性",
 ]
 RELATION_TERMS = ["姐姐", "弟弟", "哥哥", "妹妹", "父亲", "母亲", "老师", "同学"]
-NON_NAME_KEYWORDS = [
-    "失踪",
-    "真相",
-    "线索",
-    "答案",
-    "纸条",
-    "时刻",
-    "目标",
-    "秘密",
-    "内容",
-]
+SPEECH_VERBS = ["答道", "低声道", "说", "问", "喊"]
 
 RELATION_PATTERN = re.compile(
-    r"(?P<name>[\u4e00-\u9fff]{2,4})是(?P<other>[\u4e00-\u9fff]{2,4})的(?P<relation>[\u4e00-\u9fff]{1,4})"
+    rf"(?P<name>[\u4e00-\u9fff]{{2,4}})是"
+    rf"(?P<other>[\u4e00-\u9fff]{{2,4}})的(?P<relation>{'|'.join(RELATION_TERMS)})"
 )
-SPEAKER_PATTERN = re.compile(r"([\u4e00-\u9fff]{2,4})(?:说|问|喊|答道|低声道)[：:，,]?[“\"]")
+SPEAKER_PATTERN = re.compile(
+    rf"([\u4e00-\u9fff]{{2,4}})(?:{'|'.join(SPEECH_VERBS)})[：:，,]?[“\"]"
+)
 NAME_WITH_RELATION_PATTERN = re.compile(
     rf"(?:{'|'.join(RELATION_TERMS)})([\u4e00-\u9fff]{{2,4}})"
-    r"(?=说|问|喊|答道|低声道|[，。！？、\s]|$)"
+    rf"(?={'|'.join(SPEECH_VERBS)})"
 )
 CHANGE_PATTERN = re.compile(
     r"(?P<name>[\u4e00-\u9fff]{2,4}).{0,16}从(?P<start>[^，。！？\n]{1,12})到(?P<end>[^，。！？\n]{1,12})"
@@ -46,18 +39,22 @@ def _sentences(text: str) -> list[str]:
     return [item.strip() for item in re.split(r"(?<=[。！？!?])", text) if item.strip()]
 
 
+def _strip_relation_prefix(name: str) -> str:
+    for relation in RELATION_TERMS:
+        if name.startswith(relation) and len(name) > len(relation):
+            return name[len(relation) :]
+    return name
+
+
 def _looks_like_person_name(name: str) -> bool:
-    return (
-        2 <= len(name) <= 4
-        and name not in RELATION_TERMS
-        and not any(keyword in name for keyword in NON_NAME_KEYWORDS)
-    )
+    return 2 <= len(name) <= 4 and name not in RELATION_TERMS
 
 
 def _candidate_name_counts(chapters: list[Chapter]) -> Counter[str]:
     counts: Counter[str] = Counter()
 
     def add_name(name: str) -> None:
+        name = _strip_relation_prefix(name)
         if _looks_like_person_name(name):
             counts[name] += 1
 
@@ -114,8 +111,8 @@ def extract_character_profiles(chapters: list[Chapter]) -> list[dict]:
     relationships: dict[str, list[str]] = defaultdict(list)
 
     for match in RELATION_PATTERN.finditer(full_text):
-        name = match.group("name")
-        other = match.group("other")
+        name = _strip_relation_prefix(match.group("name"))
+        other = _strip_relation_prefix(match.group("other"))
         relation = match.group("relation")
         if not (_looks_like_person_name(name) and _looks_like_person_name(other)):
             continue
