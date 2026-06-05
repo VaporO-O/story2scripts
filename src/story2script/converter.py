@@ -1,5 +1,9 @@
+import json
+import os
 import re
 from typing import Protocol
+
+import httpx
 
 from .parser import Chapter
 from .screenplay import Action, Character, Dialogue, Scene, Screenplay, SourceInfo
@@ -148,8 +152,72 @@ class DemoConverter:
         )
 
 
+class AIConverter:
+    """OpenAI-compatible LLM converter.
+
+    The provider is intentionally configured by environment variables so the
+    project is not tied to one vendor.
+    """
+
+    mode = "ai"
+
+    def __init__(self, client: httpx.Client | None = None) -> None:
+        self.client = client or httpx.Client(timeout=self.timeout_seconds)
+
+    @property
+    def api_key(self) -> str:
+        return os.getenv("AI_API_KEY", "").strip()
+
+    @property
+    def base_url(self) -> str:
+        return os.getenv("AI_BASE_URL", "").strip().rstrip("/")
+
+    @property
+    def model(self) -> str:
+        return os.getenv("AI_MODEL", "").strip()
+
+    @property
+    def timeout_seconds(self) -> float:
+        return float(os.getenv("AI_TIMEOUT_SECONDS", "120"))
+
+    def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
+        if not self.api_key:
+            raise ValueError("AI mode requires AI_API_KEY.")
+        if not self.base_url:
+            raise ValueError("AI mode requires AI_BASE_URL.")
+        if not self.model:
+            raise ValueError("AI mode requires AI_MODEL.")
+
+        source_text = "\n\n".join(f"{chapter.title}\n{chapter.content}" for chapter in chapters)
+        prompt = (
+            "你是专业影视编剧。请将小说改编成结构化剧本 JSON。"
+            "重点：小说心理描写不能原样照搬，要外化为动作、对白 emotion 和 camera_hints。"
+            "只返回符合 Story2Script Screenplay Schema 的 JSON，不要 Markdown。\n\n"
+            f"标题：{title or '请根据内容拟定'}\n"
+            f"类型：{genre or '请根据内容判断'}\n"
+            "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
+            "scene 包含 elements 和 camera_hints; dialogue 可包含 emotion。\n\n"
+            f"小说原文：\n{source_text}"
+        )
+        response = self.client.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "response_format": {"type": "json_object"},
+            },
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        return Screenplay.model_validate(json.loads(content))
+
+
 def get_converter(mode: str = "demo") -> Converter:
     if mode == "demo":
         return DemoConverter()
+    if mode == "ai":
+        return AIConverter()
     raise ValueError(f"Unsupported converter mode: {mode}")
 

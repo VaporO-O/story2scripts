@@ -97,11 +97,15 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    screenplay = converter.convert(
-        chapters=chapters,
-        title=request.title,
-        genre=request.genre,
-    )
+    try:
+        screenplay = converter.convert(
+            chapters=chapters,
+            title=request.title,
+            genre=request.genre,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     return ConvertResponse(
         screenplay=screenplay,
         yaml_text=screenplay_to_yaml(screenplay),
