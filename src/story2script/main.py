@@ -2,7 +2,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from .converter import DemoConverter
 from .parser import parse_chapters
+from .screenplay import Screenplay
 from .screenplay import screenplay_json_schema
 
 
@@ -20,6 +22,17 @@ class ChapterPreviewItem(BaseModel):
 class ChapterPreviewResponse(BaseModel):
     chapter_count: int
     chapters: list[ChapterPreviewItem]
+
+
+class ConvertRequest(BaseModel):
+    novel_text: str = Field(min_length=1)
+    title: str = ""
+    genre: str = ""
+
+
+class ConvertResponse(BaseModel):
+    screenplay: Screenplay
+    mode: str
 
 
 app = FastAPI(
@@ -79,3 +92,18 @@ async def preview_chapters(request: ChapterPreviewRequest) -> ChapterPreviewResp
 @app.get("/api/screenplay/schema")
 async def get_screenplay_schema() -> dict:
     return screenplay_json_schema()
+
+
+@app.post("/api/convert", response_model=ConvertResponse)
+async def convert_novel(request: ConvertRequest) -> ConvertResponse:
+    try:
+        chapters = parse_chapters(request.novel_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    screenplay = DemoConverter().convert(
+        chapters=chapters,
+        title=request.title,
+        genre=request.genre,
+    )
+    return ConvertResponse(screenplay=screenplay, mode="demo")
