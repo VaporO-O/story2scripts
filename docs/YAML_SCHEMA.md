@@ -129,6 +129,7 @@ scenes:
 | `summary` | string | 非空 | 场景摘要 |
 | `characters` | array[string] | 角色 ID 列表 | 本场出现的角色 |
 | `elements` | array | 至少 1 项 | 场景内动作和对白 |
+| `camera_hints` | array[string] | 可为空 | 镜头提示，用于把心理活动外化为可拍摄画面 |
 
 设计原因：
 
@@ -136,6 +137,7 @@ scenes:
 - `source_chapter` 解决 AI 改编结果难追溯的问题，作者可以快速回到原文核对。
 - `summary` 便于前端做场景列表、搜索和节拍检查。
 - `elements` 保留场景内顺序，动作和对白可以交替出现。
+- `camera_hints` 不直接替代导演分镜，只提供“近景、特写、环境提示”等轻量建议，帮助把小说心理描写转成可视化表达。
 
 ## 6. Scene Element：动作与对白
 
@@ -173,6 +175,7 @@ scenes:
 | `type` | string | 固定为 `dialogue` | 元素类型 |
 | `character` | string | 必须引用已有角色 ID | 说话角色 |
 | `parenthetical` | string | 可为空 | 语气、动作或状态提示 |
+| `emotion` | string | 可为空 | 对白情绪，例如紧张、犹豫、愤怒 |
 | `text` | string | 非空 | 对白内容 |
 
 设计原因：
@@ -180,8 +183,41 @@ scenes:
 - 使用 `type` 区分动作和对白，前端可以据此渲染不同编辑控件。
 - `dialogue.character` 使用角色 ID，保证对白和角色表之间存在稳定关系。
 - `parenthetical` 保留剧本中常见的语气提示，但不强制填写。
+- `emotion` 用于保留心理活动被外化后的情绪信息，方便前端高亮或后续 AI 继续润色。
 
-## 7. 完整 YAML 示例
+## 7. 心理描写外化
+
+小说可以直接书写心理活动，但剧本需要通过动作、对白、场景调度和镜头提示表现人物内心。
+因此 v1.0 Schema 增加了两个轻量字段：
+
+- `dialogue.emotion`：记录对白情绪。
+- `scene.camera_hints`：记录镜头提示。
+
+示例：
+
+```yaml
+elements:
+  - type: action
+    text: 林澈停下脚步，缓缓回头。
+  - type: action
+    text: 周围的空气像是突然安静下来。
+  - type: dialogue
+    character: character-1
+    parenthetical: ''
+    emotion: 紧张
+    text: 不对……这不是意外。
+camera_hints:
+  - 近景：林澈绷紧的表情。
+```
+
+设计原因：
+
+- 心理描写不应该原样出现在剧本动作中，否则会变成“不可拍摄”的描述。
+- 动作负责表现人物身体反应。
+- 对白负责把关键判断外化。
+- 镜头提示负责提醒作者可用画面表达内心变化。
+
+## 8. 完整 YAML 示例
 
 ```yaml
 schema_version: '1.0'
@@ -212,10 +248,13 @@ scenes:
       - type: dialogue
         character: character-1
         parenthetical: ''
+        emotion: 紧张
         text: 这不可能是巧合。
+    camera_hints:
+      - 近景：林夏握紧信纸的手。
 ```
 
-## 8. 校验规则
+## 9. 校验规则
 
 当前系统同时使用 JSON Schema 文件和 Pydantic 模型进行校验。
 
@@ -229,6 +268,8 @@ scenes:
 - 每个场景的 `elements` 至少包含 1 项
 - 角色 ID 只能包含小写字母、数字、下划线和连字符
 - 场景 ID 必须符合 `scene-数字` 格式
+- `camera_hints` 必须是字符串列表
+- `dialogue.emotion` 必须是字符串
 
 应用层引用校验：
 
@@ -239,7 +280,7 @@ scenes:
 - 场景角色列表中的 ID 必须存在于 `characters`
 - 对白中的 `character` 必须存在于 `characters`
 
-## 9. 为什么选择 YAML
+## 10. 为什么选择 YAML
 
 选择 YAML 而不是 Markdown 或纯文本，是因为：
 
@@ -250,7 +291,7 @@ scenes:
 
 Markdown 更适合展示，不适合作为稳定数据交换格式；纯文本剧本则难以可靠区分场景、动作、对白和角色。
 
-## 10. 扩展方向
+## 11. 扩展方向
 
 v1.0 暂时聚焦“剧本初稿”，没有加入过多拍摄层信息。后续可以在不破坏主体结构的前提下扩展：
 

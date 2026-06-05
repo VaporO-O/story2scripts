@@ -20,18 +20,46 @@ def _dialogue_from_text(text: str) -> tuple[str, str] | None:
     return speaker, quote.group(1)
 
 
+def _inner_state_from_text(text: str) -> tuple[str, list[str], str, str, list[str]] | None:
+    sentence_match = re.search(
+        r"([\u4e00-\u9fff]{2,4})([^。！？!?]*(?:觉得|意识到|隐约意识到|发冷|不是意外)[^。！？!?]*)[。！？!?]",
+        text,
+    )
+    if not sentence_match:
+        return None
+
+    character = sentence_match.group(1)
+    for adverb in ["突然", "猛地", "一下"]:
+        if character.endswith(adverb):
+            character = character[: -len(adverb)]
+    sentence = sentence_match.group(2)
+    emotion = "紧张" if any(word in sentence for word in ["发冷", "不对", "不是意外"]) else "不安"
+    line = "不对……这不是意外。" if "不是意外" in sentence else "等等，这里面不对。"
+    actions = [
+        f"{character}停下脚步，缓缓回头。",
+        "周围的空气像是突然安静下来。",
+    ]
+    camera_hints = [f"近景：{character}绷紧的表情。"]
+    return character, actions, line, emotion, camera_hints
+
+
 class DemoConverter:
     """Deterministic converter used for offline demos and repeatable tests."""
 
     def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
         character_names: list[str] = []
         chapter_dialogues: list[tuple[str, str] | None] = []
+        chapter_inner_states: list[tuple[str, list[str], str, str, list[str]] | None] = []
 
         for chapter in chapters:
             dialogue = _dialogue_from_text(chapter.content)
+            inner_state = _inner_state_from_text(chapter.content)
             chapter_dialogues.append(dialogue)
+            chapter_inner_states.append(inner_state)
             if dialogue and dialogue[0] not in character_names:
                 character_names.append(dialogue[0])
+            if inner_state and inner_state[0] not in character_names:
+                character_names.append(inner_state[0])
 
         characters = [
             Character(
@@ -47,10 +75,12 @@ class DemoConverter:
         scenes: list[Scene] = []
         for index, chapter in enumerate(chapters, start=1):
             dialogue = chapter_dialogues[index - 1]
+            inner_state = chapter_inner_states[index - 1]
             elements: list[Action | Dialogue] = [
                 Action(type="action", text=_first_sentence(chapter.content))
             ]
             scene_characters: list[str] = []
+            camera_hints: list[str] = []
 
             if dialogue:
                 character_id = character_ids[dialogue[0]]
@@ -64,6 +94,23 @@ class DemoConverter:
                     )
                 )
 
+            if inner_state:
+                character_name, actions, line, emotion, hints = inner_state
+                character_id = character_ids[character_name]
+                if character_id not in scene_characters:
+                    scene_characters.append(character_id)
+                elements.extend(Action(type="action", text=action) for action in actions)
+                elements.append(
+                    Dialogue(
+                        type="dialogue",
+                        character=character_id,
+                        parenthetical="",
+                        text=line,
+                        emotion=emotion,
+                    )
+                )
+                camera_hints.extend(hints)
+
             scenes.append(
                 Scene(
                     id=f"scene-{index}",
@@ -72,6 +119,7 @@ class DemoConverter:
                     summary=_first_sentence(chapter.content, 60),
                     characters=scene_characters,
                     elements=elements,
+                    camera_hints=camera_hints,
                 )
             )
 
