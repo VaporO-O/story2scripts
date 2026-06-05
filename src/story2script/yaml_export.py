@@ -11,3 +11,8 @@ def screenplay_to_yaml(screenplay: Screenplay) -> str:
         width=100,
     )
 
+
+def screenplay_from_yaml(yaml_text: str) -> Screenplay:
+    data = yaml.safe_load(yaml_text)
+    return Screenplay.model_validate(data)
+
