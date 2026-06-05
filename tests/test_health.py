@@ -18,6 +18,7 @@ def test_index_page() -> None:
 
     assert response.status_code == 200
     assert "Story2Script" in response.text
+    assert "人物小传" in response.text
 
 
 def test_static_assets_are_served() -> None:
@@ -25,3 +26,4 @@ def test_static_assets_are_served() -> None:
 
     assert response.status_code == 200
     assert "convertNovel" in response.text
+    assert "analyzeCharacters" in response.text
