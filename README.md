@@ -43,6 +43,19 @@ uvicorn story2script.main:app --reload
 
 当识别出的有效章节少于 3 个时，接口会返回校验错误。
 
+### 剧本 Schema
+
+接口：`GET /api/screenplay/schema`
+
+该接口返回 Story2Script 剧本结构的 JSON Schema，用于约束后续 AI 生成结果和前端编辑数据。
+当前 Schema 覆盖：
+
+- 原小说来源信息
+- 角色表
+- 场景列表
+- 动作与对白元素
+- 场景、角色、来源章节之间的引用关系
+
 ## 测试
 
 ```bash

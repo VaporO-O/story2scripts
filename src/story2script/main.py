@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from .parser import parse_chapters
+from .screenplay import screenplay_json_schema
 
 
 class ChapterPreviewRequest(BaseModel):
@@ -73,3 +74,8 @@ async def preview_chapters(request: ChapterPreviewRequest) -> ChapterPreviewResp
             for index, chapter in enumerate(chapters, start=1)
         ],
     )
+
+
+@app.get("/api/screenplay/schema")
+async def get_screenplay_schema() -> dict:
+    return screenplay_json_schema()
