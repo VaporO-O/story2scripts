@@ -23,6 +23,7 @@ class ConvertRequest(BaseModel):
     novel_text: str = Field(min_length=1)
     title: str = ""
     genre: str = ""
+    mode: str = "demo"
 
 
 class ConvertResponse(BaseModel):
