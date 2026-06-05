@@ -81,6 +81,7 @@ characters:
     name: 林夏
     description: 寻找父亲失踪真相的年轻记者
     motivation: 在潮汐到来前找到答案
+    arc: 从被动接收线索到主动追查真相
 ```
 
 字段说明：
@@ -91,11 +92,12 @@ characters:
 | `name` | string | 非空 | 角色名称 |
 | `description` | string | 可为空 | 角色简介 |
 | `motivation` | string | 可为空 | 角色动机 |
+| `arc` | string | 非空 | 角色弧光，描述人物在冲突中的变化 |
 
 设计原因：
 
 - 使用 `id` 而不是角色姓名做引用，是为了避免角色改名、别名、昵称导致引用失效。
-- `description` 和 `motivation` 是作者打磨剧本时最常用的角色信息，保留在 v1.0 中。
+- `description`、`motivation` 和 `arc` 是作者打磨剧本时最常用的角色信息，保留在 v1.0 中。
 - 角色表放在顶层，便于后续扩展人物关系图、角色弧光分析和前端角色管理。
 
 ## 5. Scene：场景
@@ -108,6 +110,10 @@ scenes:
     heading: EXT. 雾港码头 - DAWN
     source_chapter: 第一章 雾中的信
     summary: 林夏在码头发现匿名信。
+    goal: 林夏想确认匿名信来源。
+    conflict: 匿名信缺少署名，阻碍林夏判断真相。
+    beat: 线索出现
+    subtext: 林夏表面冷静，实际已经开始怀疑旧案。
     characters:
       - character-1
     elements:
@@ -127,6 +133,10 @@ scenes:
 | `heading` | string | 非空 | 场景标题 |
 | `source_chapter` | string | 必须来自 `source.chapter_titles` | 来源章节 |
 | `summary` | string | 非空 | 场景摘要 |
+| `goal` | string | 非空 | 本场角色可见目标 |
+| `conflict` | string | 非空 | 阻碍角色目标的戏剧冲突 |
+| `beat` | string | 非空 | 场景节拍或转折点 |
+| `subtext` | string | 非空 | 动作和对白之下未明说的压力、意图或潜台词 |
 | `characters` | array[string] | 角色 ID 列表 | 本场出现的角色 |
 | `elements` | array | 至少 1 项 | 场景内动作和对白 |
 | `camera_hints` | array[string] | 可为空 | 镜头提示，用于把心理活动外化为可拍摄画面 |
@@ -136,8 +146,23 @@ scenes:
 - `heading` 使用类似专业剧本的格式，例如 `INT. 房间 - NIGHT`，便于未来导出专业剧本格式。
 - `source_chapter` 解决 AI 改编结果难追溯的问题，作者可以快速回到原文核对。
 - `summary` 便于前端做场景列表、搜索和节拍检查。
+- 剧本和小说的本质区别是：小说可以靠叙述推进，剧本必须靠冲突和动作推进。因此每个场景都必须说明
+  角色目标、冲突、节拍和潜台词，避免剧本只是在复述小说情节。
 - `elements` 保留场景内顺序，动作和对白可以交替出现。
 - `camera_hints` 不直接替代导演分镜，只提供“近景、特写、环境提示”等轻量建议，帮助把小说心理描写转成可视化表达。
+
+### 场景拆分依据
+
+小说章节通常比剧本场景更大。Story2Script 会尝试根据通用叙事信号，将一个章节拆成多个 scene：
+
+- 时间变化：例如清晨、夜里、第二天、与此同时等时间推进。
+- 地点变化：角色进入、离开、抵达或转入新的行动空间。
+- 人物进出：新人物出现、进入现场或离开现场。
+- 情节转折：信息突然变化，角色判断被迫调整。
+- 冲突变化：质问、阻止、拒绝、威胁、争执等阻力升级。
+
+这些拆分信号不是为了替代作者判断，而是给 AI 和编辑器一个可解释的初稿结构。后续接入 LLM 后，
+LLM 也应围绕这些通用戏剧信号输出结构化场景，而不是只按自然段机械切分。
 
 ## 6. Scene Element：动作与对白
 
@@ -235,11 +260,16 @@ characters:
     name: 林夏
     description: 从原文对白中自动识别的角色。
     motivation: 待作者进一步补充。
+    arc: 在场景目标与冲突中逐步显露变化。
 scenes:
   - id: scene-1
     heading: INT. 第一章 雾中的信 - DAY
     source_chapter: 第一章 雾中的信
     summary: 凌晨五点，林夏在码头捡到一封没有署名的信。
+    goal: 林夏试图确认匿名信来源。
+    conflict: 匿名信信息残缺，让林夏无法判断真相。
+    beat: 时间变化
+    subtext: 林夏表面追查线索，内心已经怀疑旧案仍未结束。
     characters:
       - character-1
     elements:
@@ -262,6 +292,8 @@ scenes:
 
 - `schema_version` 必须为 `1.0`
 - `title`、`logline`、`heading`、`summary` 等核心文本不能为空
+- `characters[].arc` 不能为空
+- `scenes[].goal`、`scenes[].conflict`、`scenes[].beat`、`scenes[].subtext` 不能为空
 - `source.chapter_count >= 3`
 - `source.chapter_titles` 至少包含 3 项
 - `scenes` 至少包含 1 个场景
@@ -295,7 +327,6 @@ Markdown 更适合展示，不适合作为稳定数据交换格式；纯文本�
 
 v1.0 暂时聚焦“剧本初稿”，没有加入过多拍摄层信息。后续可以在不破坏主体结构的前提下扩展：
 
-- `beats`：剧情节拍
 - `locations`：地点表
 - `props`：关键道具
 - `relationships`：人物关系

@@ -24,6 +24,7 @@ def valid_screenplay_json() -> str:
                     "name": "林澈",
                     "description": "追查姐姐失踪真相的人。",
                     "motivation": "找到姐姐失踪真相。",
+                    "arc": "从怀疑到主动面对真相。",
                 }
             ],
             "scenes": [
@@ -32,6 +33,10 @@ def valid_screenplay_json() -> str:
                     "heading": "INT. 走廊 - NIGHT",
                     "source_chapter": "第一章",
                     "summary": "林澈察觉姐姐失踪并非意外。",
+                    "goal": "林澈试图确认姐姐失踪的真实原因。",
+                    "conflict": "新的线索推翻了意外结论。",
+                    "beat": "情节转折",
+                    "subtext": "林澈表面冷静，实际已经开始恐惧真相。",
                     "characters": ["character-1"],
                     "elements": [
                         {"type": "action", "text": "林澈停下脚步，缓缓回头。"},
@@ -92,4 +97,5 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert captured["authorization"] == "Bearer test-key"
     assert captured["payload"]["model"] == "test-model"
     assert "心理描写" in captured["payload"]["messages"][0]["content"]
+    assert "goal, conflict, beat, subtext" in captured["payload"]["messages"][0]["content"]
     assert screenplay.scenes[0].camera_hints == ["近景：林澈绷紧的表情。"]

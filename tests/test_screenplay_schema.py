@@ -28,6 +28,7 @@ def sample_screenplay() -> dict:
                 "name": "林夏",
                 "description": "年轻记者",
                 "motivation": "寻找真相",
+                "arc": "从被动接收线索到主动追查。",
             }
         ],
         "scenes": [
@@ -36,6 +37,10 @@ def sample_screenplay() -> dict:
                 "heading": "EXT. 雾港码头 - DAWN",
                 "source_chapter": "第一章",
                 "summary": "林夏发现匿名信。",
+                "goal": "林夏想确认匿名信来源。",
+                "conflict": "匿名信缺少署名，阻碍林夏判断真相。",
+                "beat": "线索出现",
+                "subtext": "林夏表面冷静，实际已经开始怀疑旧案。",
                 "characters": ["character-1"],
                 "elements": [
                     {"type": "action", "text": "雾气笼罩码头。"},
@@ -74,12 +79,22 @@ def test_screenplay_model_rejects_source_count_mismatch() -> None:
         Screenplay.model_validate(data)
 
 
+def test_screenplay_model_requires_dramatic_scene_fields() -> None:
+    data = sample_screenplay()
+    del data["scenes"][0]["conflict"]
+
+    with pytest.raises(ValidationError, match="conflict"):
+        Screenplay.model_validate(data)
+
+
 def test_screenplay_schema_endpoint() -> None:
     response = client.get("/api/screenplay/schema")
 
     assert response.status_code == 200
     assert response.json()["title"] == "Story2Script Screenplay"
     assert "scenes" in response.json()["properties"]
+    scene_schema = response.json()["properties"]["scenes"]["items"]
+    assert "conflict" in scene_schema["required"]
 
 
 def test_schema_file_is_valid_json() -> None:
@@ -88,3 +103,4 @@ def test_schema_file_is_valid_json() -> None:
 
     assert schema["title"] == "Story2Script Screenplay"
     assert schema["properties"]["source"]["properties"]["chapter_count"]["minimum"] == 3
+    assert "arc" in schema["properties"]["characters"]["items"]["required"]

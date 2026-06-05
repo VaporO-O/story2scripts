@@ -25,6 +25,7 @@ class Character(StrictModel):
     name: str = Field(min_length=1)
     description: str
     motivation: str
+    arc: str = Field(min_length=1, description="Character arc across the screenplay")
 
 
 class Dialogue(StrictModel):
@@ -51,6 +52,10 @@ class Scene(StrictModel):
     )
     source_chapter: str = Field(min_length=1)
     summary: str = Field(min_length=1)
+    goal: str = Field(min_length=1, description="Visible character goal in this scene")
+    conflict: str = Field(min_length=1, description="Dramatic conflict that blocks the goal")
+    beat: str = Field(min_length=1, description="Scene beat or turning point")
+    subtext: str = Field(min_length=1, description="Unspoken pressure beneath action/dialogue")
     characters: list[str] = Field(description="Character ids in this scene")
     elements: list[SceneElement] = Field(min_length=1)
     camera_hints: list[str] = Field(default_factory=list)

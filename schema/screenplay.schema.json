@@ -59,7 +59,8 @@
           "id",
           "name",
           "description",
-          "motivation"
+          "motivation",
+          "arc"
         ],
         "properties": {
           "id": {
@@ -75,6 +76,11 @@
           },
           "motivation": {
             "type": "string"
+          },
+          "arc": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Character arc across the screenplay"
           }
         }
       }
@@ -90,6 +96,10 @@
           "heading",
           "source_chapter",
           "summary",
+          "goal",
+          "conflict",
+          "beat",
+          "subtext",
           "characters",
           "elements"
         ],
@@ -107,6 +117,22 @@
             "minLength": 1
           },
           "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "goal": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conflict": {
+            "type": "string",
+            "minLength": 1
+          },
+          "beat": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subtext": {
             "type": "string",
             "minLength": 1
           },
