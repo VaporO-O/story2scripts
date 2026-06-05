@@ -16,12 +16,27 @@ PERSONALITY_KEYWORDS = [
     "孤僻",
     "理性",
 ]
+RELATION_TERMS = ["姐姐", "弟弟", "哥哥", "妹妹", "父亲", "母亲", "老师", "同学"]
+NON_NAME_KEYWORDS = [
+    "失踪",
+    "真相",
+    "线索",
+    "答案",
+    "纸条",
+    "时刻",
+    "目标",
+    "秘密",
+    "内容",
+]
 
 RELATION_PATTERN = re.compile(
     r"(?P<name>[\u4e00-\u9fff]{2,4})是(?P<other>[\u4e00-\u9fff]{2,4})的(?P<relation>[\u4e00-\u9fff]{1,4})"
 )
 SPEAKER_PATTERN = re.compile(r"([\u4e00-\u9fff]{2,4})(?:说|问|喊|答道|低声道)[：:，,]?[“\"]")
-NAME_WITH_RELATION_PATTERN = re.compile(r"(?:姐姐|弟弟|哥哥|妹妹|父亲|母亲|老师|同学)([\u4e00-\u9fff]{2,4})")
+NAME_WITH_RELATION_PATTERN = re.compile(
+    rf"(?:{'|'.join(RELATION_TERMS)})([\u4e00-\u9fff]{{2,4}})"
+    r"(?=说|问|喊|答道|低声道|[，。！？、\s]|$)"
+)
 CHANGE_PATTERN = re.compile(
     r"(?P<name>[\u4e00-\u9fff]{2,4}).{0,16}从(?P<start>[^，。！？\n]{1,12})到(?P<end>[^，。！？\n]{1,12})"
 )
@@ -31,16 +46,31 @@ def _sentences(text: str) -> list[str]:
     return [item.strip() for item in re.split(r"(?<=[。！？!?])", text) if item.strip()]
 
 
-def _candidate_names(chapters: list[Chapter]) -> list[str]:
-    counts: Counter[str] = Counter()
-    for chapter in chapters:
-        counts.update(SPEAKER_PATTERN.findall(chapter.content))
-        counts.update(NAME_WITH_RELATION_PATTERN.findall(chapter.content))
-        for match in RELATION_PATTERN.finditer(chapter.content):
-            counts[match.group("name")] += 1
-            counts[match.group("other")] += 1
+def _looks_like_person_name(name: str) -> bool:
+    return (
+        2 <= len(name) <= 4
+        and name not in RELATION_TERMS
+        and not any(keyword in name for keyword in NON_NAME_KEYWORDS)
+    )
 
-    return [name for name, _ in counts.most_common() if len(name) >= 2]
+
+def _candidate_name_counts(chapters: list[Chapter]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+
+    def add_name(name: str) -> None:
+        if _looks_like_person_name(name):
+            counts[name] += 1
+
+    for chapter in chapters:
+        for name in SPEAKER_PATTERN.findall(chapter.content):
+            add_name(name)
+        for name in NAME_WITH_RELATION_PATTERN.findall(chapter.content):
+            add_name(name)
+        for match in RELATION_PATTERN.finditer(chapter.content):
+            add_name(match.group("name"))
+            add_name(match.group("other"))
+
+    return counts
 
 
 def _goal_for(name: str, text: str) -> str:
@@ -78,7 +108,8 @@ def _key_change_for(name: str, text: str) -> str:
 
 def extract_character_profiles(chapters: list[Chapter]) -> list[dict]:
     """Extract lightweight character profile tables from parsed novel chapters."""
-    names = _candidate_names(chapters)
+    name_counts = _candidate_name_counts(chapters)
+    names = sorted(name_counts, key=lambda name: (-name_counts[name], name))
     full_text = "\n".join(chapter.content for chapter in chapters)
     relationships: dict[str, list[str]] = defaultdict(list)
 
@@ -86,13 +117,18 @@ def extract_character_profiles(chapters: list[Chapter]) -> list[dict]:
         name = match.group("name")
         other = match.group("other")
         relation = match.group("relation")
+        if not (_looks_like_person_name(name) and _looks_like_person_name(other)):
+            continue
         relationships[name].append(f"是{other}的{relation}")
 
     appearances: dict[str, list[str]] = {}
     for name in names:
         appearances[name] = [chapter.title for chapter in chapters if name in chapter.content]
 
-    ordered_names = sorted(names, key=lambda item: (-len(appearances[item]), names.index(item)))
+    ordered_names = sorted(
+        names,
+        key=lambda item: (-len(appearances[item]), -name_counts[item], item),
+    )
     profiles: list[dict] = []
     for index, name in enumerate(ordered_names):
         profiles.append(
