@@ -111,6 +111,13 @@ Schema 的剧本对象。
 
 校验通过时返回 `valid: true`；YAML 格式错误或字段不符合 Schema 时返回 `422`。
 
+### 示例小说
+
+接口：`GET /api/examples/novel`
+
+该接口返回内置的三章示例小说、标题和类型。后续 Web 页面可用它实现“填入示例”，也可以用于
+快速测试 `/api/convert`。
+
 ## 测试
 
 ```bash
