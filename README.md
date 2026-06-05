@@ -95,6 +95,22 @@ Schema 的剧本对象。
 项目使用 `PyYAML` 将 `Screenplay` 模型序列化为 YAML。导出的 YAML 会保留中文内容和字段顺序，
 便于作者直接阅读、编辑和保存。
 
+### YAML 校验
+
+接口：`POST /api/yaml/validate`
+
+该接口用于校验编辑后的 YAML 是否仍符合 Story2Script 剧本 Schema。
+
+请求示例：
+
+```json
+{
+  "yaml_text": "schema_version: '1.0'\ntitle: 示例剧本\n..."
+}
+```
+
+校验通过时返回 `valid: true`；YAML 格式错误或字段不符合 Schema 时返回 `422`。
+
 ## 测试
 
 ```bash

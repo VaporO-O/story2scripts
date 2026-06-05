@@ -6,6 +6,7 @@ from .converter import DemoConverter
 from .parser import parse_chapters
 from .screenplay import Screenplay
 from .screenplay import screenplay_json_schema
+from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
 
 
@@ -35,6 +36,15 @@ class ConvertResponse(BaseModel):
     screenplay: Screenplay
     yaml_text: str
     mode: str
+
+
+class ValidateYamlRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+
+
+class ValidateYamlResponse(BaseModel):
+    valid: bool
+    message: str
 
 
 app = FastAPI(
@@ -109,3 +119,13 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
         genre=request.genre,
     )
     return ConvertResponse(screenplay=screenplay, yaml_text=screenplay_to_yaml(screenplay), mode="demo")
+
+
+@app.post("/api/yaml/validate", response_model=ValidateYamlResponse)
+async def validate_yaml(request: ValidateYamlRequest) -> ValidateYamlResponse:
+    try:
+        screenplay_from_yaml(request.yaml_text)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"YAML 校验失败：{exc}") from exc
+
+    return ValidateYamlResponse(valid=True, message="YAML 符合 Story2Script 剧本 Schema。")
