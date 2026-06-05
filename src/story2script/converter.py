@@ -1,12 +1,19 @@
 import json
 import os
 import re
+from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
 
 from .parser import Chapter
 from .screenplay import Action, Character, Dialogue, Scene, Screenplay, SourceInfo
+
+
+@dataclass(frozen=True)
+class SceneSlice:
+    text: str
+    break_reasons: list[str]
 
 
 class Converter(Protocol):
@@ -16,9 +23,109 @@ class Converter(Protocol):
         raise NotImplementedError
 
 
+SCENE_BREAK_PATTERNS = [
+    (
+        "时间变化",
+        re.compile(
+            r"(?:清晨|早晨|上午|中午|下午|傍晚|黄昏|深夜|凌晨|夜里|第二天|"
+            r"数日后|几天后|多年后|与此同时|later|meanwhile|morning|night)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "地点变化",
+        re.compile(
+            r"(?:来到|走进|进入|回到|抵达|到达|离开|穿过|推开|转入|"
+            r"arrives?|enters?|leaves?|returns?)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "人物进出",
+        re.compile(
+            r"(?:出现|走来|走进|冲进|推门而入|离开|退场|转身离去|"
+            r"appears?|exits?|walks? in)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "情节转折",
+        re.compile(
+            r"(?:突然|忽然|可是|然而|但|却|没想到|这时|就在这时|"
+            r"suddenly|however|but|then)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "冲突变化",
+        re.compile(
+            r"(?:质问|追问|争执|阻止|拒绝|威胁|拦住|抢过|打断|反驳|"
+            r"confronts?|refuses?|blocks?|argues?)",
+            re.IGNORECASE,
+        ),
+    ),
+]
+
+
 def _first_sentence(text: str, limit: int = 100) -> str:
-    sentence = re.split(r"(?<=[。！？.!?])", text.strip(), maxsplit=1)[0].strip()
+    match = re.search(r"^(.+?[。！？.!?][”\"]?)", text.strip(), re.DOTALL)
+    sentence = match.group(1).strip() if match else text.strip()
     return sentence[:limit] or "故事在沉默中展开。"
+
+
+def _text_units(text: str) -> list[str]:
+    paragraphs = [item.strip() for item in re.split(r"(?:\r?\n\s*){2,}", text) if item.strip()]
+    if len(paragraphs) > 1:
+        return paragraphs
+    return [
+        match.group(0).strip()
+        for match in re.finditer(r"[^。！？.!?]+[。！？.!?][”\"]?|[^。！？.!?]+$", text.strip())
+        if match.group(0).strip()
+    ]
+
+
+def _scene_break_reasons(text: str) -> list[str]:
+    return [label for label, pattern in SCENE_BREAK_PATTERNS if pattern.search(text)]
+
+
+def _append_unique(items: list[str], values: list[str]) -> None:
+    for value in values:
+        if value not in items:
+            items.append(value)
+
+
+def _split_scene_slices(text: str) -> list[SceneSlice]:
+    units = _text_units(text)
+    if not units:
+        return [SceneSlice(text="故事在沉默中展开。", break_reasons=["章节推进"])]
+
+    slices: list[SceneSlice] = []
+    current_units: list[str] = []
+    current_reasons: list[str] = []
+
+    for unit in units:
+        reasons = _scene_break_reasons(unit)
+        if current_units and reasons:
+            slices.append(
+                SceneSlice(
+                    text="\n".join(current_units).strip(),
+                    break_reasons=current_reasons or ["章节推进"],
+                )
+            )
+            current_units = [unit]
+            current_reasons = reasons
+            continue
+
+        current_units.append(unit)
+        _append_unique(current_reasons, reasons)
+
+    slices.append(
+        SceneSlice(
+            text="\n".join(current_units).strip(),
+            break_reasons=current_reasons or ["章节推进"],
+        )
+    )
+    return slices
 
 
 def _dialogue_from_text(text: str) -> tuple[str, str] | None:
@@ -55,6 +162,40 @@ def _inner_state_from_text(text: str) -> tuple[str, list[str], str, str, list[st
     return character, actions, line, emotion, camera_hints
 
 
+def _scene_goal(
+    text: str,
+    dialogue: tuple[str, str] | None,
+    inner_state: tuple[str, list[str], str, str, list[str]] | None,
+) -> str:
+    actor = dialogue[0] if dialogue else inner_state[0] if inner_state else "角色"
+    return f"{actor}试图完成当前场景中的可见行动：{_first_sentence(text, 50)}"
+
+
+def _scene_conflict(
+    reasons: list[str],
+    dialogue: tuple[str, str] | None,
+    inner_state: tuple[str, list[str], str, str, list[str]] | None,
+) -> str:
+    if "冲突变化" in reasons:
+        return "外部阻力升级，角色目标被迫重新调整。"
+    if "情节转折" in reasons or inner_state:
+        return "新的信息改变角色判断，形成场景冲突。"
+    if dialogue:
+        return "对白中的信息差让角色目标受到阻碍。"
+    return "角色目标与未知信息之间形成潜在阻力。"
+
+
+def _scene_subtext(
+    dialogue: tuple[str, str] | None,
+    inner_state: tuple[str, list[str], str, str, list[str]] | None,
+) -> str:
+    if inner_state:
+        return "角色表面继续行动，内心判断已经发生变化。"
+    if dialogue:
+        return "对白之外，角色仍在试探对方的真实意图。"
+    return "动作背后保留未明说的压力与选择。"
+
+
 class DemoConverter:
     """Deterministic converter used for offline demos and repeatable tests."""
 
@@ -62,18 +203,18 @@ class DemoConverter:
 
     def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
         character_names: list[str] = []
-        chapter_dialogues: list[tuple[str, str] | None] = []
-        chapter_inner_states: list[tuple[str, list[str], str, str, list[str]] | None] = []
+        chapter_slices: list[tuple[Chapter, list[SceneSlice]]] = []
 
         for chapter in chapters:
-            dialogue = _dialogue_from_text(chapter.content)
-            inner_state = _inner_state_from_text(chapter.content)
-            chapter_dialogues.append(dialogue)
-            chapter_inner_states.append(inner_state)
-            if dialogue and dialogue[0] not in character_names:
-                character_names.append(dialogue[0])
-            if inner_state and inner_state[0] not in character_names:
-                character_names.append(inner_state[0])
+            scene_slices = _split_scene_slices(chapter.content)
+            chapter_slices.append((chapter, scene_slices))
+            for scene_slice in scene_slices:
+                dialogue = _dialogue_from_text(scene_slice.text)
+                inner_state = _inner_state_from_text(scene_slice.text)
+                if dialogue and dialogue[0] not in character_names:
+                    character_names.append(dialogue[0])
+                if inner_state and inner_state[0] not in character_names:
+                    character_names.append(inner_state[0])
 
         characters = [
             Character(
@@ -81,61 +222,73 @@ class DemoConverter:
                 name=name,
                 description="从原文对白中自动识别的角色。",
                 motivation="待作者进一步补充。",
+                arc="在场景目标与冲突中逐步显露变化。",
             )
             for index, name in enumerate(character_names, start=1)
         ]
         character_ids = {character.name: character.id for character in characters}
 
         scenes: list[Scene] = []
-        for index, chapter in enumerate(chapters, start=1):
-            dialogue = chapter_dialogues[index - 1]
-            inner_state = chapter_inner_states[index - 1]
-            elements: list[Action | Dialogue] = [
-                Action(type="action", text=_first_sentence(chapter.content))
-            ]
-            scene_characters: list[str] = []
-            camera_hints: list[str] = []
+        scene_index = 1
+        for chapter, scene_slices in chapter_slices:
+            for scene_slice in scene_slices:
+                dialogue = _dialogue_from_text(scene_slice.text)
+                inner_state = _inner_state_from_text(scene_slice.text)
+                elements: list[Action | Dialogue] = [
+                    Action(type="action", text=_first_sentence(scene_slice.text))
+                ]
+                scene_characters: list[str] = []
+                camera_hints: list[str] = []
 
-            if dialogue:
-                character_id = character_ids[dialogue[0]]
-                scene_characters.append(character_id)
-                elements.append(
-                    Dialogue(
-                        type="dialogue",
-                        character=character_id,
-                        parenthetical="",
-                        text=dialogue[1],
-                    )
-                )
-
-            if inner_state:
-                character_name, actions, line, emotion, hints = inner_state
-                character_id = character_ids[character_name]
-                if character_id not in scene_characters:
+                if dialogue:
+                    character_id = character_ids[dialogue[0]]
                     scene_characters.append(character_id)
-                elements.extend(Action(type="action", text=action) for action in actions)
-                elements.append(
-                    Dialogue(
-                        type="dialogue",
-                        character=character_id,
-                        parenthetical="",
-                        text=line,
-                        emotion=emotion,
+                    elements.append(
+                        Dialogue(
+                            type="dialogue",
+                            character=character_id,
+                            parenthetical="",
+                            text=dialogue[1],
+                        )
+                    )
+
+                if inner_state:
+                    character_name, actions, line, emotion, hints = inner_state
+                    character_id = character_ids[character_name]
+                    if character_id not in scene_characters:
+                        scene_characters.append(character_id)
+                    elements.extend(Action(type="action", text=action) for action in actions)
+                    elements.append(
+                        Dialogue(
+                            type="dialogue",
+                            character=character_id,
+                            parenthetical="",
+                            text=line,
+                            emotion=emotion,
+                        )
+                    )
+                    camera_hints.extend(hints)
+
+                scenes.append(
+                    Scene(
+                        id=f"scene-{scene_index}",
+                        heading=f"INT. {chapter.title} - DAY",
+                        source_chapter=chapter.title,
+                        summary=_first_sentence(scene_slice.text, 60),
+                        goal=_scene_goal(scene_slice.text, dialogue, inner_state),
+                        conflict=_scene_conflict(
+                            scene_slice.break_reasons,
+                            dialogue,
+                            inner_state,
+                        ),
+                        beat="、".join(scene_slice.break_reasons),
+                        subtext=_scene_subtext(dialogue, inner_state),
+                        characters=scene_characters,
+                        elements=elements,
+                        camera_hints=camera_hints,
                     )
                 )
-                camera_hints.extend(hints)
-
-            scenes.append(
-                Scene(
-                    id=f"scene-{index}",
-                    heading=f"INT. {chapter.title} - DAY",
-                    source_chapter=chapter.title,
-                    summary=_first_sentence(chapter.content, 60),
-                    characters=scene_characters,
-                    elements=elements,
-                    camera_hints=camera_hints,
-                )
-            )
+                scene_index += 1
 
         resolved_title = title.strip() or "未命名改编"
         return Screenplay(
@@ -192,11 +345,13 @@ class AIConverter:
         prompt = (
             "你是专业影视编剧。请将小说改编成结构化剧本 JSON。"
             "重点：小说心理描写不能原样照搬，要外化为动作、对白 emotion 和 camera_hints。"
+            "剧本要按时间变化、地点变化、人物进出、情节转折和冲突变化拆成多个场景。"
             "只返回符合 Story2Script Screenplay Schema 的 JSON，不要 Markdown。\n\n"
             f"标题：{title or '请根据内容拟定'}\n"
             f"类型：{genre or '请根据内容判断'}\n"
             "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
-            "scene 包含 elements 和 camera_hints; dialogue 可包含 emotion。\n\n"
+            "character 必须包含 arc; scene 必须包含 goal, conflict, beat, subtext, "
+            "elements 和 camera_hints; dialogue 可包含 emotion。\n\n"
             f"小说原文：\n{source_text}"
         )
         response = self.client.post(
