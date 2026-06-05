@@ -1,50 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
 
+from .api_models import ChapterPreviewItem
+from .api_models import ChapterPreviewRequest
+from .api_models import ChapterPreviewResponse
+from .api_models import ConvertRequest
+from .api_models import ConvertResponse
+from .api_models import ValidateYamlRequest
+from .api_models import ValidateYamlResponse
 from .converter import DemoConverter
 from .parser import parse_chapters
-from .screenplay import Screenplay
 from .screenplay import screenplay_json_schema
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
-
-
-class ChapterPreviewRequest(BaseModel):
-    novel_text: str = Field(min_length=1)
-
-
-class ChapterPreviewItem(BaseModel):
-    index: int
-    title: str
-    character_count: int
-    preview: str
-
-
-class ChapterPreviewResponse(BaseModel):
-    chapter_count: int
-    chapters: list[ChapterPreviewItem]
-
-
-class ConvertRequest(BaseModel):
-    novel_text: str = Field(min_length=1)
-    title: str = ""
-    genre: str = ""
-
-
-class ConvertResponse(BaseModel):
-    screenplay: Screenplay
-    yaml_text: str
-    mode: str
-
-
-class ValidateYamlRequest(BaseModel):
-    yaml_text: str = Field(min_length=1)
-
-
-class ValidateYamlResponse(BaseModel):
-    valid: bool
-    message: str
 
 
 app = FastAPI(
