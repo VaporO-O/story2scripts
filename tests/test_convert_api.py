@@ -24,6 +24,7 @@ def test_convert_api_returns_demo_screenplay() -> None:
     body = response.json()
     assert body["mode"] == "demo"
     assert body["screenplay"]["title"] == "测试故事"
+    assert body["yaml_text"].startswith("schema_version: '1.0'")
     assert body["screenplay"]["source"]["chapter_count"] == 3
     assert len(body["screenplay"]["scenes"]) == 3
 

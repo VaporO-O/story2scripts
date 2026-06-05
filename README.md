@@ -84,6 +84,17 @@ Schema 的剧本对象。
 }
 ```
 
+响应中同时包含：
+
+- `screenplay`：结构化剧本 JSON
+- `yaml_text`：可编辑、可保存的 YAML 剧本初稿
+- `mode`：当前转换模式
+
+### YAML 输出
+
+项目使用 `PyYAML` 将 `Screenplay` 模型序列化为 YAML。导出的 YAML 会保留中文内容和字段顺序，
+便于作者直接阅读、编辑和保存。
+
 ## 测试
 
 ```bash
