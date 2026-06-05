@@ -45,3 +45,21 @@ class ExampleNovelResponse(BaseModel):
     genre: str
     novel_text: str
 
+
+class CharacterProfileRequest(BaseModel):
+    novel_text: str = Field(min_length=1)
+
+
+class CharacterProfile(BaseModel):
+    name: str
+    role: str
+    personality: str
+    goal: str
+    relationships: list[str]
+    appearance_chapters: list[str]
+    key_change: str
+
+
+class CharacterProfileResponse(BaseModel):
+    profiles: list[CharacterProfile]
+

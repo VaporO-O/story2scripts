@@ -134,6 +134,23 @@ ruff check .
 - 支持 YAML 校验
 - 支持下载 `screenplay.yaml`
 
+<<<<<<< HEAD
+## 人物小传提取
+
+接口：`POST /api/characters/profiles`
+
+该接口会从三章以上小说中自动提取人物小传信息，返回字段包括：
+
+- `name`：人物姓名
+- `role`：角色定位
+- `personality`：性格
+- `goal`：目标
+- `relationships`：与他人的关系
+- `appearance_chapters`：出场章节
+- `key_change`：关键变化
+
+当前版本使用规则提取，适合本地演示和稳定测试；后续可在不改变接口结构的前提下接入 AI 增强。
+=======
 ## Schema 文档
 
 YAML Schema 设计说明见：
@@ -141,3 +158,4 @@ YAML Schema 设计说明见：
 ```text
 docs/YAML_SCHEMA.md
 ```
+>>>>>>> origin/main
