@@ -39,3 +39,9 @@ class ValidateYamlResponse(BaseModel):
     valid: bool
     message: str
 
+
+class ExampleNovelResponse(BaseModel):
+    title: str
+    genre: str
+    novel_text: str
+

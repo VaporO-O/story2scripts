@@ -6,9 +6,11 @@ from .api_models import ChapterPreviewRequest
 from .api_models import ChapterPreviewResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
+from .api_models import ExampleNovelResponse
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
 from .converter import DemoConverter
+from .examples import load_example_novel
 from .parser import parse_chapters
 from .screenplay import screenplay_json_schema
 from .yaml_export import screenplay_from_yaml
@@ -72,6 +74,11 @@ async def preview_chapters(request: ChapterPreviewRequest) -> ChapterPreviewResp
 @app.get("/api/screenplay/schema")
 async def get_screenplay_schema() -> dict:
     return screenplay_json_schema()
+
+
+@app.get("/api/examples/novel", response_model=ExampleNovelResponse)
+async def get_example_novel() -> ExampleNovelResponse:
+    return ExampleNovelResponse(**load_example_novel())
 
 
 @app.post("/api/convert", response_model=ConvertResponse)
