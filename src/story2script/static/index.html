@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Story2Script · 小说剧本对照工作台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">Story<span>2</span>Script</a>
+      <nav>
+        <a href="/docs">API 文档</a>
+        <a href="/api/screenplay/schema">Schema</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">NOVEL TO SCREENPLAY</p>
+        <h1>左边小说，右边剧本。</h1>
+        <p>输入三章以上小说，生成结构化 YAML 剧本初稿，并在同一屏幕中对照检查。</p>
+      </section>
+
+      <section class="workspace">
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <span>01</span>
+              <h2>小说原文</h2>
+            </div>
+            <button id="loadExampleButton" class="ghost-button">填入示例</button>
+          </div>
+
+          <div class="metadata">
+            <label>作品名<input id="titleInput" placeholder="例如：雾港来信" /></label>
+            <label>类型<input id="genreInput" placeholder="例如：悬疑 / 剧情" /></label>
+          </div>
+
+          <textarea id="novelInput" placeholder="请粘贴小说正文，并使用“第一章 标题”格式标记至少三个章节……"></textarea>
+
+          <div class="panel-footer">
+            <span id="chapterCount">已识别 0 个章节</span>
+            <button id="convertButton" class="primary-button">生成剧本</button>
+          </div>
+        </section>
+
+        <section class="panel script-panel">
+          <div class="panel-heading">
+            <div>
+              <span>02</span>
+              <h2>YAML 剧本</h2>
+            </div>
+            <div class="button-row">
+              <button id="validateButton" class="ghost-button">校验</button>
+              <button id="downloadButton" class="ghost-button">下载</button>
+            </div>
+          </div>
+
+          <div id="emptyState" class="empty-state">
+            <div class="script-card">SCENE<br /><strong>01</strong></div>
+            <h3>等待故事开场</h3>
+            <p>生成后的 YAML 剧本会显示在这里，你可以直接编辑再校验。</p>
+          </div>
+
+          <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
+          <div id="message" class="message">准备就绪</div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+

@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .api_models import ChapterPreviewItem
 from .api_models import ChapterPreviewRequest
@@ -17,32 +20,20 @@ from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
 
 
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
 app = FastAPI(
     title="Story2Script API",
     version="0.1.0",
     description="AI-assisted novel-to-screenplay workbench.",
 )
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def index() -> str:
-    return """
-    <!doctype html>
-    <html lang="zh-CN">
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Story2Script</title>
-      </head>
-      <body>
-        <main>
-          <h1>Story2Script</h1>
-          <p>AI 辅助小说转剧本工具正在持续开发中。</p>
-          <a href="/docs">查看 API 文档</a>
-        </main>
-      </body>
-    </html>
-    """
+@app.get("/", include_in_schema=False)
+async def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/api/health")
