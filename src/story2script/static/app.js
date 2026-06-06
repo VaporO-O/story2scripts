@@ -1,6 +1,7 @@
 const titleInput = document.querySelector("#titleInput");
 const genreInput = document.querySelector("#genreInput");
 const adaptationTypeInput = document.querySelector("#adaptationTypeInput");
+const convertModeInput = document.querySelector("#convertModeInput");
 const novelInput = document.querySelector("#novelInput");
 const yamlOutput = document.querySelector("#yamlOutput");
 const emptyState = document.querySelector("#emptyState");
@@ -77,6 +78,7 @@ async function loadExample() {
   titleInput.value = data.title;
   genreInput.value = data.genre;
   adaptationTypeInput.value = "影视剧";
+  convertModeInput.value = "demo";
   novelInput.value = data.novel_text;
   updateChapterCount();
   setMessage("示例小说已填入。");
@@ -84,7 +86,8 @@ async function loadExample() {
 
 async function convertNovel() {
   convertButton.disabled = true;
-  setMessage("正在解析小说并生成 YAML 剧本……");
+  const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
+  setMessage(`正在使用${modeName}模式生成 YAML 剧本……`);
 
   try {
     const response = await fetch("/api/convert", {
@@ -94,6 +97,7 @@ async function convertNovel() {
         title: titleInput.value,
         genre: genreInput.value,
         adaptation_type: adaptationTypeInput.value,
+        mode: convertModeInput.value,
         novel_text: novelInput.value,
       }),
     });

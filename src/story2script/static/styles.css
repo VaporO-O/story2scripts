@@ -169,6 +169,29 @@ textarea {
   border-bottom: 0;
   color: var(--muted);
   font-size: 12px;
+  gap: 12px;
+}
+
+.convert-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mode-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.mode-select select {
+  width: auto;
+  min-width: 96px;
+  margin-top: 0;
+  padding: 8px 28px 8px 10px;
 }
 
 .primary-button {
@@ -375,6 +398,16 @@ textarea {
 
   .rewrite-fields {
     grid-template-columns: 1fr;
+  }
+
+  .panel-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px 22px;
+  }
+
+  .convert-controls {
+    justify-content: flex-start;
   }
 }
 

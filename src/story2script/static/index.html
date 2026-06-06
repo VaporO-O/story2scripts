@@ -51,9 +51,18 @@
 
           <div class="panel-footer">
             <span id="chapterCount">已识别 0 个章节</span>
-            <div class="button-row">
-              <button id="analyzeCharactersButton" class="ghost-button">分析人物</button>
-              <button id="convertButton" class="primary-button">生成剧本</button>
+            <div class="convert-controls">
+              <label class="mode-select">
+                转换模式
+                <select id="convertModeInput">
+                  <option value="demo" selected>本地</option>
+                  <option value="ai">AI</option>
+                </select>
+              </label>
+              <div class="button-row">
+                <button id="analyzeCharactersButton" class="ghost-button">分析人物</button>
+                <button id="convertButton" class="primary-button">生成剧本</button>
+              </div>
             </div>
           </div>
         </section>
