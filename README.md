@@ -55,6 +55,7 @@ uvicorn story2script.main:app --reload
 - 角色表
 - 场景列表
 - 内外景、拍摄时段、地点、出场人物和道具等可制作性字段
+- 叙述到动作、对白、潜台词和场景描述的戏剧化分类决策
 - 动作与对白元素
 - 场景、角色、来源章节之间的引用关系
 
@@ -90,6 +91,7 @@ Schema 的剧本对象。
 - 根据时间变化、地点变化、人物进出、情节转折和冲突变化拆分场景
 - 为每个场景生成 `int_ext`、`time_of_day`、`location`、`characters_present` 和 `props`，
   对齐工业级剧本格式中的 slug line、出场人物和道具拆解
+- 为每个场景生成 `dramatization_decisions`，显式判断小说叙述应改写成动作行、对白、潜台词还是场景描述
 - 从章节中的引号内容抽取一条对白
 - 根据“某某说/问/喊”格式识别说话人
 - 按改编类型生成不同的动作、冲突、节拍和生产提示
@@ -117,6 +119,7 @@ Schema 的剧本对象。
 - `screenplay`：结构化剧本 JSON
 - `screenplay.global_state`：跨章节人物表、地点表和时间线
 - `screenplay.scenes[].int_ext/time_of_day/location/characters_present/props`：可制作性场景字段
+- `screenplay.scenes[].dramatization_decisions`：叙述到戏剧表达的分类决策
 - `yaml_text`：可编辑、可保存的 YAML 剧本初稿
 - `mode`：当前转换模式
 - `adaptation_type`：当前改编类型
@@ -257,14 +260,27 @@ python -m compileall -q src tests
 
 ## 心理描写外化
 
-转换器会尝试识别“觉得、意识到、发冷、不是意外”等心理描写，并将其外化为：
+转换器会尝试识别心理描写，并将其外化为：
 
 - 可拍摄的动作
-- 带 `emotion` 的对白
+- 潜台词和人物反应
 - `camera_hints` 镜头提示
 
 例如“林澈突然觉得背后一阵发冷，他隐约意识到，姐姐的失踪可能不是意外。”会被转换为停步回头、
-紧张对白和近景提示。
+潜台词压力和近景提示，而不是把心理判断机械搬成一句台词。
+
+## 叙述到戏剧化改写
+
+每个场景会生成 `dramatization_decisions`，记录系统如何判断小说叙述的改写方向：
+
+| target | 改写方向 |
+| --- | --- |
+| `action` | 角色可见行为、身体反应、场面推进 |
+| `dialogue` | 原文明确对白，或需要通过信息交换推动冲突 |
+| `subtext` | 心理活动、情绪判断、未说出口的意图 |
+| `scene_description` | 天气、空间、背景和氛围 |
+
+AI 转换 prompt 会显式要求模型做这个分类决策，避免把小说里的心理描写、环境叙述和背景说明直接搬进剧本。
 
 ## 转换器模式
 

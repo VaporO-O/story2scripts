@@ -24,6 +24,7 @@ def test_screenplay_to_yaml_can_round_trip() -> None:
     assert "global_state:" in yaml_text
     assert "characters_present:" in yaml_text
     assert "props:" in yaml_text
+    assert "dramatization_decisions:" in yaml_text
     assert "林夏" in yaml_text
 
 

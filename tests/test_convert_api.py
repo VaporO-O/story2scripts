@@ -36,6 +36,7 @@ def test_convert_api_returns_demo_screenplay() -> None:
     assert body["screenplay"]["scenes"][0]["time_of_day"] in ["DAY", "NIGHT"]
     assert "characters_present" in body["screenplay"]["scenes"][0]
     assert "props" in body["screenplay"]["scenes"][0]
+    assert "dramatization_decisions" in body["screenplay"]["scenes"][0]
     assert len(body["screenplay"]["scenes"]) == 3
 
 

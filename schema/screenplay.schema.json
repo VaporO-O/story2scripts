@@ -267,6 +267,7 @@
             "characters",
             "characters_present",
             "props",
+            "dramatization_decisions",
             "elements"
           ],
         "properties": {
@@ -338,6 +339,44 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "dramatization_decisions": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Explicit narration-to-drama classification decisions for this scene.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source_text",
+                "target",
+                "rendering",
+                "reason"
+              ],
+              "properties": {
+                "source_text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "target": {
+                  "type": "string",
+                  "enum": [
+                    "action",
+                    "dialogue",
+                    "subtext",
+                    "scene_description"
+                  ]
+                },
+                "rendering": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           },
           "camera_hints": {

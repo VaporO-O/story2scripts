@@ -105,6 +105,14 @@ SceneElement = Dialogue | Action
 
 IntExt = Literal["INT.", "EXT."]
 TimeOfDay = Literal["DAY", "NIGHT"]
+DramatizationTarget = Literal["action", "dialogue", "subtext", "scene_description"]
+
+
+class DramatizationDecision(StrictModel):
+    source_text: str = Field(min_length=1)
+    target: DramatizationTarget
+    rendering: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
 
 
 class Scene(StrictModel):
@@ -125,6 +133,10 @@ class Scene(StrictModel):
     characters: list[str] = Field(description="Character ids in this scene")
     characters_present: list[str] = Field(description="Character ids visibly present in this scene")
     props: list[str] = Field(description="Production-relevant props used or mentioned in this scene")
+    dramatization_decisions: list[DramatizationDecision] = Field(
+        min_length=1,
+        description="Narration-to-drama classification decisions for this scene",
+    )
     elements: list[SceneElement] = Field(min_length=1)
     camera_hints: list[str] = Field(default_factory=list)
 

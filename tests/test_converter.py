@@ -63,6 +63,11 @@ def test_demo_converter_populates_industry_scene_fields() -> None:
     assert scene.heading == "EXT. 码头 - NIGHT"
     assert scene.characters_present == ["character-1"]
     assert scene.props == ["信"]
+    assert {decision.target for decision in scene.dramatization_decisions} >= {
+        "action",
+        "dialogue",
+        "scene_description",
+    }
 
 
 def test_demo_converter_splits_chapter_into_dramatic_scenes() -> None:
@@ -84,6 +89,7 @@ def test_demo_converter_splits_chapter_into_dramatic_scenes() -> None:
     assert all(scene.conflict for scene in first_chapter_scenes)
     assert all(scene.beat for scene in first_chapter_scenes)
     assert all(scene.subtext for scene in first_chapter_scenes)
+    assert all(scene.dramatization_decisions for scene in first_chapter_scenes)
     assert any("地点变化" in scene.beat for scene in first_chapter_scenes)
     assert any("情节转折" in scene.beat for scene in first_chapter_scenes)
 

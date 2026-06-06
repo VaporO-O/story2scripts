@@ -189,6 +189,15 @@ scenes:
       - character-1
     props:
       - 匿名信
+    dramatization_decisions:
+      - source_text: 雾气笼罩码头。
+        target: scene_description
+        rendering: 雾气笼罩码头。
+        reason: 环境叙述用于建立可拍摄的场景氛围。
+      - source_text: 林夏发现匿名信。
+        target: action
+        rendering: 林夏发现匿名信。
+        reason: 可见行为转成动作行。
     elements:
       - type: action
         text: 雾气盖住码头，海水拍打锈蚀的系船柱。
@@ -216,6 +225,7 @@ scenes:
 | `characters` | array[string] | 角色 ID 列表 | 本场出现的角色 |
 | `characters_present` | array[string] | 角色 ID 列表 | 本场画面或舞台中实际在场的角色 |
 | `props` | array[string] | 可为空 | 本场使用或提及的可制作道具 |
+| `dramatization_decisions` | array | 至少 1 项 | 叙述到戏剧表达的分类决策 |
 | `elements` | array | 至少 1 项 | 场景内动作和对白 |
 | `camera_hints` | array[string] | 可为空 | 镜头提示，用于把心理活动外化为可拍摄画面 |
 
@@ -228,6 +238,7 @@ scenes:
 - `summary` 便于前端做场景列表、搜索和节拍检查。
 - 剧本和小说的本质区别是：小说可以靠叙述推进，剧本必须靠冲突和动作推进。因此每个场景都必须说明
   角色目标、冲突、节拍和潜台词，避免剧本只是在复述小说情节。
+- `dramatization_decisions` 显式记录“叙述→戏剧化”的判断过程，说明哪些原文被改写为动作行、对白、潜台词或场景描述。
 - `elements` 保留场景内顺序，动作和对白可以交替出现。
 - `camera_hints` 不直接替代导演分镜，只提供“近景、特写、环境提示”等轻量建议，帮助把小说心理描写转成可视化表达。
 
@@ -322,7 +333,36 @@ camera_hints:
 - 对白负责把关键判断外化。
 - 镜头提示负责提醒作者可用画面表达内心变化。
 
-## 9. 完整 YAML 示例
+## 9. 叙述→戏剧化分类决策
+
+小说原文中的心理描写、环境叙述、背景信息和人物判断不能被机械搬运到剧本里。Story2Script 会在
+`scene.dramatization_decisions` 中显式记录每段叙述被改写成哪种戏剧表达：
+
+| target | 用途 | 判断原则 |
+| --- | --- | --- |
+| `action` | 动作行 | 角色可见行为、身体反应、场面推进 |
+| `dialogue` | 对白 | 原文存在明确说话内容，或需要通过信息交换推动冲突 |
+| `subtext` | 潜台词 | 心理活动、情绪判断、未说出口的意图，不直接搬成台词 |
+| `scene_description` | 场景描述 | 天气、空间、背景、氛围等纯环境信息 |
+
+示例：
+
+```yaml
+dramatization_decisions:
+  - source_text: 林澈突然觉得背后一阵发冷。
+    target: subtext
+    rendering: 林澈表面继续行动，内心判断已经发生变化。
+    reason: 心理活动不直接搬成台词，而是通过潜台词和动作反应间接表现。
+  - source_text: 走廊尽头的灯闪了一下。
+    target: scene_description
+    rendering: 走廊尽头的灯闪了一下。
+    reason: 环境叙述用于建立可拍摄的场景压力。
+```
+
+这个字段让 AI 的改编过程可解释：评审或作者不仅能看到结果，还能看到系统为什么把某段小说叙述改成
+动作、对白、潜台词或场景描述。
+
+## 10. 完整 YAML 示例
 
 ```yaml
 schema_version: '1.0'
@@ -397,6 +437,19 @@ scenes:
       - character-1
     props:
       - 信
+    dramatization_decisions:
+      - source_text: 凌晨五点，林夏在码头捡到一封没有署名的信。
+        target: scene_description
+        rendering: 凌晨五点，林夏在码头捡到一封没有署名的信。
+        reason: 时间、地点和氛围信息用于建立可拍摄的场景描述。
+      - source_text: 凌晨五点，林夏在码头捡到一封没有署名的信。
+        target: action
+        rendering: 林夏在码头捡到没有署名的信。
+        reason: 可见行为转成动作行，避免复述旁白。
+      - source_text: 这不可能是巧合。
+        target: dialogue
+        rendering: 这不可能是巧合。
+        reason: 原文存在明确对白，可保留为推动信息交换的台词。
     elements:
       - type: action
         text: 凌晨五点，林夏在码头捡到一封没有署名的信。
@@ -409,7 +462,7 @@ scenes:
       - 近景：林夏握紧信纸的手。
 ```
 
-## 10. 校验规则
+## 11. 校验规则
 
 当前系统同时使用 JSON Schema 文件和 Pydantic 模型进行校验。
 
@@ -424,6 +477,8 @@ scenes:
 - `scenes[].heading` 必须与 `int_ext`、`location`、`time_of_day` 保持一致
 - `scenes[].characters_present` 必须是字符串列表
 - `scenes[].props` 必须是字符串列表
+- `scenes[].dramatization_decisions` 至少包含 1 项
+- `dramatization_decisions[].target` 必须是 `action`、`dialogue`、`subtext`、`scene_description` 之一
 - `global_state` 必须包含 `characters`、`locations`、`timeline`
 - `global_state.characters[].id` 必须符合 `character-数字` 格式
 - `global_state.locations[].id` 必须符合 `location-数字` 格式
@@ -451,7 +506,7 @@ scenes:
 - `characters_present` 中的 ID 必须存在于 `characters`
 - 对白中的 `character` 必须存在于 `characters`
 
-## 11. 为什么选择 YAML
+## 12. 为什么选择 YAML
 
 选择 YAML 而不是 Markdown 或纯文本，是因为：
 
@@ -462,7 +517,7 @@ scenes:
 
 Markdown 更适合展示，不适合作为稳定数据交换格式；纯文本剧本则难以可靠区分场景、动作、对白和角色。
 
-## 12. 扩展方向
+## 13. 扩展方向
 
 v1.0 暂时聚焦“剧本初稿”，没有加入过多拍摄层信息。后续可以在不破坏主体结构的前提下扩展：
 
