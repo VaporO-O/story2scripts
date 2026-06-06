@@ -24,6 +24,7 @@ def test_index_page() -> None:
     assert "重新生成本场对白" in response.text
     assert "加强戏剧冲突" in response.text
     assert "减少旁白" in response.text
+    assert "rewriteModeInput" in response.text
 
 
 def test_static_assets_are_served() -> None:

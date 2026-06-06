@@ -138,6 +138,7 @@ async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewrite
             operation=request.operation,
             character_id=request.character_id,
             tone=request.tone,
+            mode=request.mode,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"局部重写失败：{exc}") from exc
@@ -147,5 +148,6 @@ async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewrite
         yaml_text=screenplay_to_yaml(updated_screenplay),
         scene_id=request.scene_id,
         operation=request.operation,
+        mode=request.mode,
         message=message,
     )

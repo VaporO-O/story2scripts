@@ -132,6 +132,7 @@ Schema 的剧本对象。
 
 该接口用于在已有 YAML 剧本上只重写某一个场景，避免每次修改都重新生成全文。请求需要传入当前
 `yaml_text`、目标 `scene_id` 和局部操作 `operation`，接口会返回更新后的结构化剧本和 YAML。
+默认使用本地规则模式；配置外部 LLM 后，可以传入 `mode: "ai"` 使用 AI 局部重写。
 
 当前支持的操作：
 
@@ -150,7 +151,8 @@ Schema 的剧本对象。
 {
   "yaml_text": "schema_version: '1.0'\n...",
   "scene_id": "scene-1",
-  "operation": "strengthen_conflict"
+  "operation": "strengthen_conflict",
+  "mode": "demo"
 }
 ```
 
@@ -161,10 +163,24 @@ Schema 的剧本对象。
   "yaml_text": "schema_version: '1.0'\n...",
   "scene_id": "scene-1",
   "operation": "adjust_character_voice",
+  "mode": "ai",
   "character_id": "character-1",
   "tone": "更锋利"
 }
 ```
+
+AI 局部重写复用 `.env.example` 中的 OpenAI-compatible 配置：
+
+```bash
+AI_API_KEY=your-api-key
+AI_BASE_URL=https://your-provider.example/v1
+AI_MODEL=your-model-name
+AI_TIMEOUT_SECONDS=120
+```
+
+AI 模式只要求模型返回目标 `scene` 的 JSON，不返回完整剧本。服务端会校验 `scene.id` 和
+`source_chapter` 不变，再把该 scene 替换回原剧本，并重新通过 `Screenplay` 模型校验，保证 YAML
+结构仍然有效。
 
 ### 示例小说
 

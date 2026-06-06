@@ -8,6 +8,7 @@ const message = document.querySelector("#message");
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
 const sceneIdInput = document.querySelector("#sceneIdInput");
+const rewriteModeInput = document.querySelector("#rewriteModeInput");
 const rewriteCharacterInput = document.querySelector("#rewriteCharacterInput");
 const rewriteToneInput = document.querySelector("#rewriteToneInput");
 const rewriteButtons = document.querySelectorAll("[data-rewrite-operation]");
@@ -180,6 +181,7 @@ async function rewriteScene(operation) {
         yaml_text: yamlOutput.value,
         scene_id: sceneIdInput.value,
         operation,
+        mode: rewriteModeInput.value,
         character_id: rewriteCharacterInput.value,
         tone: rewriteToneInput.value,
       }),
@@ -193,7 +195,7 @@ async function rewriteScene(operation) {
     yamlOutput.value = data.yaml_text;
     emptyState.classList.add("hidden");
     yamlOutput.classList.remove("hidden");
-    setMessage(`${data.message} 已更新 ${data.scene_id}。`);
+    setMessage(`${data.message} 已更新 ${data.scene_id}，模式：${data.mode}。`);
   } catch (error) {
     setMessage(error.message, true);
   } finally {

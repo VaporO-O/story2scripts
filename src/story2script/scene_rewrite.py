@@ -1,6 +1,10 @@
+import json
+import os
 from typing import Literal
 
-from .screenplay import Action, Dialogue, Screenplay
+import httpx
+
+from .screenplay import Action, Dialogue, Scene, Screenplay
 
 
 SceneRewriteOperation = Literal[
@@ -11,6 +15,7 @@ SceneRewriteOperation = Literal[
     "reduce_narration",
     "adjust_character_voice",
 ]
+SceneRewriteMode = Literal["demo", "ai"]
 
 
 OPERATION_MESSAGES: dict[SceneRewriteOperation, str] = {
@@ -20,6 +25,15 @@ OPERATION_MESSAGES: dict[SceneRewriteOperation, str] = {
     "add_camera_hints": "已补充本场镜头提示。",
     "reduce_narration": "已减少本场旁白式描述。",
     "adjust_character_voice": "已调整本场人物语气。",
+}
+
+OPERATION_PROMPTS: dict[SceneRewriteOperation, str] = {
+    "rewrite_dialogue": "只重新生成本场对白，让对白更能推动目标、冲突和人物关系。",
+    "strengthen_conflict": "加强本场戏剧冲突，让阻力更明确，但不要改变场景来源。",
+    "short_drama_pace": "把本场调整为短剧节奏，提高钩子、反转和冲突密度。",
+    "add_camera_hints": "补充镜头提示，强调画面、景别和人物反应。",
+    "reduce_narration": "减少旁白式解释，把信息改写为可见动作、对白或镜头提示。",
+    "adjust_character_voice": "只调整指定人物的语气，保持场景结构和剧情事实稳定。",
 }
 
 
@@ -165,13 +179,153 @@ def _adjust_character_voice(
     scene.subtext = f"人物语气：{tone}。{scene.subtext}"
 
 
+class AISceneRewriter:
+    """OpenAI-compatible local scene rewriter.
+
+    The LLM is only allowed to return a replacement Scene object. The full
+    screenplay is validated again after replacement so bad references cannot
+    leak into YAML output.
+    """
+
+    def __init__(self, client: httpx.Client | None = None) -> None:
+        self.client = client or httpx.Client(timeout=self.timeout_seconds)
+
+    @property
+    def api_key(self) -> str:
+        return os.getenv("AI_API_KEY", "").strip()
+
+    @property
+    def base_url(self) -> str:
+        return os.getenv("AI_BASE_URL", "").strip().rstrip("/")
+
+    @property
+    def model(self) -> str:
+        return os.getenv("AI_MODEL", "").strip()
+
+    @property
+    def timeout_seconds(self) -> float:
+        return float(os.getenv("AI_TIMEOUT_SECONDS", "120"))
+
+    def rewrite(
+        self,
+        screenplay: Screenplay,
+        scene_id: str,
+        operation: SceneRewriteOperation,
+        character_id: str = "",
+        tone: str = "更克制",
+    ) -> Screenplay:
+        if not self.api_key:
+            raise ValueError("AI scene rewrite requires AI_API_KEY.")
+        if not self.base_url:
+            raise ValueError("AI scene rewrite requires AI_BASE_URL.")
+        if not self.model:
+            raise ValueError("AI scene rewrite requires AI_MODEL.")
+
+        target_scene = _find_scene(screenplay, scene_id)
+        if character_id:
+            _resolve_character_id(screenplay, scene_id, character_id)
+
+        prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone)
+        response = self.client.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "response_format": {"type": "json_object"},
+            },
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        replacement_scene = Scene.model_validate(json.loads(content))
+
+        if replacement_scene.id != target_scene.id:
+            raise ValueError("AI scene rewrite must keep the original scene id.")
+        if replacement_scene.source_chapter != target_scene.source_chapter:
+            raise ValueError("AI scene rewrite must keep the original source_chapter.")
+
+        updated = screenplay.model_copy(deep=True)
+        for index, scene in enumerate(updated.scenes):
+            if scene.id == scene_id:
+                updated.scenes[index] = replacement_scene
+                break
+
+        return Screenplay.model_validate(updated.model_dump(mode="json"))
+
+    def _build_prompt(
+        self,
+        screenplay: Screenplay,
+        target_scene,
+        operation: SceneRewriteOperation,
+        character_id: str,
+        tone: str,
+    ) -> str:
+        context = {
+            "screenplay": {
+                "title": screenplay.title,
+                "genre": screenplay.genre,
+                "adaptation_type": screenplay.adaptation_type,
+                "logline": screenplay.logline,
+                "characters": [character.model_dump(mode="json") for character in screenplay.characters],
+            },
+            "target_scene": target_scene.model_dump(mode="json"),
+            "operation": operation,
+            "operation_goal": OPERATION_PROMPTS[operation],
+            "character_id": character_id,
+            "tone": tone,
+        }
+        return (
+            "你是专业影视编剧。请基于给定剧本上下文，只局部重写 target_scene。\n"
+            "只返回一个符合 Story2Script Scene Schema 的 JSON 对象，不要 Markdown，不要返回完整剧本。\n"
+            "硬性要求：id 必须保持不变；source_chapter 必须保持不变；"
+            "characters 和 dialogue.character 只能引用已存在角色 id；"
+            "必须保留 heading, summary, goal, conflict, beat, subtext, characters, elements, camera_hints。\n"
+            "本次局部操作："
+            f"{OPERATION_PROMPTS[operation]}\n"
+            f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"
+        )
+
+
+def _rewrite_scene_with_ai(
+    screenplay: Screenplay,
+    scene_id: str,
+    operation: SceneRewriteOperation,
+    character_id: str = "",
+    tone: str = "更克制",
+    client: httpx.Client | None = None,
+) -> Screenplay:
+    return AISceneRewriter(client=client).rewrite(
+        screenplay=screenplay,
+        scene_id=scene_id,
+        operation=operation,
+        character_id=character_id,
+        tone=tone,
+    )
+
+
 def rewrite_scene(
     screenplay: Screenplay,
     scene_id: str,
     operation: SceneRewriteOperation,
     character_id: str = "",
     tone: str = "更克制",
+    mode: SceneRewriteMode = "demo",
+    client: httpx.Client | None = None,
 ) -> tuple[Screenplay, str]:
+    if mode == "ai":
+        updated = _rewrite_scene_with_ai(
+            screenplay=screenplay,
+            scene_id=scene_id,
+            operation=operation,
+            character_id=character_id,
+            tone=tone,
+            client=client,
+        )
+        return updated, f"AI {OPERATION_MESSAGES[operation]}"
+    if mode != "demo":
+        raise ValueError(f"不支持的局部重写模式：{mode}")
+
     updated = screenplay.model_copy(deep=True)
 
     if operation == "rewrite_dialogue":

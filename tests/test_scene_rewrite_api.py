@@ -36,6 +36,7 @@ def test_scene_rewrite_api_returns_updated_yaml() -> None:
 
     assert body["scene_id"] == "scene-1"
     assert body["operation"] == "add_camera_hints"
+    assert body["mode"] == "demo"
     assert "镜头提示" in "\n".join(restored.scenes[0].camera_hints)
 
 
@@ -51,3 +52,22 @@ def test_scene_rewrite_api_rejects_missing_scene() -> None:
 
     assert response.status_code == 422
     assert "局部重写失败" in response.json()["detail"]
+
+
+def test_scene_rewrite_api_rejects_unconfigured_ai_mode(monkeypatch) -> None:
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("AI_BASE_URL", raising=False)
+    monkeypatch.delenv("AI_MODEL", raising=False)
+
+    response = client.post(
+        "/api/scenes/rewrite",
+        json={
+            "yaml_text": sample_yaml_text(),
+            "scene_id": "scene-1",
+            "operation": "add_camera_hints",
+            "mode": "ai",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "AI scene rewrite requires" in response.json()["detail"]

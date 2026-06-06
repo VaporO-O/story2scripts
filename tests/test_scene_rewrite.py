@@ -1,3 +1,8 @@
+import json
+
+import httpx
+import pytest
+
 from story2script.converter import DemoConverter
 from story2script.parser import parse_chapters
 from story2script.scene_rewrite import rewrite_scene
@@ -64,3 +69,88 @@ def test_rewrite_scene_rejects_unknown_scene() -> None:
         assert "missing-scene" in str(exc)
     else:
         raise AssertionError("Expected missing scene to raise ValueError")
+
+
+def test_rewrite_scene_can_use_ai_for_single_scene(monkeypatch: pytest.MonkeyPatch) -> None:
+    screenplay = sample_screenplay()
+    replacement = screenplay.scenes[0].model_copy(deep=True)
+    replacement.conflict = "AI冲突：新的阻力让角色无法直接达成目标。"
+    replacement.camera_hints.append("AI镜头：近景捕捉角色迟疑。")
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers["authorization"]
+        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                replacement.model_dump(mode="json"),
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+
+    updated, message = rewrite_scene(
+        screenplay,
+        "scene-1",
+        "strengthen_conflict",
+        mode="ai",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    prompt = captured["payload"]["messages"][0]["content"]
+    assert captured["url"] == "https://example.test/v1/chat/completions"
+    assert captured["authorization"] == "Bearer test-key"
+    assert "只返回一个符合 Story2Script Scene Schema 的 JSON 对象" in prompt
+    assert "加强本场戏剧冲突" in prompt
+    assert updated.scenes[0].conflict.startswith("AI冲突")
+    assert updated.scenes[1].model_dump(mode="json") == screenplay.scenes[1].model_dump(mode="json")
+    assert message == "AI 已加强本场戏剧冲突。"
+
+
+def test_ai_scene_rewrite_rejects_changed_scene_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    screenplay = sample_screenplay()
+    replacement = screenplay.scenes[0].model_copy(deep=True)
+    replacement.id = "scene-99"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                replacement.model_dump(mode="json"),
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+
+    with pytest.raises(ValueError, match="scene id"):
+        rewrite_scene(
+            screenplay,
+            "scene-1",
+            "add_camera_hints",
+            mode="ai",
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
