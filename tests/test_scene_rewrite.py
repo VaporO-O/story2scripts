@@ -116,6 +116,7 @@ def test_rewrite_scene_can_use_ai_for_single_scene(monkeypatch: pytest.MonkeyPat
     assert "只返回一个符合 Story2Script Scene Schema 的 JSON 对象" in prompt
     assert "加强本场戏剧冲突" in prompt
     assert "global_state" in prompt
+    assert "int_ext、time_of_day、location 必须保持不变" in prompt
     assert updated.scenes[0].conflict.startswith("AI冲突")
     assert updated.scenes[1].model_dump(mode="json") == screenplay.scenes[1].model_dump(mode="json")
     assert message == "AI 已加强本场戏剧冲突。"
@@ -148,6 +149,43 @@ def test_ai_scene_rewrite_rejects_changed_scene_id(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("AI_MODEL", "test-model")
 
     with pytest.raises(ValueError, match="scene id"):
+        rewrite_scene(
+            screenplay,
+            "scene-1",
+            "add_camera_hints",
+            mode="ai",
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
+
+def test_ai_scene_rewrite_rejects_changed_location(monkeypatch: pytest.MonkeyPatch) -> None:
+    screenplay = sample_screenplay()
+    replacement = screenplay.scenes[0].model_copy(deep=True)
+    replacement.location = "另一个地点"
+    replacement.heading = f"{replacement.int_ext} {replacement.location} - {replacement.time_of_day}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                replacement.model_dump(mode="json"),
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+
+    with pytest.raises(ValueError, match="location"):
         rewrite_scene(
             screenplay,
             "scene-1",

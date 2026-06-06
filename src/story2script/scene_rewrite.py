@@ -94,6 +94,7 @@ def _rewrite_dialogue(screenplay: Screenplay, scene_id: str) -> None:
             _prepend_action(scene, "对白重写提示：本场需要先补充可说话角色。")
             return
         _append_unique(scene.characters, character_id)
+        _append_unique(scene.characters_present, character_id)
         scene.elements.append(
             Dialogue(
                 type="dialogue",
@@ -166,6 +167,7 @@ def _adjust_character_voice(
 
     if not matched:
         _append_unique(scene.characters, resolved_character_id)
+        _append_unique(scene.characters_present, resolved_character_id)
         scene.elements.append(
             Dialogue(
                 type="dialogue",
@@ -244,6 +246,12 @@ class AISceneRewriter:
             raise ValueError("AI scene rewrite must keep the original scene id.")
         if replacement_scene.source_chapter != target_scene.source_chapter:
             raise ValueError("AI scene rewrite must keep the original source_chapter.")
+        if replacement_scene.int_ext != target_scene.int_ext:
+            raise ValueError("AI scene rewrite must keep the original int_ext.")
+        if replacement_scene.time_of_day != target_scene.time_of_day:
+            raise ValueError("AI scene rewrite must keep the original time_of_day.")
+        if replacement_scene.location != target_scene.location:
+            raise ValueError("AI scene rewrite must keep the original location.")
 
         updated = screenplay.model_copy(deep=True)
         for index, scene in enumerate(updated.scenes):
@@ -280,9 +288,11 @@ class AISceneRewriter:
             "你是专业影视编剧。请基于给定剧本上下文，只局部重写 target_scene。\n"
             "只返回一个符合 Story2Script Scene Schema 的 JSON 对象，不要 Markdown，不要返回完整剧本。\n"
             "硬性要求：id 必须保持不变；source_chapter 必须保持不变；"
+            "int_ext、time_of_day、location 必须保持不变；"
             "characters 和 dialogue.character 只能引用已存在角色 id；"
             "必须遵守 global_state 中的人物表、地点表和时间线，不要改写跨章节事实；"
-            "必须保留 heading, summary, goal, conflict, beat, subtext, characters, elements, camera_hints。\n"
+            "必须保留 heading, int_ext, time_of_day, location, characters_present, props, "
+            "summary, goal, conflict, beat, subtext, characters, elements, camera_hints。\n"
             "本次局部操作："
             f"{OPERATION_PROMPTS[operation]}\n"
             f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"

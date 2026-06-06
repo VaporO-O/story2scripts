@@ -37,6 +37,9 @@ def valid_screenplay_json() -> str:
                 {
                     "id": "scene-1",
                     "heading": "INT. 走廊 - NIGHT",
+                    "int_ext": "INT.",
+                    "time_of_day": "NIGHT",
+                    "location": "走廊",
                     "source_chapter": "第一章",
                     "summary": "林澈察觉姐姐失踪并非意外。",
                     "goal": "林澈试图确认姐姐失踪的真实原因。",
@@ -44,6 +47,8 @@ def valid_screenplay_json() -> str:
                     "beat": "情节转折",
                     "subtext": "林澈表面冷静，实际已经开始恐惧真相。",
                     "characters": ["character-1"],
+                    "characters_present": ["character-1"],
+                    "props": [],
                     "elements": [
                         {"type": "action", "text": "林澈停下脚步，缓缓回头。"},
                         {
@@ -112,6 +117,10 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert "改编类型：短剧" in captured["payload"]["messages"][0]["content"]
     assert "强反转" in captured["payload"]["messages"][0]["content"]
     assert "全局状态表" in captured["payload"]["messages"][0]["content"]
+    assert "int_ext, time_of_day, location, characters_present, props" in captured["payload"][
+        "messages"
+    ][0]["content"]
     assert screenplay.adaptation_type == "短剧"
     assert screenplay.global_state.timeline[0].chapter == "第一章"
+    assert screenplay.scenes[0].int_ext == "INT."
     assert screenplay.scenes[0].camera_hints == ["近景：林澈绷紧的表情。"]

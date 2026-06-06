@@ -14,9 +14,11 @@ from .screenplay import Character
 from .screenplay import Dialogue
 from .screenplay import GlobalCharacterState
 from .screenplay import GlobalStoryState
+from .screenplay import IntExt
 from .screenplay import Scene
 from .screenplay import Screenplay
 from .screenplay import SourceInfo
+from .screenplay import TimeOfDay
 from .story_state import extract_global_story_state
 
 
@@ -141,6 +143,22 @@ SCENE_BREAK_PATTERNS = [
         ),
     ),
 ]
+NIGHT_MARKER_PATTERN = re.compile(
+    r"(?:夜里|深夜|凌晨|黄昏|傍晚|午夜|night|midnight|dusk)",
+    re.IGNORECASE,
+)
+EXTERIOR_CUE_PATTERN = re.compile(
+    r"(?:室外|屋外|门外|街|路|桥|港|码头|广场|公园|海边|山|湖|河|森林|巷|站)",
+    re.IGNORECASE,
+)
+PROP_PHRASE_PATTERN = re.compile(
+    r"(?:一|这|那)?(?:封|张|把|个|件|本|只|枚|串|部|台|盏|块|条|支|瓶|盒)"
+    r"(?P<name>[^，。！？\n]{1,12})"
+)
+PROP_BOUNDARY_PATTERN = re.compile(
+    r"(?:出现|落下|掉下|放在|拿起|递给|藏在|打开|关上|写着|留下|发现|看见|"
+    r"说|问|喊|答道|低声道)"
+)
 
 
 def _adaptation_style_profile(adaptation_type: AdaptationType) -> AdaptationStyleProfile:
@@ -290,6 +308,40 @@ def _styled_beat(reasons: list[str], style: AdaptationStyleProfile) -> str:
 
 def _styled_subtext(text: str, style: AdaptationStyleProfile) -> str:
     return f"{style.subtext_cue} {text}"
+
+
+def _scene_time_of_day(text: str) -> TimeOfDay:
+    return "NIGHT" if NIGHT_MARKER_PATTERN.search(text) else "DAY"
+
+
+def _scene_location(text: str, chapter_title: str, global_state: GlobalStoryState) -> str:
+    for location in global_state.locations:
+        if location.name in text:
+            return location.name
+    return chapter_title
+
+
+def _scene_int_ext(text: str, location: str) -> IntExt:
+    return "EXT." if EXTERIOR_CUE_PATTERN.search(f"{location}\n{text}") else "INT."
+
+
+def _clean_prop_name(raw_name: str) -> str:
+    name = raw_name.strip("，。！？、：:；;（）() ")
+    if "的" in name:
+        name = name.rsplit("的", 1)[-1]
+    boundary_match = PROP_BOUNDARY_PATTERN.search(name)
+    if boundary_match and boundary_match.start() >= 1:
+        name = name[: boundary_match.start()]
+    return name.strip("，。！？、：:；;（）() ")[:12]
+
+
+def _scene_props(text: str) -> list[str]:
+    props: list[str] = []
+    for match in PROP_PHRASE_PATTERN.finditer(text):
+        name = _clean_prop_name(match.group("name"))
+        if name and name not in props:
+            props.append(name)
+    return props
 
 
 def _append_character_id(scene_characters: list[str], character_id: str) -> None:
@@ -445,10 +497,16 @@ class DemoConverter:
                     )
                     camera_hints.extend(hints)
 
+                location = _scene_location(scene_slice.text, chapter.title, global_state)
+                int_ext = _scene_int_ext(scene_slice.text, location)
+                time_of_day = _scene_time_of_day(scene_slice.text)
                 scenes.append(
                     Scene(
                         id=f"scene-{scene_index}",
-                        heading=f"INT. {chapter.title} - DAY",
+                        heading=f"{int_ext} {location} - {time_of_day}",
+                        int_ext=int_ext,
+                        time_of_day=time_of_day,
+                        location=location,
                         source_chapter=chapter.title,
                         summary=_first_sentence(scene_slice.text, 60),
                         goal=_scene_goal(scene_slice.text, dialogue, inner_state),
@@ -463,6 +521,8 @@ class DemoConverter:
                         beat=_styled_beat(scene_slice.break_reasons, style),
                         subtext=_styled_subtext(_scene_subtext(dialogue, inner_state), style),
                         characters=scene_characters,
+                        characters_present=list(scene_characters),
+                        props=_scene_props(scene_slice.text),
                         elements=elements,
                         camera_hints=camera_hints,
                     )
@@ -544,7 +604,9 @@ class AIConverter:
             f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
             "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
             "顶层必须包含 adaptation_type 和 global_state; character 必须包含 arc; "
-            "scene 必须包含 goal, conflict, beat, subtext, elements 和 camera_hints; "
+            "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
+            "goal, conflict, beat, subtext, elements 和 camera_hints; "
+            "heading 必须与 int_ext/location/time_of_day 对齐，使用类似 INT. LIBRARY - DAY 的 slug line; "
             "dialogue 可包含 emotion。\n\n"
             f"小说原文：\n{source_text}"
         )
