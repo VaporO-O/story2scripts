@@ -70,6 +70,34 @@
             </div>
           </div>
 
+          <div class="rewrite-tools">
+            <div class="rewrite-fields">
+              <label>场景 ID<input id="sceneIdInput" value="scene-1" /></label>
+              <label>角色 ID<input id="rewriteCharacterInput" placeholder="可选，例如 character-1" /></label>
+              <label>语气<input id="rewriteToneInput" value="更克制" /></label>
+            </div>
+            <div class="rewrite-actions">
+              <button class="ghost-button" data-rewrite-operation="rewrite_dialogue">
+                重新生成本场对白
+              </button>
+              <button class="ghost-button" data-rewrite-operation="strengthen_conflict">
+                加强戏剧冲突
+              </button>
+              <button class="ghost-button" data-rewrite-operation="short_drama_pace">
+                改成短剧节奏
+              </button>
+              <button class="ghost-button" data-rewrite-operation="add_camera_hints">
+                增加镜头提示
+              </button>
+              <button class="ghost-button" data-rewrite-operation="reduce_narration">
+                减少旁白
+              </button>
+              <button class="ghost-button" data-rewrite-operation="adjust_character_voice">
+                调整人物语气
+              </button>
+            </div>
+          </div>
+
           <div id="emptyState" class="empty-state">
             <div class="script-card">SCENE<br /><strong>01</strong></div>
             <h3>等待故事开场</h3>

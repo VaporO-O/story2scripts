@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import AdaptationType
 from .screenplay import Screenplay
+from .scene_rewrite import SceneRewriteOperation
 
 
 class ChapterPreviewRequest(BaseModel):
@@ -42,6 +43,22 @@ class ValidateYamlRequest(BaseModel):
 
 class ValidateYamlResponse(BaseModel):
     valid: bool
+    message: str
+
+
+class SceneRewriteRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+    scene_id: str = Field(min_length=1)
+    operation: SceneRewriteOperation
+    character_id: str = ""
+    tone: str = "更克制"
+
+
+class SceneRewriteResponse(BaseModel):
+    screenplay: Screenplay
+    yaml_text: str
+    scene_id: str
+    operation: SceneRewriteOperation
     message: str
 
 

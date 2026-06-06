@@ -126,6 +126,46 @@ Schema 的剧本对象。
 
 校验通过时返回 `valid: true`；YAML 格式错误或字段不符合 Schema 时返回 `422`。
 
+### 局部重生成
+
+接口：`POST /api/scenes/rewrite`
+
+该接口用于在已有 YAML 剧本上只重写某一个场景，避免每次修改都重新生成全文。请求需要传入当前
+`yaml_text`、目标 `scene_id` 和局部操作 `operation`，接口会返回更新后的结构化剧本和 YAML。
+
+当前支持的操作：
+
+| 操作 | 说明 |
+| --- | --- |
+| `rewrite_dialogue` | 重新生成本场对白 |
+| `strengthen_conflict` | 加强戏剧冲突 |
+| `short_drama_pace` | 改成短剧节奏 |
+| `add_camera_hints` | 增加镜头提示 |
+| `reduce_narration` | 减少旁白 |
+| `adjust_character_voice` | 调整某个人物的语气 |
+
+请求示例：
+
+```json
+{
+  "yaml_text": "schema_version: '1.0'\n...",
+  "scene_id": "scene-1",
+  "operation": "strengthen_conflict"
+}
+```
+
+调整人物语气时可以额外传入：
+
+```json
+{
+  "yaml_text": "schema_version: '1.0'\n...",
+  "scene_id": "scene-1",
+  "operation": "adjust_character_voice",
+  "character_id": "character-1",
+  "tone": "更锋利"
+}
+```
+
 ### 示例小说
 
 接口：`GET /api/examples/novel`
@@ -151,6 +191,7 @@ python -m compileall -q src tests
 - 支持 YAML 校验
 - 支持下载 `screenplay.yaml`
 - 支持展示人物小传表
+- 支持对指定场景进行局部重生成，包括对白、冲突、短剧节奏、镜头提示、旁白和人物语气
 
 ## 人物小传提取
 

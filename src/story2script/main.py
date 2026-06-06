@@ -12,12 +12,15 @@ from .api_models import CharacterProfileResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
 from .api_models import ExampleNovelResponse
+from .api_models import SceneRewriteRequest
+from .api_models import SceneRewriteResponse
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
 from .character_profiles import extract_character_profiles
 from .converter import get_converter
 from .examples import load_example_novel
 from .parser import parse_chapters
+from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
@@ -123,3 +126,26 @@ async def validate_yaml(request: ValidateYamlRequest) -> ValidateYamlResponse:
         raise HTTPException(status_code=422, detail=f"YAML 校验失败：{exc}") from exc
 
     return ValidateYamlResponse(valid=True, message="YAML 符合 Story2Script 剧本 Schema。")
+
+
+@app.post("/api/scenes/rewrite", response_model=SceneRewriteResponse)
+async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewriteResponse:
+    try:
+        screenplay = screenplay_from_yaml(request.yaml_text)
+        updated_screenplay, message = rewrite_scene(
+            screenplay=screenplay,
+            scene_id=request.scene_id,
+            operation=request.operation,
+            character_id=request.character_id,
+            tone=request.tone,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"局部重写失败：{exc}") from exc
+
+    return SceneRewriteResponse(
+        screenplay=updated_screenplay,
+        yaml_text=screenplay_to_yaml(updated_screenplay),
+        scene_id=request.scene_id,
+        operation=request.operation,
+        message=message,
+    )

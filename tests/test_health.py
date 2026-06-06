@@ -21,6 +21,9 @@ def test_index_page() -> None:
     assert "人物小传" in response.text
     assert "adaptationTypeInput" in response.text
     assert "分镜脚本" in response.text
+    assert "重新生成本场对白" in response.text
+    assert "加强戏剧冲突" in response.text
+    assert "减少旁白" in response.text
 
 
 def test_static_assets_are_served() -> None:
