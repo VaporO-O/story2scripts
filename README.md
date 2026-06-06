@@ -54,6 +54,7 @@ uvicorn story2script.main:app --reload
 - 跨章节一致性状态表
 - 角色表
 - 场景列表
+- 内外景、拍摄时段、地点、出场人物和道具等可制作性字段
 - 动作与对白元素
 - 场景、角色、来源章节之间的引用关系
 
@@ -87,6 +88,8 @@ Schema 的剧本对象。
 
 - 先生成 `global_state`，把人物表、地点表和时间线作为跨章节固定上下文
 - 根据时间变化、地点变化、人物进出、情节转折和冲突变化拆分场景
+- 为每个场景生成 `int_ext`、`time_of_day`、`location`、`characters_present` 和 `props`，
+  对齐工业级剧本格式中的 slug line、出场人物和道具拆解
 - 从章节中的引号内容抽取一条对白
 - 根据“某某说/问/喊”格式识别说话人
 - 按改编类型生成不同的动作、冲突、节拍和生产提示
@@ -113,6 +116,7 @@ Schema 的剧本对象。
 
 - `screenplay`：结构化剧本 JSON
 - `screenplay.global_state`：跨章节人物表、地点表和时间线
+- `screenplay.scenes[].int_ext/time_of_day/location/characters_present/props`：可制作性场景字段
 - `yaml_text`：可编辑、可保存的 YAML 剧本初稿
 - `mode`：当前转换模式
 - `adaptation_type`：当前改编类型

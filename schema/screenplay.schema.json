@@ -252,24 +252,49 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "id",
-          "heading",
-          "source_chapter",
-          "summary",
-          "goal",
-          "conflict",
-          "beat",
-          "subtext",
-          "characters",
-          "elements"
-        ],
+          "required": [
+            "id",
+            "heading",
+            "int_ext",
+            "time_of_day",
+            "location",
+            "source_chapter",
+            "summary",
+            "goal",
+            "conflict",
+            "beat",
+            "subtext",
+            "characters",
+            "characters_present",
+            "props",
+            "elements"
+          ],
         "properties": {
           "id": {
             "type": "string",
             "pattern": "^scene-[0-9]+$"
           },
           "heading": {
+            "type": "string",
+            "minLength": 1
+          },
+          "int_ext": {
+            "type": "string",
+            "enum": [
+              "INT.",
+              "EXT."
+            ],
+            "description": "Industry slug-line interior/exterior marker."
+          },
+          "time_of_day": {
+            "type": "string",
+            "enum": [
+              "DAY",
+              "NIGHT"
+            ],
+            "description": "Industry slug-line time marker."
+          },
+          "location": {
             "type": "string",
             "minLength": 1
           },
@@ -298,6 +323,18 @@
             "minLength": 1
           },
           "characters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "characters_present": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "props": {
             "type": "array",
             "items": {
               "type": "string"

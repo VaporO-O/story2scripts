@@ -47,6 +47,24 @@ def test_demo_converter_uses_chapter_titles_as_source_titles() -> None:
     assert screenplay.scenes[1].source_chapter == "第2章 B"
 
 
+def test_demo_converter_populates_industry_scene_fields() -> None:
+    chapters = parse_chapters(
+        "第一章 开始\n深夜，林夏在码头捡到一封没有署名的信。林夏说：“先带回去。”\n"
+        "第二章 转折\n雨落下来。\n"
+        "第三章 结局\n太阳升起。"
+    )
+
+    screenplay = DemoConverter().convert(chapters)
+    scene = screenplay.scenes[0]
+
+    assert scene.int_ext == "EXT."
+    assert scene.time_of_day == "NIGHT"
+    assert scene.location == "码头"
+    assert scene.heading == "EXT. 码头 - NIGHT"
+    assert scene.characters_present == ["character-1"]
+    assert scene.props == ["信"]
+
+
 def test_demo_converter_splits_chapter_into_dramatic_scenes() -> None:
     chapters = parse_chapters(
         "第一章 开始\n"

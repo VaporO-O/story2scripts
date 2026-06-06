@@ -19,7 +19,7 @@ LOCATION_CUE_PATTERN = re.compile(
     r"(?P<name>[\u4e00-\u9fffA-Za-z0-9·]{2,12})"
 )
 LOCATION_SUFFIX_PATTERN = re.compile(
-    r"^(.{1,10}?(?:楼|室|房|厅|馆|店|院|街|路|桥|港|站|城|村|镇|门口|"
+    r"^(.{0,10}?(?:楼|室|房|厅|馆|店|院|街|路|桥|港|站|城|村|镇|门口|"
     r"走廊|码头|广场|仓库|学校|医院|公寓|办公室|屋|山|湖|海边))"
 )
 LOCATION_ACTION_BOUNDARY_PATTERN = re.compile(

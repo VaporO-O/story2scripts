@@ -173,7 +173,10 @@ characters:
 ```yaml
 scenes:
   - id: scene-1
-    heading: EXT. 雾港码头 - DAWN
+    heading: EXT. 雾港码头 - DAY
+    int_ext: EXT.
+    time_of_day: DAY
+    location: 雾港码头
     source_chapter: 第一章 雾中的信
     summary: 林夏在码头发现匿名信。
     goal: 林夏想确认匿名信来源。
@@ -182,6 +185,10 @@ scenes:
     subtext: 林夏表面冷静，实际已经开始怀疑旧案。
     characters:
       - character-1
+    characters_present:
+      - character-1
+    props:
+      - 匿名信
     elements:
       - type: action
         text: 雾气盖住码头，海水拍打锈蚀的系船柱。
@@ -197,6 +204,9 @@ scenes:
 | --- | --- | --- | --- |
 | `id` | string | `scene-数字` | 场景稳定标识 |
 | `heading` | string | 非空 | 场景标题 |
+| `int_ext` | enum | `INT.` 或 `EXT.` | 内景/外景标记，对应 slug line 的开头 |
+| `time_of_day` | enum | `DAY` 或 `NIGHT` | 拍摄时段标记，对应 slug line 的结尾 |
+| `location` | string | 非空 | 可制作的场景地点 |
 | `source_chapter` | string | 必须来自 `source.chapter_titles` | 来源章节 |
 | `summary` | string | 非空 | 场景摘要 |
 | `goal` | string | 非空 | 本场角色可见目标 |
@@ -204,12 +214,16 @@ scenes:
 | `beat` | string | 非空 | 场景节拍或转折点 |
 | `subtext` | string | 非空 | 动作和对白之下未明说的压力、意图或潜台词 |
 | `characters` | array[string] | 角色 ID 列表 | 本场出现的角色 |
+| `characters_present` | array[string] | 角色 ID 列表 | 本场画面或舞台中实际在场的角色 |
+| `props` | array[string] | 可为空 | 本场使用或提及的可制作道具 |
 | `elements` | array | 至少 1 项 | 场景内动作和对白 |
 | `camera_hints` | array[string] | 可为空 | 镜头提示，用于把心理活动外化为可拍摄画面 |
 
 设计原因：
 
 - `heading` 使用类似专业剧本的格式，例如 `INT. 房间 - NIGHT`，便于未来导出专业剧本格式。
+- `int_ext`、`time_of_day`、`location`、`characters_present` 和 `props` 对齐工业级剧本格式，
+  把 slug line、出场人物和道具这些可制作性信息从自由文本中拆出来，方便后续做拍摄拆解、场景表或预算表。
 - `source_chapter` 解决 AI 改编结果难追溯的问题，作者可以快速回到原文核对。
 - `summary` 便于前端做场景列表、搜索和节拍检查。
 - 剧本和小说的本质区别是：小说可以靠叙述推进，剧本必须靠冲突和动作推进。因此每个场景都必须说明
@@ -367,7 +381,10 @@ characters:
     arc: 在场景目标与冲突中逐步显露变化。
 scenes:
   - id: scene-1
-    heading: INT. 第一章 雾中的信 - DAY
+    heading: EXT. 码头 - NIGHT
+    int_ext: EXT.
+    time_of_day: NIGHT
+    location: 码头
     source_chapter: 第一章 雾中的信
     summary: 凌晨五点，林夏在码头捡到一封没有署名的信。
     goal: 林夏试图确认匿名信来源。
@@ -376,6 +393,10 @@ scenes:
     subtext: 林夏表面追查线索，内心已经怀疑旧案仍未结束。
     characters:
       - character-1
+    characters_present:
+      - character-1
+    props:
+      - 信
     elements:
       - type: action
         text: 凌晨五点，林夏在码头捡到一封没有署名的信。
@@ -397,6 +418,12 @@ scenes:
 - `schema_version` 必须为 `1.0`
 - `adaptation_type` 必须是 `短剧`、`影视剧`、`舞台剧`、`广播剧`、`分镜脚本` 之一
 - `title`、`logline`、`heading`、`summary` 等核心文本不能为空
+- `scenes[].int_ext` 必须是 `INT.` 或 `EXT.`
+- `scenes[].time_of_day` 必须是 `DAY` 或 `NIGHT`
+- `scenes[].location` 不能为空
+- `scenes[].heading` 必须与 `int_ext`、`location`、`time_of_day` 保持一致
+- `scenes[].characters_present` 必须是字符串列表
+- `scenes[].props` 必须是字符串列表
 - `global_state` 必须包含 `characters`、`locations`、`timeline`
 - `global_state.characters[].id` 必须符合 `character-数字` 格式
 - `global_state.locations[].id` 必须符合 `location-数字` 格式
@@ -421,6 +448,7 @@ scenes:
 - `global_state` 中的角色、地点和时间线章节引用必须存在于 `source.chapter_titles`
 - `scene.source_chapter` 必须存在于 `source.chapter_titles`
 - 场景角色列表中的 ID 必须存在于 `characters`
+- `characters_present` 中的 ID 必须存在于 `characters`
 - 对白中的 `character` 必须存在于 `characters`
 
 ## 11. 为什么选择 YAML
@@ -438,7 +466,6 @@ Markdown 更适合展示，不适合作为稳定数据交换格式；纯文本�
 
 v1.0 暂时聚焦“剧本初稿”，没有加入过多拍摄层信息。后续可以在不破坏主体结构的前提下扩展：
 
-- `props`：关键道具
 - `relationships`：更细的人物关系图
 - `estimated_duration`：场景预计时长
 - `shots`：镜头拆分

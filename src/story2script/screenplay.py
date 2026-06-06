@@ -103,12 +103,19 @@ class Action(StrictModel):
 SceneElement = Dialogue | Action
 
 
+IntExt = Literal["INT.", "EXT."]
+TimeOfDay = Literal["DAY", "NIGHT"]
+
+
 class Scene(StrictModel):
     id: str = Field(pattern=r"^scene-[0-9]+$")
     heading: str = Field(
         min_length=1,
         description="Standard scene heading, e.g. INT. LIBRARY - NIGHT",
     )
+    int_ext: IntExt = Field(description="Industry slug-line interior/exterior marker")
+    time_of_day: TimeOfDay = Field(description="Industry slug-line time marker")
+    location: str = Field(min_length=1, description="Playable scene location")
     source_chapter: str = Field(min_length=1)
     summary: str = Field(min_length=1)
     goal: str = Field(min_length=1, description="Visible character goal in this scene")
@@ -116,8 +123,22 @@ class Scene(StrictModel):
     beat: str = Field(min_length=1, description="Scene beat or turning point")
     subtext: str = Field(min_length=1, description="Unspoken pressure beneath action/dialogue")
     characters: list[str] = Field(description="Character ids in this scene")
+    characters_present: list[str] = Field(description="Character ids visibly present in this scene")
+    props: list[str] = Field(description="Production-relevant props used or mentioned in this scene")
     elements: list[SceneElement] = Field(min_length=1)
     camera_hints: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def slug_line_matches_production_fields(self) -> Self:
+        expected_prefix = f"{self.int_ext} "
+        expected_suffix = f" - {self.time_of_day}"
+        if not self.heading.startswith(expected_prefix):
+            raise ValueError("heading 必须以 int_ext 开头")
+        if self.location not in self.heading:
+            raise ValueError("heading 必须包含 location")
+        if not self.heading.endswith(expected_suffix):
+            raise ValueError("heading 必须以 time_of_day 结尾")
+        return self
 
 
 class Screenplay(StrictModel):
@@ -181,6 +202,7 @@ class Screenplay(StrictModel):
                 raise ValueError(f"{scene.id} 引用了不存在的来源章节：{scene.source_chapter}")
 
             referenced = set(scene.characters)
+            referenced.update(scene.characters_present)
             referenced.update(
                 element.character for element in scene.elements if isinstance(element, Dialogue)
             )

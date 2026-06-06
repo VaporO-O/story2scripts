@@ -32,6 +32,10 @@ def test_convert_api_returns_demo_screenplay() -> None:
     assert "global_state:" in body["yaml_text"]
     assert body["screenplay"]["source"]["chapter_count"] == 3
     assert len(body["screenplay"]["global_state"]["timeline"]) == 3
+    assert body["screenplay"]["scenes"][0]["int_ext"] in ["INT.", "EXT."]
+    assert body["screenplay"]["scenes"][0]["time_of_day"] in ["DAY", "NIGHT"]
+    assert "characters_present" in body["screenplay"]["scenes"][0]
+    assert "props" in body["screenplay"]["scenes"][0]
     assert len(body["screenplay"]["scenes"]) == 3
 
 
