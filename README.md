@@ -200,7 +200,7 @@ Schema 的剧本对象。
 }
 ```
 
-AI 局部重写复用 `.env.example` 中的 OpenAI-compatible 配置：
+AI 局部重写复用项目根目录 `.env` 中的 OpenAI-compatible 配置：
 
 ```bash
 AI_API_KEY=your-api-key
@@ -294,7 +294,8 @@ AI 转换 prompt 会显式要求模型做这个分类决策，避免把小说里
 
 ### 外部 LLM 配置
 
-项目已预留 OpenAI-compatible Chat Completions 接口。你确定服务商后，参考 `.env.example` 填写：
+项目已预留 OpenAI-compatible Chat Completions 接口。你确定服务商后，在项目根目录创建正式 `.env`
+配置文件：
 
 ```bash
 AI_API_KEY=your-api-key
@@ -319,6 +320,9 @@ Web 工作台默认使用本地模式，因此没有 API Key 也能演示；配�
 AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务端会用这份固定状态表回填并校验最终
 `Screenplay`，确保分块改编不会丢失跨章节一致性。
 
+启动服务时，统一 LLM 客户端会自动读取项目根目录 `.env`。如果同名配置同时存在于系统环境变量和
+`.env` 中，系统环境变量优先。`.env` 已被 git 忽略，避免真实 API Key 被提交到仓库。
+
 AI 全文转换遵循固定校验链路：
 
 ```text
@@ -329,7 +333,7 @@ LLM 只负责生成 JSON；最终结构必须通过 `Screenplay` Schema 校验�
 JSON、缺少 `adaptation_type`、缺少角色 `arc`，或场景缺少 `goal`、`conflict`、`beat`、`subtext`
 等字段，接口会返回清晰的 `422` 错误，不会把坏 YAML 返回给前端。
 
-全文转换和局部重写共用 `src/story2script/llm_client.py` 中的统一 LLM 客户端。该客户端集中读取
+全文转换和局部重写共用 `src/story2script/llm_client.py` 中的统一 LLM 客户端。该客户端自动读取
 `AI_API_KEY`、`AI_BASE_URL`、`AI_MODEL` 和 `AI_TIMEOUT_SECONDS`，调用 `/chat/completions`，
 并统一处理超时、网络错误、HTTP 错误和模型空响应。
 
