@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import AdaptationType
 from .screenplay import Screenplay
+from .scene_rewrite import SceneRewriteMode
 from .scene_rewrite import SceneRewriteOperation
 
 
@@ -50,6 +51,7 @@ class SceneRewriteRequest(BaseModel):
     yaml_text: str = Field(min_length=1)
     scene_id: str = Field(min_length=1)
     operation: SceneRewriteOperation
+    mode: SceneRewriteMode = "demo"
     character_id: str = ""
     tone: str = "更克制"
 
@@ -59,6 +61,7 @@ class SceneRewriteResponse(BaseModel):
     yaml_text: str
     scene_id: str
     operation: SceneRewriteOperation
+    mode: SceneRewriteMode
     message: str
 
 
