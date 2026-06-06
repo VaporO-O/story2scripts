@@ -318,6 +318,16 @@ AI_TIMEOUT_SECONDS=120
 AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务端会用这份固定状态表回填并校验最终
 `Screenplay`，确保分块改编不会丢失跨章节一致性。
 
+AI 全文转换遵循固定校验链路：
+
+```text
+llm_json -> json.loads -> Screenplay.model_validate -> screenplay_to_yaml
+```
+
+LLM 只负责生成 JSON；最终结构必须通过 `Screenplay` Schema 校验后才会导出 YAML。若模型返回非法
+JSON、缺少 `adaptation_type`、缺少角色 `arc`，或场景缺少 `goal`、`conflict`、`beat`、`subtext`
+等字段，接口会返回清晰的 `422` 错误，不会把坏 YAML 返回给前端。
+
 全文转换和局部重写共用 `src/story2script/llm_client.py` 中的统一 LLM 客户端。该客户端集中读取
 `AI_API_KEY`、`AI_BASE_URL`、`AI_MODEL` 和 `AI_TIMEOUT_SECONDS`，调用 `/chat/completions`，
 并统一处理超时、网络错误、HTTP 错误和模型空响应。
