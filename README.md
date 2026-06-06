@@ -235,6 +235,7 @@ python -m compileall -q src tests
 
 - 左侧输入或填入示例小说
 - 支持选择改编类型
+- 支持在生成按钮旁切换本地 / AI 全文转换模式
 - 右侧展示生成后的 YAML 剧本
 - 支持 YAML 校验
 - 支持下载 `screenplay.yaml`
@@ -296,7 +297,6 @@ AI 转换 prompt 会显式要求模型做这个分类决策，避免把小说里
 项目已预留 OpenAI-compatible Chat Completions 接口。你确定服务商后，参考 `.env.example` 填写：
 
 ```bash
-CONVERTER_MODE=ai
 AI_API_KEY=your-api-key
 AI_BASE_URL=https://your-provider.example/v1
 AI_MODEL=your-model-name
@@ -314,7 +314,8 @@ AI_TIMEOUT_SECONDS=120
 }
 ```
 
-如果暂时没有配置 API Key，继续使用默认 `demo` 模式即可。
+Web 工作台默认使用本地模式，因此没有 API Key 也能演示；配置上述环境变量后，在生成按钮旁选择 `AI`
+即可展示 LLM 改编质量。API 调用中如果暂时没有配置 API Key，继续使用默认 `demo` 模式即可。
 AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务端会用这份固定状态表回填并校验最终
 `Screenplay`，确保分块改编不会丢失跨章节一致性。
 
