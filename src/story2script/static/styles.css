@@ -125,7 +125,7 @@ h2 {
 
 .metadata {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
@@ -137,7 +137,8 @@ label {
   letter-spacing: 1px;
 }
 
-input {
+input,
+select {
   display: block;
   width: 100%;
   margin-top: 7px;
@@ -145,6 +146,10 @@ input {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
+}
+
+select {
+  min-height: 38px;
 }
 
 textarea {
@@ -339,6 +344,10 @@ textarea {
   .section-heading {
     align-items: start;
     flex-direction: column;
+  }
+
+  .metadata {
+    grid-template-columns: 1fr;
   }
 }
 

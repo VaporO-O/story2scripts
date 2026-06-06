@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from .screenplay import DEFAULT_ADAPTATION_TYPE
+from .screenplay import AdaptationType
 from .screenplay import Screenplay
 
 
@@ -23,6 +25,7 @@ class ConvertRequest(BaseModel):
     novel_text: str = Field(min_length=1)
     title: str = ""
     genre: str = ""
+    adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE
     mode: str = "demo"
 
 
@@ -30,6 +33,7 @@ class ConvertResponse(BaseModel):
     screenplay: Screenplay
     yaml_text: str
     mode: str
+    adaptation_type: AdaptationType
 
 
 class ValidateYamlRequest(BaseModel):

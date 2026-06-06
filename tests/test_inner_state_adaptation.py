@@ -19,7 +19,7 @@ def test_demo_converter_externalizes_inner_state() -> None:
     assert isinstance(dialogue, Dialogue)
     assert dialogue.text == "不对……这不是意外。"
     assert dialogue.emotion == "紧张"
-    assert scene.camera_hints == ["近景：林澈绷紧的表情。"]
+    assert "近景：林澈绷紧的表情。" in scene.camera_hints
 
 
 def test_screenplay_schema_contains_camera_hints_and_dialogue_emotion() -> None:

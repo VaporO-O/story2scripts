@@ -9,6 +9,7 @@
     "schema_version",
     "title",
     "genre",
+    "adaptation_type",
     "logline",
     "source",
     "characters",
@@ -24,6 +25,17 @@
     },
     "genre": {
       "type": "string"
+    },
+    "adaptation_type": {
+      "type": "string",
+      "enum": [
+        "短剧",
+        "影视剧",
+        "舞台剧",
+        "广播剧",
+        "分镜脚本"
+      ],
+      "description": "Target adaptation style for the screenplay draft."
     },
     "logline": {
       "type": "string",

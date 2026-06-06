@@ -13,6 +13,7 @@ def valid_screenplay_json() -> str:
             "schema_version": "1.0",
             "title": "智能改编",
             "genre": "悬疑",
+            "adaptation_type": "短剧",
             "logline": "林澈意识到姐姐失踪并非意外。",
             "source": {
                 "chapter_count": 3,
@@ -91,11 +92,19 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     converter = AIConverter(client=client)
     chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
 
-    screenplay = converter.convert(chapters, title="智能改编", genre="悬疑")
+    screenplay = converter.convert(
+        chapters,
+        title="智能改编",
+        genre="悬疑",
+        adaptation_type="短剧",
+    )
 
     assert captured["url"] == "https://example.test/v1/chat/completions"
     assert captured["authorization"] == "Bearer test-key"
     assert captured["payload"]["model"] == "test-model"
     assert "心理描写" in captured["payload"]["messages"][0]["content"]
     assert "goal, conflict, beat, subtext" in captured["payload"]["messages"][0]["content"]
+    assert "改编类型：短剧" in captured["payload"]["messages"][0]["content"]
+    assert "强反转" in captured["payload"]["messages"][0]["content"]
+    assert screenplay.adaptation_type == "短剧"
     assert screenplay.scenes[0].camera_hints == ["近景：林澈绷紧的表情。"]

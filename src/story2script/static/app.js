@@ -1,5 +1,6 @@
 const titleInput = document.querySelector("#titleInput");
 const genreInput = document.querySelector("#genreInput");
+const adaptationTypeInput = document.querySelector("#adaptationTypeInput");
 const novelInput = document.querySelector("#novelInput");
 const yamlOutput = document.querySelector("#yamlOutput");
 const emptyState = document.querySelector("#emptyState");
@@ -66,6 +67,7 @@ async function loadExample() {
 
   titleInput.value = data.title;
   genreInput.value = data.genre;
+  adaptationTypeInput.value = "影视剧";
   novelInput.value = data.novel_text;
   updateChapterCount();
   setMessage("示例小说已填入。");
@@ -82,6 +84,7 @@ async function convertNovel() {
       body: JSON.stringify({
         title: titleInput.value,
         genre: genreInput.value,
+        adaptation_type: adaptationTypeInput.value,
         novel_text: novelInput.value,
       }),
     });
@@ -94,7 +97,9 @@ async function convertNovel() {
     yamlOutput.value = data.yaml_text;
     emptyState.classList.add("hidden");
     yamlOutput.classList.remove("hidden");
-    setMessage(`已生成 ${data.screenplay.scenes.length} 个场景，当前模式：${data.mode}。`);
+    setMessage(
+      `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。`,
+    );
   } catch (error) {
     setMessage(error.message, true);
   } finally {

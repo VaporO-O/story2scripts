@@ -5,6 +5,17 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+AdaptationType = Literal["短剧", "影视剧", "舞台剧", "广播剧", "分镜脚本"]
+SUPPORTED_ADAPTATION_TYPES: tuple[AdaptationType, ...] = (
+    "短剧",
+    "影视剧",
+    "舞台剧",
+    "广播剧",
+    "分镜脚本",
+)
+DEFAULT_ADAPTATION_TYPE: AdaptationType = "影视剧"
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -65,6 +76,7 @@ class Screenplay(StrictModel):
     schema_version: Literal["1.0"]
     title: str = Field(min_length=1)
     genre: str
+    adaptation_type: AdaptationType
     logline: str = Field(min_length=1)
     source: SourceInfo
     characters: list[Character]
