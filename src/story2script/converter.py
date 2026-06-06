@@ -3,6 +3,8 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
+from pydantic import ValidationError
+
 from .llm_client import LLMClient
 from .parser import Chapter
 from .screenplay import DEFAULT_ADAPTATION_TYPE
@@ -490,6 +492,31 @@ def _state_character_data(state: GlobalCharacterState) -> dict[str, str]:
     }
 
 
+def _format_validation_error(exc: ValidationError) -> str:
+    first_error = exc.errors()[0] if exc.errors() else {"loc": (), "msg": str(exc)}
+    location = ".".join(str(item) for item in first_error.get("loc", ())) or "root"
+    return f"{location}: {first_error.get('msg', str(exc))}"
+
+
+def _load_ai_screenplay_data(content: str) -> dict:
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError("AI 全文转换失败：模型返回内容不是有效 JSON。") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError("AI 全文转换失败：模型返回的 JSON 必须是 Screenplay 对象。")
+    return data
+
+
+def _validate_ai_screenplay_data(data: dict) -> Screenplay:
+    try:
+        return Screenplay.model_validate(data)
+    except ValidationError as exc:
+        detail = _format_validation_error(exc)
+        raise ValueError(f"AI 全文转换失败：模型返回结果不符合 Screenplay Schema（{detail}）。") from exc
+
+
 class DemoConverter:
     """Deterministic converter used for offline demos and repeatable tests."""
 
@@ -663,10 +690,12 @@ class AIConverter:
         global_state = extract_global_story_state(chapters)
         source_text = "\n\n".join(f"{chapter.title}\n{chapter.content}" for chapter in chapters)
         prompt = (
-            "你是专业影视编剧。请将小说改编成结构化剧本 JSON。"
+            "你是专业影视编剧。请将小说改编成完整的 Story2Script Screenplay JSON 对象。"
             "重点：小说心理描写不能原样照搬，要外化为动作、对白 emotion 和 camera_hints。"
             "剧本要按时间变化、地点变化、人物进出、情节转折和冲突变化拆成多个场景。"
-            "只返回符合 Story2Script Screenplay Schema 的 JSON，不要 Markdown。\n\n"
+            "只返回可被 json.loads 解析的 JSON 对象，不要 YAML、Markdown 或解释文字。"
+            "后端会执行 llm_json -> json.loads -> Screenplay.model_validate -> screenplay_to_yaml；"
+            "任何缺字段或类型错误都会被拒绝。\n\n"
             f"标题：{title or '请根据内容拟定'}\n"
             f"类型：{genre or '请根据内容判断'}\n"
             f"改编类型：{adaptation_type}\n"
@@ -674,7 +703,8 @@ class AIConverter:
             "全局状态表是固定上下文，分块转换时必须保持人物姓名、性格、地点和时间线一致："
             f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
             "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
-            "顶层必须包含 adaptation_type 和 global_state; character 必须包含 arc; "
+            f"顶层必须包含 adaptation_type，且 adaptation_type 必须等于 {adaptation_type}; "
+            "顶层必须包含 global_state; 每个 character 必须包含 arc; "
             "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
             "dramatization_decisions, goal, conflict, beat, subtext, elements 和 camera_hints; "
             "heading 必须与 int_ext/location/time_of_day 对齐，使用类似 INT. LIBRARY - DAY 的 slug line; "
@@ -687,7 +717,7 @@ class AIConverter:
             f"小说原文：\n{source_text}"
         )
         content = self.llm_client.complete_json(prompt)
-        screenplay_data = json.loads(content)
+        screenplay_data = _load_ai_screenplay_data(content)
         screenplay_data["global_state"] = global_state.model_dump(mode="json")
         existing_characters = {
             character.get("id"): character for character in screenplay_data.setdefault("characters", [])
@@ -708,9 +738,12 @@ class AIConverter:
             else:
                 screenplay_data["characters"].append(state_data)
 
-        screenplay = Screenplay.model_validate(screenplay_data)
+        screenplay = _validate_ai_screenplay_data(screenplay_data)
         if screenplay.adaptation_type != adaptation_type:
-            raise ValueError("AI output adaptation_type must match requested adaptation_type.")
+            raise ValueError(
+                "AI 全文转换失败：模型返回的 adaptation_type 必须与请求一致"
+                f"（expected={adaptation_type}, actual={screenplay.adaptation_type}）。"
+            )
         return screenplay
 
 

@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+import story2script.main as main_module
 from story2script.main import app
 
 
@@ -66,4 +67,31 @@ def test_convert_api_rejects_unknown_adaptation_type() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_convert_api_does_not_return_yaml_when_ai_validation_fails(monkeypatch) -> None:
+    class FailingConverter:
+        mode = "ai"
+
+        def convert(self, **kwargs):
+            raise ValueError("AI 全文转换失败：模型返回结果不符合 Screenplay Schema。")
+
+    monkeypatch.setattr(main_module, "get_converter", lambda mode: FailingConverter())
+
+    response = client.post(
+        "/api/convert",
+        json={
+            "mode": "ai",
+            "novel_text": (
+                "第一章 开始\n内容一\n"
+                "第二章 转折\n内容二\n"
+                "第三章 结局\n内容三"
+            ),
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert "AI 全文转换失败" in body["detail"]
+    assert "yaml_text" not in body
 

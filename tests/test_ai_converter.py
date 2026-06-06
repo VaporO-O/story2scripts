@@ -126,6 +126,12 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert captured["url"] == "https://example.test/v1/chat/completions"
     assert captured["authorization"] == "Bearer test-key"
     assert captured["payload"]["model"] == "test-model"
+    assert "完整的 Story2Script Screenplay JSON 对象" in captured["payload"]["messages"][0][
+        "content"
+    ]
+    assert "json.loads -> Screenplay.model_validate -> screenplay_to_yaml" in captured[
+        "payload"
+    ]["messages"][0]["content"]
     assert "心理描写" in captured["payload"]["messages"][0]["content"]
     assert "goal, conflict, beat, subtext" in captured["payload"]["messages"][0]["content"]
     assert "改编类型：短剧" in captured["payload"]["messages"][0]["content"]
@@ -143,3 +149,110 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert screenplay.scenes[0].int_ext == "INT."
     assert screenplay.scenes[0].dramatization_decisions[0].target == "subtext"
     assert screenplay.scenes[0].camera_hints == ["近景：林澈绷紧的表情。"]
+
+
+def test_ai_converter_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "not json"}}]},
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    with pytest.raises(ValueError, match="不是有效 JSON"):
+        converter.convert(chapters, adaptation_type="短剧")
+
+
+def test_ai_converter_rejects_schema_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_data = json.loads(valid_screenplay_json())
+    del invalid_data["scenes"][0]["conflict"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(invalid_data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    with pytest.raises(ValueError, match="不符合 Screenplay Schema"):
+        converter.convert(chapters, adaptation_type="短剧")
+
+
+def test_ai_converter_rejects_missing_adaptation_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_data = json.loads(valid_screenplay_json())
+    del invalid_data["adaptation_type"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(invalid_data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    with pytest.raises(ValueError, match="adaptation_type"):
+        converter.convert(chapters, adaptation_type="短剧")
+
+
+def test_ai_converter_rejects_adaptation_type_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mismatch_data = json.loads(valid_screenplay_json())
+    mismatch_data["adaptation_type"] = "影视剧"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(mismatch_data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    with pytest.raises(ValueError, match="adaptation_type"):
+        converter.convert(chapters, adaptation_type="短剧")
