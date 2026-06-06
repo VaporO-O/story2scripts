@@ -130,12 +130,21 @@ EXTERIOR_CUE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 PROP_PHRASE_PATTERN = re.compile(
-    r"(?:一|这|那)?(?:封|张|把|个|件|本|只|枚|串|部|台|盏|块|条|支|瓶|盒)"
-    r"(?P<name>[^，。！？\n]{1,12})"
+    r"(?:[一二两三四五六七八九十几数]|这|那|某)"
+    r"(?:封|张|把|个|件|本|只|枚|串|部|台|盏|块|条|支|瓶|盒)"
+    r"(?P<name>[一-鿿]{1,6})"
 )
 PROP_BOUNDARY_PATTERN = re.compile(
     r"(?:出现|落下|掉下|放在|拿起|递给|藏在|打开|关上|写着|留下|发现|看见|"
     r"说|问|喊|答道|低声道)"
+)
+PROP_NON_NOUN_PATTERN = re.compile(
+    r"(?:仍|可见|清晰|样子|时候|事情|地方|声音|心里|内心|以为|觉得|意识)"
+)
+PROP_STOPWORDS = frozenset({"字", "事", "人", "话", "样", "声", "次", "下", "点"})
+CHAPTER_PREFIX_PATTERN = re.compile(
+    r"^\s*(?:第[零一二两三四五六七八九十百千万\d]+章|chapter\s+\d+)\s*",
+    re.IGNORECASE,
 )
 PSYCHOLOGICAL_NARRATION_PATTERN = re.compile(
     r"(?:觉得|意识到|隐约意识到|心里|内心|害怕|担心|怀疑|明白|想起|希望|以为|"
@@ -296,11 +305,16 @@ def _scene_time_of_day(text: str) -> TimeOfDay:
     return "NIGHT" if NIGHT_MARKER_PATTERN.search(text) else "DAY"
 
 
+def _strip_chapter_prefix(title: str) -> str:
+    stripped = CHAPTER_PREFIX_PATTERN.sub("", title).strip()
+    return stripped or title
+
+
 def _scene_location(text: str, chapter_title: str, global_state: GlobalStoryState) -> str:
     for location in global_state.locations:
         if location.name in text:
             return location.name
-    return chapter_title
+    return _strip_chapter_prefix(chapter_title)
 
 
 def _scene_int_ext(text: str, location: str) -> IntExt:
@@ -314,7 +328,11 @@ def _clean_prop_name(raw_name: str) -> str:
     boundary_match = PROP_BOUNDARY_PATTERN.search(name)
     if boundary_match and boundary_match.start() >= 1:
         name = name[: boundary_match.start()]
-    return name.strip("，。！？、：:；;（）() ")[:12]
+    name = name.strip("，。！？、：:；;（）() ")[:6]
+    # 剔除把动词、形容词或抽象词误当成道具的结果，只保留具体名词。
+    if name in PROP_STOPWORDS or PROP_NON_NOUN_PATTERN.search(name):
+        return ""
+    return name
 
 
 def _scene_props(text: str) -> list[str]:

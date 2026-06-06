@@ -26,6 +26,10 @@ LOCATION_ACTION_BOUNDARY_PATTERN = re.compile(
     r"(?:等待|停下|发现|看见|遇见|寻找|找到|调查|争执|质问|追问|站着|坐着|"
     r"走来|出现|说|问|喊|答道|低声道)"
 )
+NON_LOCATION_PATTERN = re.compile(
+    r"(?:年前|年后|之前|之后|时刻|时候|当年|那天|今天|昨天|明天|"
+    r"失踪|死亡|意外|事故|真相|秘密|回忆|记忆|事情|样子|声音|心里|内心)"
+)
 
 
 def _sentences(text: str) -> list[str]:
@@ -55,7 +59,11 @@ def _clean_location_name(raw_name: str) -> str:
     boundary_match = LOCATION_ACTION_BOUNDARY_PATTERN.search(name)
     if boundary_match and boundary_match.start() >= 2:
         name = name[: boundary_match.start()]
-    return name[:12]
+    name = name[:12]
+    # 时间、事件或抽象描述被地点提示词误捕获时（如“在十年前父亲失踪的时刻”），予以剔除。
+    if NON_LOCATION_PATTERN.search(name):
+        return ""
+    return name
 
 
 def _extract_global_characters(chapters: list[Chapter]) -> list[GlobalCharacterState]:

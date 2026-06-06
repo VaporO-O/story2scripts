@@ -95,6 +95,48 @@ def test_demo_converter_populates_industry_scene_fields() -> None:
     }
 
 
+def test_demo_converter_drops_garbage_props() -> None:
+    chapters = parse_chapters(
+        "第一章 开始\n"
+        "凌晨五点，林夏在码头捡到一封没有署名的信。"
+        "信纸被海水浸湿，只有“旧钟楼”三个字仍清晰可见。\n"
+        "第二章 转折\n雨落下来。\n"
+        "第三章 结局\n太阳升起。"
+    )
+
+    screenplay = DemoConverter().convert(chapters)
+    first_chapter_props = [
+        prop
+        for scene in screenplay.scenes
+        if scene.source_chapter == "第一章 开始"
+        for prop in scene.props
+    ]
+
+    # 真实道具仍被保留
+    assert "信" in first_chapter_props
+    # “只有……三个字仍清晰可见”不再被误抽成道具
+    assert all("仍清晰" not in prop and "三个字" not in prop for prop in first_chapter_props)
+    assert all("”" not in prop and "“" not in prop for prop in first_chapter_props)
+
+
+def test_demo_converter_strips_chapter_prefix_from_fallback_location() -> None:
+    chapters = parse_chapters(
+        "第一章 开始\n林夏说：“出发吧。”\n"
+        "第二章 旧钟楼\n雨水敲打着旧钟楼的玻璃。\n"
+        "第三章 结局\n太阳升起。"
+    )
+
+    screenplay = DemoConverter().convert(chapters)
+    chapter_two_scene = next(
+        scene for scene in screenplay.scenes if scene.source_chapter == "第二章 旧钟楼"
+    )
+
+    # 退回章节标题作地点时，不应带上“第二章”这种章节号前缀
+    assert not chapter_two_scene.location.startswith("第二章")
+    assert chapter_two_scene.location == "旧钟楼"
+    assert chapter_two_scene.location in chapter_two_scene.heading
+
+
 def test_demo_converter_splits_chapter_into_dramatic_scenes() -> None:
     chapters = parse_chapters(
         "第一章 开始\n"
