@@ -31,6 +31,54 @@ class SourceInfo(StrictModel):
         return self
 
 
+class GlobalCharacterState(StrictModel):
+    id: str = Field(pattern=r"^character-[0-9]+$")
+    name: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    first_appearance: str = Field(min_length=1)
+    appearance_chapters: list[str] = Field(min_length=1)
+    traits: list[str] = Field(default_factory=list)
+    goal: str
+    arc: str = Field(min_length=1)
+    consistency_note: str = Field(min_length=1)
+
+
+class GlobalLocationState(StrictModel):
+    id: str = Field(pattern=r"^location-[0-9]+$")
+    name: str = Field(min_length=1)
+    first_appearance: str = Field(min_length=1)
+    appearance_chapters: list[str] = Field(min_length=1)
+    description: str = Field(min_length=1)
+
+
+class TimelineEvent(StrictModel):
+    id: str = Field(pattern=r"^event-[0-9]+$")
+    order: int = Field(ge=1)
+    chapter: str = Field(min_length=1)
+    time_marker: str = ""
+    summary: str = Field(min_length=1)
+
+
+class GlobalStoryState(StrictModel):
+    characters: list[GlobalCharacterState] = Field(default_factory=list)
+    locations: list[GlobalLocationState] = Field(default_factory=list)
+    timeline: list[TimelineEvent] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ids_are_unique(self) -> Self:
+        character_ids = [character.id for character in self.characters]
+        location_ids = [location.id for location in self.locations]
+        event_ids = [event.id for event in self.timeline]
+
+        if len(character_ids) != len(set(character_ids)):
+            raise ValueError("全局状态表角色 id 不能重复")
+        if len(location_ids) != len(set(location_ids)):
+            raise ValueError("全局状态表地点 id 不能重复")
+        if len(event_ids) != len(set(event_ids)):
+            raise ValueError("全局状态表时间线事件 id 不能重复")
+        return self
+
+
 class Character(StrictModel):
     id: str = Field(pattern=r"^[a-z0-9_-]+$")
     name: str = Field(min_length=1)
@@ -79,6 +127,7 @@ class Screenplay(StrictModel):
     adaptation_type: AdaptationType
     logline: str = Field(min_length=1)
     source: SourceInfo
+    global_state: GlobalStoryState
     characters: list[Character]
     scenes: list[Scene] = Field(min_length=1)
 
@@ -94,6 +143,39 @@ class Screenplay(StrictModel):
 
         known_characters = set(character_ids)
         known_chapters = set(self.source.chapter_titles)
+
+        global_character_ids = {character.id for character in self.global_state.characters}
+        unknown_global_characters = global_character_ids - known_characters
+        if unknown_global_characters:
+            raise ValueError(
+                "全局状态表引用了不存在的角色："
+                f"{', '.join(sorted(unknown_global_characters))}"
+            )
+
+        for character in self.global_state.characters:
+            referenced_chapters = set(character.appearance_chapters)
+            referenced_chapters.add(character.first_appearance)
+            unknown_chapters = referenced_chapters - known_chapters
+            if unknown_chapters:
+                raise ValueError(
+                    f"{character.id} 的全局角色状态引用了不存在的章节："
+                    f"{', '.join(sorted(unknown_chapters))}"
+                )
+
+        for location in self.global_state.locations:
+            referenced_chapters = set(location.appearance_chapters)
+            referenced_chapters.add(location.first_appearance)
+            unknown_chapters = referenced_chapters - known_chapters
+            if unknown_chapters:
+                raise ValueError(
+                    f"{location.id} 的全局地点状态引用了不存在的章节："
+                    f"{', '.join(sorted(unknown_chapters))}"
+                )
+
+        for event in self.global_state.timeline:
+            if event.chapter not in known_chapters:
+                raise ValueError(f"{event.id} 引用了不存在的时间线章节：{event.chapter}")
+
         for scene in self.scenes:
             if scene.source_chapter not in known_chapters:
                 raise ValueError(f"{scene.id} 引用了不存在的来源章节：{scene.source_chapter}")

@@ -115,6 +115,7 @@ def test_rewrite_scene_can_use_ai_for_single_scene(monkeypatch: pytest.MonkeyPat
     assert captured["authorization"] == "Bearer test-key"
     assert "只返回一个符合 Story2Script Scene Schema 的 JSON 对象" in prompt
     assert "加强本场戏剧冲突" in prompt
+    assert "global_state" in prompt
     assert updated.scenes[0].conflict.startswith("AI冲突")
     assert updated.scenes[1].model_dump(mode="json") == screenplay.scenes[1].model_dump(mode="json")
     assert message == "AI 已加强本场戏剧冲突。"

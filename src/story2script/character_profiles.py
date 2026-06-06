@@ -97,6 +97,16 @@ def _personalities_for(name: str, text: str) -> list[str]:
 
 
 def _key_change_for(name: str, text: str) -> str:
+    for sentence in _sentences(text):
+        if name not in sentence:
+            continue
+        sentence_change = re.search(
+            r"从(?P<start>[^，。！？\n]{1,12})到(?P<end>[^，。！？\n]{1,12})",
+            sentence,
+        )
+        if sentence_change:
+            return f"从{sentence_change.group('start')}到{sentence_change.group('end')}"
+
     for match in CHANGE_PATTERN.finditer(text):
         if match.group("name") == name:
             return f"从{match.group('start')}到{match.group('end')}"

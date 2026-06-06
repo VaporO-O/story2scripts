@@ -29,7 +29,9 @@ def test_convert_api_returns_demo_screenplay() -> None:
     assert body["screenplay"]["adaptation_type"] == "分镜脚本"
     assert body["yaml_text"].startswith("schema_version: '1.0'")
     assert "adaptation_type: 分镜脚本" in body["yaml_text"]
+    assert "global_state:" in body["yaml_text"]
     assert body["screenplay"]["source"]["chapter_count"] == 3
+    assert len(body["screenplay"]["global_state"]["timeline"]) == 3
     assert len(body["screenplay"]["scenes"]) == 3
 
 

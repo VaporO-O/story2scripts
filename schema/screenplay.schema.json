@@ -12,6 +12,7 @@
     "adaptation_type",
     "logline",
     "source",
+    "global_state",
     "characters",
     "scenes"
   ],
@@ -58,6 +59,154 @@
           "minItems": 3,
           "items": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "global_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Fixed cross-chapter state table used to keep chunked conversion consistent.",
+      "required": [
+        "characters",
+        "locations",
+        "timeline"
+      ],
+      "properties": {
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "aliases",
+              "first_appearance",
+              "appearance_chapters",
+              "traits",
+              "goal",
+              "arc",
+              "consistency_note"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^character-[0-9]+$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "aliases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "first_appearance": {
+                "type": "string",
+                "minLength": 1
+              },
+              "appearance_chapters": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "traits": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "goal": {
+                "type": "string"
+              },
+              "arc": {
+                "type": "string",
+                "minLength": 1
+              },
+              "consistency_note": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "first_appearance",
+              "appearance_chapters",
+              "description"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^location-[0-9]+$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "first_appearance": {
+                "type": "string",
+                "minLength": 1
+              },
+              "appearance_chapters": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "timeline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "order",
+              "chapter",
+              "time_marker",
+              "summary"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^event-[0-9]+$"
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "chapter": {
+                "type": "string",
+                "minLength": 1
+              },
+              "time_marker": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       }

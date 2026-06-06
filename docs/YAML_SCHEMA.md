@@ -36,6 +36,7 @@ src/story2script/screenplay.py
 | `adaptation_type` | enum | 是 | 改编类型，例如短剧、影视剧、舞台剧、广播剧、分镜脚本 |
 | `logline` | string | 是 | 一句话故事梗概 |
 | `source` | object | 是 | 原小说来源章节信息 |
+| `global_state` | object | 是 | 跨章节一致性状态表，包含人物表、地点表和时间线 |
 | `characters` | array | 是 | 全局角色表 |
 | `scenes` | array | 是 | 剧本场景列表 |
 
@@ -44,6 +45,7 @@ src/story2script/screenplay.py
 - `schema_version` 让未来升级 Schema 时可以做版本迁移。
 - `adaptation_type` 记录同一段小说面向哪种媒介和节奏进行改编，方便作者比较不同输出版本。
 - `source` 让剧本内容能追溯到原小说章节。
+- `global_state` 先于分块改编生成，作为固定上下文喂给转换器或 LLM，减少长文本分块后的前后矛盾。
 - `characters` 放在顶层，方便对白和场景通过稳定 ID 引用角色。
 - `scenes` 是剧本主体，按叙事顺序排列。
 
@@ -85,7 +87,57 @@ source:
 - `chapter_titles` 用于让场景的 `source_chapter` 可以指回原章节。
 - 应用层额外校验 `chapter_count` 必须等于 `chapter_titles` 的数量，避免来源信息不一致。
 
-## 4. Character：角色表
+## 4. Global State：跨章节一致性状态表
+
+示例：
+
+```yaml
+global_state:
+  characters:
+    - id: character-1
+      name: 林夏
+      aliases: []
+      first_appearance: 第一章 雾中的信
+      appearance_chapters:
+        - 第一章 雾中的信
+        - 第三章 潮汐之前
+      traits:
+        - 冷静
+      goal: 在潮汐到来前找到答案
+      arc: 从被动接收线索到主动追查真相
+      consistency_note: 后续分块转换必须保持姓名、性格、目标和人物弧光一致。
+  locations:
+    - id: location-1
+      name: 雾港码头
+      first_appearance: 第一章 雾中的信
+      appearance_chapters:
+        - 第一章 雾中的信
+        - 第三章 潮汐之前
+      description: 林夏在码头发现匿名信。
+  timeline:
+    - id: event-1
+      order: 1
+      chapter: 第一章 雾中的信
+      time_marker: 凌晨
+      summary: 林夏发现匿名信。
+```
+
+字段说明：
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `global_state.characters` | array | 可为空 | 跨章节人物状态表，使用与顶层 `characters` 一致的角色 ID |
+| `global_state.locations` | array | 可为空 | 跨章节地点状态表，记录地点首次出现和出现章节 |
+| `global_state.timeline` | array | 可为空 | 章节级时间线，记录事件顺序、章节、时间标记和摘要 |
+
+设计原因：
+
+- 三章以上文本可能超过单次 LLM 上下文，分块改编时容易出现姓名翻译不一致、性格漂移或时间线前后矛盾。
+- 系统会先扫一遍全文，抽取“人物表 + 地点表 + 时间线”，再把这张表作为固定上下文传给转换器。
+- demo 中可以展示：第 1 章和第 3 章出现的同一人物会共享同一个 `character-id`，
+  并在 `appearance_chapters` 中同时记录两个章节，因此后续场景对白、人物弧光和局部重写都能引用同一份状态。
+
+## 5. Character：角色表
 
 示例：
 
@@ -114,7 +166,7 @@ characters:
 - `description`、`motivation` 和 `arc` 是作者打磨剧本时最常用的角色信息，保留在 v1.0 中。
 - 角色表放在顶层，便于后续扩展人物关系图、角色弧光分析和前端角色管理。
 
-## 5. Scene：场景
+## 6. Scene：场景
 
 示例：
 
@@ -178,7 +230,7 @@ scenes:
 这些拆分信号不是为了替代作者判断，而是给 AI 和编辑器一个可解释的初稿结构。后续接入 LLM 后，
 LLM 也应围绕这些通用戏剧信号输出结构化场景，而不是只按自然段机械切分。
 
-## 6. Scene Element：动作与对白
+## 7. Scene Element：动作与对白
 
 ### Action
 
@@ -224,7 +276,7 @@ LLM 也应围绕这些通用戏剧信号输出结构化场景，而不是只按�
 - `parenthetical` 保留剧本中常见的语气提示，但不强制填写。
 - `emotion` 用于保留心理活动被外化后的情绪信息，方便前端高亮或后续 AI 继续润色。
 
-## 7. 心理描写外化
+## 8. 心理描写外化
 
 小说可以直接书写心理活动，但剧本需要通过动作、对白、场景调度和镜头提示表现人物内心。
 因此 v1.0 Schema 增加了两个轻量字段：
@@ -256,7 +308,7 @@ camera_hints:
 - 对白负责把关键判断外化。
 - 镜头提示负责提醒作者可用画面表达内心变化。
 
-## 8. 完整 YAML 示例
+## 9. 完整 YAML 示例
 
 ```yaml
 schema_version: '1.0'
@@ -270,6 +322,43 @@ source:
     - 第一章 雾中的信
     - 第二章 旧钟楼
     - 第三章 潮汐之前
+global_state:
+  characters:
+    - id: character-1
+      name: 林夏
+      aliases: []
+      first_appearance: 第一章 雾中的信
+      appearance_chapters:
+        - 第一章 雾中的信
+        - 第三章 潮汐之前
+      traits: []
+      goal: 待作者进一步补充。
+      arc: 在场景目标与冲突中逐步显露变化。
+      consistency_note: 后续分块转换必须保持姓名、性格、目标和人物弧光一致。
+  locations:
+    - id: location-1
+      name: 码头
+      first_appearance: 第一章 雾中的信
+      appearance_chapters:
+        - 第一章 雾中的信
+        - 第三章 潮汐之前
+      description: 凌晨五点，林夏在码头捡到一封没有署名的信。
+  timeline:
+    - id: event-1
+      order: 1
+      chapter: 第一章 雾中的信
+      time_marker: 凌晨
+      summary: 凌晨五点，林夏在码头捡到一封没有署名的信。
+    - id: event-2
+      order: 2
+      chapter: 第二章 旧钟楼
+      time_marker: ''
+      summary: 林夏走进旧钟楼。
+    - id: event-3
+      order: 3
+      chapter: 第三章 潮汐之前
+      time_marker: ''
+      summary: 林夏回到码头。
 characters:
   - id: character-1
     name: 林夏
@@ -299,7 +388,7 @@ scenes:
       - 近景：林夏握紧信纸的手。
 ```
 
-## 9. 校验规则
+## 10. 校验规则
 
 当前系统同时使用 JSON Schema 文件和 Pydantic 模型进行校验。
 
@@ -308,6 +397,10 @@ scenes:
 - `schema_version` 必须为 `1.0`
 - `adaptation_type` 必须是 `短剧`、`影视剧`、`舞台剧`、`广播剧`、`分镜脚本` 之一
 - `title`、`logline`、`heading`、`summary` 等核心文本不能为空
+- `global_state` 必须包含 `characters`、`locations`、`timeline`
+- `global_state.characters[].id` 必须符合 `character-数字` 格式
+- `global_state.locations[].id` 必须符合 `location-数字` 格式
+- `global_state.timeline[].id` 必须符合 `event-数字` 格式
 - `characters[].arc` 不能为空
 - `scenes[].goal`、`scenes[].conflict`、`scenes[].beat`、`scenes[].subtext` 不能为空
 - `source.chapter_count >= 3`
@@ -324,11 +417,13 @@ scenes:
 - `source.chapter_count` 必须等于 `source.chapter_titles` 数量
 - 角色 ID 不能重复
 - 场景 ID 不能重复
+- `global_state.characters[].id` 必须存在于顶层 `characters`
+- `global_state` 中的角色、地点和时间线章节引用必须存在于 `source.chapter_titles`
 - `scene.source_chapter` 必须存在于 `source.chapter_titles`
 - 场景角色列表中的 ID 必须存在于 `characters`
 - 对白中的 `character` 必须存在于 `characters`
 
-## 10. 为什么选择 YAML
+## 11. 为什么选择 YAML
 
 选择 YAML 而不是 Markdown 或纯文本，是因为：
 
@@ -339,13 +434,12 @@ scenes:
 
 Markdown 更适合展示，不适合作为稳定数据交换格式；纯文本剧本则难以可靠区分场景、动作、对白和角色。
 
-## 11. 扩展方向
+## 12. 扩展方向
 
 v1.0 暂时聚焦“剧本初稿”，没有加入过多拍摄层信息。后续可以在不破坏主体结构的前提下扩展：
 
-- `locations`：地点表
 - `props`：关键道具
-- `relationships`：人物关系
+- `relationships`：更细的人物关系图
 - `estimated_duration`：场景预计时长
 - `shots`：镜头拆分
 - `revision_notes`：作者修改意见

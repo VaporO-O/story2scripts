@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import AdaptationType
+from .screenplay import GlobalStoryState
 from .screenplay import Screenplay
 from .scene_rewrite import SceneRewriteMode
 from .scene_rewrite import SceneRewriteOperation
@@ -21,6 +22,14 @@ class ChapterPreviewItem(BaseModel):
 class ChapterPreviewResponse(BaseModel):
     chapter_count: int
     chapters: list[ChapterPreviewItem]
+
+
+class GlobalStateRequest(BaseModel):
+    novel_text: str = Field(min_length=1)
+
+
+class GlobalStateResponse(BaseModel):
+    global_state: GlobalStoryState
 
 
 class ConvertRequest(BaseModel):

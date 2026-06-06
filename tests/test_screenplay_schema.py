@@ -23,6 +23,39 @@ def sample_screenplay() -> dict:
             "chapter_count": 3,
             "chapter_titles": ["第一章", "第二章", "第三章"],
         },
+        "global_state": {
+            "characters": [
+                {
+                    "id": "character-1",
+                    "name": "林夏",
+                    "aliases": [],
+                    "first_appearance": "第一章",
+                    "appearance_chapters": ["第一章", "第二章", "第三章"],
+                    "traits": ["冷静"],
+                    "goal": "寻找真相",
+                    "arc": "从被动接收线索到主动追查。",
+                    "consistency_note": "后续分块转换必须保持姓名、性格、目标和人物弧光一致。",
+                }
+            ],
+            "locations": [
+                {
+                    "id": "location-1",
+                    "name": "雾港码头",
+                    "first_appearance": "第一章",
+                    "appearance_chapters": ["第一章"],
+                    "description": "雾气笼罩码头。",
+                }
+            ],
+            "timeline": [
+                {
+                    "id": "event-1",
+                    "order": 1,
+                    "chapter": "第一章",
+                    "time_marker": "",
+                    "summary": "林夏发现匿名信。",
+                }
+            ],
+        },
         "characters": [
             {
                 "id": "character-1",
@@ -88,6 +121,14 @@ def test_screenplay_model_requires_dramatic_scene_fields() -> None:
         Screenplay.model_validate(data)
 
 
+def test_screenplay_model_rejects_unknown_global_state_character() -> None:
+    data = sample_screenplay()
+    data["global_state"]["characters"][0]["id"] = "character-99"
+
+    with pytest.raises(ValidationError, match="全局状态表引用"):
+        Screenplay.model_validate(data)
+
+
 def test_screenplay_schema_endpoint() -> None:
     response = client.get("/api/screenplay/schema")
 
@@ -101,6 +142,8 @@ def test_screenplay_schema_endpoint() -> None:
         "广播剧",
         "分镜脚本",
     ]
+    assert "global_state" in response.json()["required"]
+    assert "timeline" in response.json()["properties"]["global_state"]["required"]
     scene_schema = response.json()["properties"]["scenes"]["items"]
     assert "conflict" in scene_schema["required"]
 
@@ -111,5 +154,6 @@ def test_schema_file_is_valid_json() -> None:
 
     assert schema["title"] == "Story2Script Screenplay"
     assert "adaptation_type" in schema["required"]
+    assert "global_state" in schema["required"]
     assert schema["properties"]["source"]["properties"]["chapter_count"]["minimum"] == 3
     assert "arc" in schema["properties"]["characters"]["items"]["required"]
