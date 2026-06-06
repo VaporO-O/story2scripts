@@ -326,12 +326,21 @@ AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务�
 AI 全文转换遵循固定校验链路：
 
 ```text
-llm_json -> json.loads -> Screenplay.model_validate -> screenplay_to_yaml
+llm_json -> json.loads -> normalize -> Screenplay.model_validate -> screenplay_to_yaml
 ```
 
-LLM 只负责生成 JSON；最终结构必须通过 `Screenplay` Schema 校验后才会导出 YAML。若模型返回非法
-JSON、缺少 `adaptation_type`、缺少角色 `arc`，或场景缺少 `goal`、`conflict`、`beat`、`subtext`
-等字段，接口会返回清晰的 `422` 错误，不会把坏 YAML 返回给前端。
+LLM 只负责生成 JSON；服务端会先做一层归一化修复，再用 `Screenplay` Schema 做最终校验，校验通过后
+才会导出 YAML。归一化会自动修复 LLM 常见的小偏差，避免动辄整篇失败：
+
+- 回填或修正缺失 / 格式不对的 `scene.id`（统一为 `scene-数字`）
+- 把中文或不规范的 `int_ext`、`time_of_day` 归一为 `INT./EXT.` 与 `DAY/NIGHT`，并据此重建 `heading`
+- 丢弃 `scene`、`element`、`dramatization_decisions` 上 Schema 不允许的多余字段
+- 把用人物名引用的对白映射回稳定的角色 `id`，无法解析的对白降级为动作行
+- 缺失的 `goal`、`conflict`、`beat`、`subtext`、`elements`、`dramatization_decisions` 等会补成
+  可编辑的占位内容，并按请求回填缺失的 `adaptation_type`
+
+只有真正无法恢复的情况才会返回清晰的 `422` 错误，不会把坏 YAML 返回给前端，包括：模型返回非法
+JSON、没有任何有效场景、或显式给出与请求矛盾的 `adaptation_type`。
 
 全文转换和局部重写共用 `src/story2script/llm_client.py` 中的统一 LLM 客户端。该客户端自动读取
 `AI_API_KEY`、`AI_BASE_URL`、`AI_MODEL` 和 `AI_TIMEOUT_SECONDS`，调用 `/chat/completions`，

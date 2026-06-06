@@ -481,16 +481,235 @@ def _source_info_from_chapters(chapters: list[Chapter]) -> SourceInfo:
     )
 
 
-def _prune_screenplay_character_data(character: dict) -> dict:
+def _as_text(value: object, default: str = "") -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+def _as_text_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _normalize_screenplay_character_data(characters: object) -> list[dict]:
+    """Prune unknown keys and backfill required fields on AI character data."""
     allowed_fields = Character.model_fields.keys()
-    return {key: value for key, value in character.items() if key in allowed_fields}
+    normalized: list[dict] = []
+    used_ids: set[str] = set()
+    if not isinstance(characters, list):
+        return normalized
+    for index, character in enumerate(characters, start=1):
+        if not isinstance(character, dict):
+            continue
+        pruned = {key: value for key, value in character.items() if key in allowed_fields}
+        character_id = _as_text(pruned.get("id"))
+        if not re.fullmatch(r"[a-z0-9_-]+", character_id) or character_id in used_ids:
+            suffix = index
+            character_id = f"character-{suffix}"
+            while character_id in used_ids:
+                suffix += 1
+                character_id = f"character-{suffix}"
+        used_ids.add(character_id)
+        pruned["id"] = character_id
+        pruned["name"] = _as_text(pruned.get("name")) or character_id
+        pruned["description"] = _as_text(pruned.get("description"))
+        pruned["motivation"] = _as_text(pruned.get("motivation"))
+        pruned["arc"] = _as_text(pruned.get("arc")) or "待补充：人物弧光。"
+        normalized.append(pruned)
+    return normalized
 
 
-def _normalize_screenplay_character_data(characters: list) -> list:
-    return [
-        _prune_screenplay_character_data(character) if isinstance(character, dict) else character
-        for character in characters
-    ]
+def _resolve_character_ids(
+    value: object, known_ids: set[str], name_to_id: dict[str, str]
+) -> list[str]:
+    resolved: list[str] = []
+    for item in _as_text_list(value):
+        if item in known_ids:
+            candidate = item
+        elif item in name_to_id:
+            candidate = name_to_id[item]
+        else:
+            continue
+        if candidate not in resolved:
+            resolved.append(candidate)
+    return resolved
+
+
+def _normalize_int_ext(value: object, heading: str) -> IntExt:
+    haystack = f"{_as_text(value)} {heading}".upper()
+    if any(cue in haystack for cue in ("EXT", "外景", "室外", "户外", "门外")):
+        return "EXT."
+    return "INT."
+
+
+def _normalize_time_of_day(value: object, heading: str) -> TimeOfDay:
+    haystack = f"{_as_text(value)} {heading}".upper()
+    night_markers = ("NIGHT", "MIDNIGHT", "DUSK", "夜", "晚", "黄昏", "傍晚", "凌晨", "深夜", "午夜")
+    if any(marker in haystack for marker in night_markers):
+        return "NIGHT"
+    return "DAY"
+
+
+def _location_from_heading(heading: str) -> str:
+    match = re.match(
+        r"^\s*(?:INT\.?|EXT\.?)\s*(?P<name>.+?)\s*-\s*(?:DAY|NIGHT)\s*$",
+        heading,
+        re.IGNORECASE,
+    )
+    return match.group("name").strip() if match else ""
+
+
+def _normalize_heading(value: object, int_ext: str, location: str, time_of_day: str) -> str:
+    heading = _as_text(value)
+    if (
+        heading.startswith(f"{int_ext} ")
+        and location in heading
+        and heading.endswith(f" - {time_of_day}")
+    ):
+        return heading
+    return f"{int_ext} {location} - {time_of_day}"
+
+
+def _normalize_scene_element(
+    element: object, known_ids: set[str], name_to_id: dict[str, str]
+) -> dict | None:
+    if not isinstance(element, dict):
+        return None
+    element_type = _as_text(element.get("type")).lower()
+    text = _as_text(element.get("text")) or _as_text(element.get("description"))
+    if element_type == "dialogue":
+        character = _as_text(element.get("character"))
+        if character not in known_ids:
+            character = name_to_id.get(character, "")
+        if character in known_ids and text:
+            return {
+                "type": "dialogue",
+                "character": character,
+                "parenthetical": _as_text(element.get("parenthetical")),
+                "text": text,
+                "emotion": _as_text(element.get("emotion")),
+            }
+    if text:
+        return {"type": "action", "text": text}
+    return None
+
+
+def _normalize_scene_elements(
+    elements: object,
+    known_ids: set[str],
+    name_to_id: dict[str, str],
+    fallback_text: str,
+) -> list[dict]:
+    normalized: list[dict] = []
+    if isinstance(elements, list):
+        for element in elements:
+            resolved = _normalize_scene_element(element, known_ids, name_to_id)
+            if resolved:
+                normalized.append(resolved)
+    if not normalized:
+        normalized.append({"type": "action", "text": fallback_text})
+    return normalized
+
+
+def _normalize_dramatization_decisions(decisions: object, fallback_text: str) -> list[dict]:
+    valid_targets = {"action", "dialogue", "subtext", "scene_description"}
+    normalized: list[dict] = []
+    if isinstance(decisions, list):
+        for decision in decisions:
+            if not isinstance(decision, dict):
+                continue
+            target = _as_text(decision.get("target")).lower()
+            if target not in valid_targets:
+                target = "action"
+            source_text = _as_text(decision.get("source_text")) or fallback_text
+            rendering = _as_text(decision.get("rendering")) or source_text
+            reason = _as_text(decision.get("reason")) or "由 AI 输出补全的戏剧化决策。"
+            normalized.append(
+                {
+                    "source_text": source_text,
+                    "target": target,
+                    "rendering": rendering,
+                    "reason": reason,
+                }
+            )
+    if not normalized:
+        normalized.append(
+            {
+                "source_text": fallback_text,
+                "target": "action",
+                "rendering": fallback_text,
+                "reason": "缺少分类决策时默认转为可见动作。",
+            }
+        )
+    return normalized
+
+
+def _normalize_screenplay_scene_data(
+    scenes: object,
+    known_ids: set[str],
+    name_to_id: dict[str, str],
+    chapter_titles: list[str],
+) -> list[dict]:
+    """Repair common AI scene deviations before strict schema validation."""
+    allowed_fields = Scene.model_fields.keys()
+    default_chapter = chapter_titles[0] if chapter_titles else ""
+    normalized: list[dict] = []
+    if not isinstance(scenes, list):
+        return normalized
+    for index, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict):
+            continue
+        pruned = {key: value for key, value in scene.items() if key in allowed_fields}
+
+        scene_id = _as_text(pruned.get("id"))
+        if not re.fullmatch(r"scene-[0-9]+", scene_id):
+            scene_id = f"scene-{index}"
+        pruned["id"] = scene_id
+
+        heading = _as_text(pruned.get("heading"))
+        location = _as_text(pruned.get("location")) or _location_from_heading(heading) or "未指定地点"
+        int_ext = _normalize_int_ext(pruned.get("int_ext"), heading)
+        time_of_day = _normalize_time_of_day(pruned.get("time_of_day"), heading)
+        pruned["location"] = location
+        pruned["int_ext"] = int_ext
+        pruned["time_of_day"] = time_of_day
+        pruned["heading"] = _normalize_heading(heading, int_ext, location, time_of_day)
+
+        source_chapter = _as_text(pruned.get("source_chapter"))
+        if source_chapter not in chapter_titles:
+            source_chapter = next(
+                (title for title in chapter_titles if source_chapter and source_chapter in title),
+                default_chapter,
+            )
+        pruned["source_chapter"] = source_chapter
+
+        summary = _as_text(pruned.get("summary")) or f"第 {index} 场，待补充摘要。"
+        pruned["summary"] = summary
+        pruned["goal"] = _as_text(pruned.get("goal")) or "待补充：本场角色可见目标。"
+        pruned["conflict"] = _as_text(pruned.get("conflict")) or "待补充：本场戏剧冲突。"
+        pruned["beat"] = _as_text(pruned.get("beat")) or "待补充：本场节拍。"
+        pruned["subtext"] = _as_text(pruned.get("subtext")) or "待补充：本场潜台词。"
+
+        pruned["characters"] = _resolve_character_ids(pruned.get("characters"), known_ids, name_to_id)
+        pruned["characters_present"] = _resolve_character_ids(
+            pruned.get("characters_present"), known_ids, name_to_id
+        )
+        pruned["props"] = _as_text_list(pruned.get("props"))
+        pruned["camera_hints"] = _as_text_list(pruned.get("camera_hints"))
+        pruned["dramatization_decisions"] = _normalize_dramatization_decisions(
+            pruned.get("dramatization_decisions"), summary
+        )
+        pruned["elements"] = _normalize_scene_elements(
+            pruned.get("elements"), known_ids, name_to_id, summary
+        )
+        normalized.append(pruned)
+    return normalized
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -717,8 +936,14 @@ class AIConverter:
         screenplay_data = _load_ai_screenplay_data(content)
         screenplay_data["source"] = _source_info_from_chapters(chapters).model_dump(mode="json")
         screenplay_data["global_state"] = global_state.model_dump(mode="json")
+        raw_characters = screenplay_data.get("characters")
+        if not isinstance(raw_characters, list):
+            raw_characters = []
+        screenplay_data["characters"] = raw_characters
         existing_characters = {
-            character.get("id"): character for character in screenplay_data.setdefault("characters", [])
+            character.get("id"): character
+            for character in raw_characters
+            if isinstance(character, dict)
         }
         for state in global_state.characters:
             state_data = _state_character_data(state)
@@ -738,6 +963,32 @@ class AIConverter:
         screenplay_data["characters"] = _normalize_screenplay_character_data(
             screenplay_data["characters"]
         )
+
+        resolved_title = _as_text(screenplay_data.get("title")) or title.strip() or "未命名改编"
+        screenplay_data["schema_version"] = "1.0"
+        screenplay_data["title"] = resolved_title
+        screenplay_data["genre"] = _as_text(screenplay_data.get("genre")) or genre.strip()
+        screenplay_data["logline"] = (
+            _as_text(screenplay_data.get("logline"))
+            or f"以{adaptation_type}方式围绕《{resolved_title}》核心冲突展开的剧本初稿。"
+        )
+        if not _as_text(screenplay_data.get("adaptation_type")):
+            screenplay_data["adaptation_type"] = adaptation_type
+
+        known_ids = {character["id"] for character in screenplay_data["characters"]}
+        name_to_id = {
+            character["name"]: character["id"]
+            for character in screenplay_data["characters"]
+            if character.get("name")
+        }
+        screenplay_data["scenes"] = _normalize_screenplay_scene_data(
+            screenplay_data.get("scenes"),
+            known_ids,
+            name_to_id,
+            [chapter.title for chapter in chapters],
+        )
+        if not screenplay_data["scenes"]:
+            raise ValueError("AI 全文转换失败：模型没有返回任何有效场景。")
 
         screenplay = _validate_ai_screenplay_data(screenplay_data)
         if screenplay.adaptation_type != adaptation_type:
