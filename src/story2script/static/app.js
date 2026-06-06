@@ -17,7 +17,8 @@ const rewriteToneInput = document.querySelector("#rewriteToneInput");
 const rewriteButtons = document.querySelectorAll("[data-rewrite-operation]");
 const profileGrid = document.querySelector("#profileGrid");
 const profileEmptyState = document.querySelector("#profileEmptyState");
-const supportedNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
+const supportedTextNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
+const unsupportedEbookFileExtensions = [".mobi", ".azw", ".azw3"];
 
 function setMessage(text, isError = false) {
   message.textContent = text;
@@ -43,11 +44,19 @@ function fileTitle(fileName) {
   return dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
 }
 
-function isSupportedNovelFile(file) {
+function isSupportedTextNovelFile(file) {
   if (file.type.startsWith("text/")) {
     return true;
   }
-  return supportedNovelFileExtensions.includes(fileExtension(file.name));
+  return supportedTextNovelFileExtensions.includes(fileExtension(file.name));
+}
+
+function isEpubNovelFile(file) {
+  return fileExtension(file.name) === ".epub";
+}
+
+function isUnsupportedEbookFile(file) {
+  return unsupportedEbookFileExtensions.includes(fileExtension(file.name));
 }
 
 function decodeNovelFileContent(buffer) {
@@ -56,6 +65,34 @@ function decodeNovelFileContent(buffer) {
   } catch {
     return new TextDecoder("gb18030").decode(buffer);
   }
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (reader.result instanceof ArrayBuffer) {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("文件读取失败"));
+    });
+    reader.addEventListener("error", () => {
+      reject(new Error("文件读取失败，请确认文件未被占用或损坏。"));
+    });
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
 }
 
 function createProfileRow(label, value) {
@@ -112,30 +149,58 @@ async function loadExample() {
   setMessage("示例小说已填入。");
 }
 
+function applyImportedNovel(fileName, title, content) {
+  novelInput.value = content;
+  if (!titleInput.value.trim()) {
+    titleInput.value = title || fileTitle(fileName);
+  }
+  updateChapterCount();
+}
+
+async function importTextNovelFile(file) {
+  const buffer = await readFileAsArrayBuffer(file);
+  applyImportedNovel(file.name, fileTitle(file.name), decodeNovelFileContent(buffer));
+  setMessage(`已导入 ${file.name}。`);
+}
+
+async function importEpubNovelFile(file) {
+  setMessage("正在解析 EPUB 文件……");
+  const buffer = await readFileAsArrayBuffer(file);
+  const response = await fetch("/api/novels/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file_name: file.name,
+      content_base64: arrayBufferToBase64(buffer),
+    }),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "EPUB 解析失败"));
+  }
+
+  applyImportedNovel(file.name, data.title, data.novel_text);
+  setMessage(`已导入 ${data.file_name}，解析出 ${data.character_count} 个字符。`);
+}
+
 function importNovelFile(file) {
   if (!file) {
     return;
   }
-  if (!isSupportedNovelFile(file)) {
-    setMessage("暂支持导入 txt、md、csv、log 等纯文本小说文件。", true);
+  if (isUnsupportedEbookFile(file)) {
+    setMessage("暂不支持直接解析 MOBI/AZW/AZW3，请先转换为 EPUB 或 TXT 后导入。", true);
+    return;
+  }
+  if (!isSupportedTextNovelFile(file) && !isEpubNovelFile(file)) {
+    setMessage("暂支持导入 EPUB、TXT、Markdown、CSV 和 LOG 等小说文件。", true);
     return;
   }
 
-  const reader = new FileReader();
-  reader.addEventListener("load", () => {
-    const content =
-      reader.result instanceof ArrayBuffer ? decodeNovelFileContent(reader.result) : "";
-    novelInput.value = content;
-    if (!titleInput.value.trim()) {
-      titleInput.value = fileTitle(file.name);
-    }
-    updateChapterCount();
-    setMessage(`已导入 ${file.name}。`);
+  const importTask = isEpubNovelFile(file) ? importEpubNovelFile(file) : importTextNovelFile(file);
+  importTask.catch((error) => {
+    setMessage(error.message, true);
   });
-  reader.addEventListener("error", () => {
-    setMessage("文件读取失败，请确认文件未被占用或损坏。", true);
-  });
-  reader.readAsArrayBuffer(file);
 }
 
 async function convertNovel() {

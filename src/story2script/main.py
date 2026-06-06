@@ -14,6 +14,8 @@ from .api_models import ConvertResponse
 from .api_models import ExampleNovelResponse
 from .api_models import GlobalStateRequest
 from .api_models import GlobalStateResponse
+from .api_models import NovelImportRequest
+from .api_models import NovelImportResponse
 from .api_models import SceneRewriteRequest
 from .api_models import SceneRewriteResponse
 from .api_models import ValidateYamlRequest
@@ -21,6 +23,7 @@ from .api_models import ValidateYamlResponse
 from .character_profiles import extract_character_profiles
 from .converter import get_converter
 from .examples import load_example_novel
+from .novel_import import import_novel_content
 from .parser import parse_chapters
 from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
@@ -99,6 +102,22 @@ async def preview_global_state(request: GlobalStateRequest) -> GlobalStateRespon
 @app.get("/api/examples/novel", response_model=ExampleNovelResponse)
 async def get_example_novel() -> ExampleNovelResponse:
     return ExampleNovelResponse(**load_example_novel())
+
+
+@app.post("/api/novels/import", response_model=NovelImportResponse)
+async def import_novel(request: NovelImportRequest) -> NovelImportResponse:
+    try:
+        imported = import_novel_content(request.file_name, request.content_base64)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return NovelImportResponse(
+        file_name=imported.file_name,
+        file_type=imported.file_type,
+        title=imported.title,
+        novel_text=imported.novel_text,
+        character_count=imported.character_count,
+    )
 
 
 @app.post("/api/convert", response_model=ConvertResponse)

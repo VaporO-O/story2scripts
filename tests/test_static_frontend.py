@@ -25,7 +25,7 @@ def test_workbench_exposes_novel_file_import() -> None:
     assert 'id="importNovelFileButton"' in html
     assert 'id="novelFileInput"' in html
     assert 'type="file"' in html
-    assert ".txt,.text,.md,.markdown,.csv,.log,text/*" in html
+    assert ".txt,.text,.md,.markdown,.csv,.log,.epub,.mobi,.azw,.azw3,text/*" in html
 
 
 def test_workbench_reads_imported_novel_file() -> None:
@@ -36,5 +36,8 @@ def test_workbench_reads_imported_novel_file() -> None:
     assert 'new TextDecoder("utf-8", { fatal: true })' in script
     assert 'new TextDecoder("gb18030")' in script
     assert "reader.readAsArrayBuffer(file)" in script
+    assert 'fetch("/api/novels/import"' in script
+    assert "content_base64: arrayBufferToBase64(buffer)" in script
+    assert "暂不支持直接解析 MOBI/AZW/AZW3" in script
     assert "novelInput.value = content" in script
     assert "updateChapterCount()" in script
