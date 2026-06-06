@@ -132,6 +132,9 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert "json.loads -> Screenplay.model_validate -> screenplay_to_yaml" in captured[
         "payload"
     ]["messages"][0]["content"]
+    assert 'schema_version 必须固定为字符串 "1.0"' in captured["payload"]["messages"][0][
+        "content"
+    ]
     assert "心理描写" in captured["payload"]["messages"][0]["content"]
     assert "goal, conflict, beat, subtext" in captured["payload"]["messages"][0]["content"]
     assert "改编类型：短剧" in captured["payload"]["messages"][0]["content"]

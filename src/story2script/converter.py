@@ -678,7 +678,8 @@ class AIConverter:
             f"改编要求：{style.prompt_instruction}\n"
             "全局状态表是固定上下文，分块转换时必须保持人物姓名、性格、地点和时间线一致："
             f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
-            "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
+            'Schema 要点：顶层 schema_version 必须固定为字符串 "1.0"，不要写成数字、v1.0 或其它值; '
+            "title, genre, logline, source, characters, scenes 必须存在; "
             f"顶层必须包含 adaptation_type，且 adaptation_type 必须等于 {adaptation_type}; "
             "顶层必须包含 global_state; 每个 character 必须包含 arc; "
             "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
