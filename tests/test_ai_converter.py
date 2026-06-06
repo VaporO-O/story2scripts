@@ -135,6 +135,9 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert 'schema_version 必须固定为字符串 "1.0"' in captured["payload"]["messages"][0][
         "content"
     ]
+    assert "source 会由后端根据章节解析结果回填为对象" in captured["payload"]["messages"][0][
+        "content"
+    ]
     assert "心理描写" in captured["payload"]["messages"][0]["content"]
     assert "goal, conflict, beat, subtext" in captured["payload"]["messages"][0]["content"]
     assert "改编类型：短剧" in captured["payload"]["messages"][0]["content"]
@@ -152,6 +155,38 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert screenplay.scenes[0].int_ext == "INT."
     assert screenplay.scenes[0].dramatization_decisions[0].target == "subtext"
     assert screenplay.scenes[0].camera_hints == ["近景：林澈绷紧的表情。"]
+
+
+def test_ai_converter_backfills_source_from_parsed_chapters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_data = json.loads(valid_screenplay_json())
+    invalid_data["source"] = "模型误把来源章节写成字符串"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(invalid_data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    screenplay = converter.convert(chapters, adaptation_type="短剧")
+
+    assert screenplay.source.chapter_count == 3
+    assert screenplay.source.chapter_titles == ["第一章", "第二章", "第三章"]
 
 
 def test_ai_converter_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:

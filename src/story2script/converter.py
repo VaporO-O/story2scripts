@@ -474,6 +474,13 @@ def _state_character_data(state: GlobalCharacterState) -> dict[str, str]:
     }
 
 
+def _source_info_from_chapters(chapters: list[Chapter]) -> SourceInfo:
+    return SourceInfo(
+        chapter_count=len(chapters),
+        chapter_titles=[chapter.title for chapter in chapters],
+    )
+
+
 def _format_validation_error(exc: ValidationError) -> str:
     first_error = exc.errors()[0] if exc.errors() else {"loc": (), "msg": str(exc)}
     location = ".".join(str(item) for item in first_error.get("loc", ())) or "root"
@@ -633,10 +640,7 @@ class DemoConverter:
             genre=genre.strip(),
             adaptation_type=adaptation_type,
             logline=f"以{adaptation_type}方式围绕《{resolved_title}》核心冲突展开的剧本初稿。",
-            source=SourceInfo(
-                chapter_count=len(chapters),
-                chapter_titles=[chapter.title for chapter in chapters],
-            ),
+            source=_source_info_from_chapters(chapters),
             global_state=global_state,
             characters=characters,
             scenes=scenes,
@@ -679,7 +683,8 @@ class AIConverter:
             "全局状态表是固定上下文，分块转换时必须保持人物姓名、性格、地点和时间线一致："
             f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
             'Schema 要点：顶层 schema_version 必须固定为字符串 "1.0"，不要写成数字、v1.0 或其它值; '
-            "title, genre, logline, source, characters, scenes 必须存在; "
+            "title, genre, logline, characters, scenes 必须存在; "
+            "source 会由后端根据章节解析结果回填为对象，不要输出字符串或数组; "
             f"顶层必须包含 adaptation_type，且 adaptation_type 必须等于 {adaptation_type}; "
             "顶层必须包含 global_state; 每个 character 必须包含 arc; "
             "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
@@ -695,6 +700,7 @@ class AIConverter:
         )
         content = self.llm_client.complete_json(prompt)
         screenplay_data = _load_ai_screenplay_data(content)
+        screenplay_data["source"] = _source_info_from_chapters(chapters).model_dump(mode="json")
         screenplay_data["global_state"] = global_state.model_dump(mode="json")
         existing_characters = {
             character.get("id"): character for character in screenplay_data.setdefault("characters", [])
