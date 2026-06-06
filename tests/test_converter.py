@@ -38,6 +38,31 @@ def test_demo_converter_extracts_dialogue_character() -> None:
     assert dialogue.text == "出发吧。"
 
 
+def test_demo_converter_ignores_quotes_without_speaker() -> None:
+    chapters = parse_chapters(
+        "第一章 开始\n信纸上只有“旧钟楼”三个字仍清晰可见。林夏说：“这不可能是巧合。”\n"
+        "第二章 转折\n雨落下来。\n"
+        "第三章 结局\n太阳升起。"
+    )
+
+    screenplay = DemoConverter().convert(chapters)
+
+    # 无说话人的引文（信纸上的文字）不应制造“叙述者”角色
+    assert all(character.name != "叙述者" for character in screenplay.characters)
+    assert all(
+        character.name != "叙述者" for character in screenplay.global_state.characters
+    )
+
+    # 真正带说话人的台词仍被正确识别，即使它排在无主引文之后
+    first_scene = screenplay.scenes[0]
+    dialogues = [element for element in first_scene.elements if isinstance(element, Dialogue)]
+    assert len(dialogues) == 1
+    assert dialogues[0].character == screenplay.characters[0].id
+    assert dialogues[0].text == "这不可能是巧合。"
+    # 信纸上的“旧钟楼”不应被当作任何人的台词
+    assert all(dialogue.text != "旧钟楼" for dialogue in dialogues)
+
+
 def test_demo_converter_uses_chapter_titles_as_source_titles() -> None:
     chapters = parse_chapters("第1章 A\n内容一\n第2章 B\n内容二\n第3章 C\n内容三")
 
