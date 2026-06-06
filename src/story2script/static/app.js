@@ -7,6 +7,10 @@ const emptyState = document.querySelector("#emptyState");
 const message = document.querySelector("#message");
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
+const sceneIdInput = document.querySelector("#sceneIdInput");
+const rewriteCharacterInput = document.querySelector("#rewriteCharacterInput");
+const rewriteToneInput = document.querySelector("#rewriteToneInput");
+const rewriteButtons = document.querySelectorAll("[data-rewrite-operation]");
 const profileGrid = document.querySelector("#profileGrid");
 const profileEmptyState = document.querySelector("#profileEmptyState");
 
@@ -18,6 +22,10 @@ function setMessage(text, isError = false) {
 function updateChapterCount() {
   const chapters = novelInput.value.match(/^\s*(第.+章.*|chapter\s+\d+.*)$/gim) || [];
   document.querySelector("#chapterCount").textContent = `已识别 ${chapters.length} 个章节`;
+}
+
+function errorMessage(data, fallback) {
+  return typeof data.detail === "string" ? data.detail : fallback;
 }
 
 function createProfileRow(label, value) {
@@ -153,6 +161,48 @@ async function validateYaml() {
   setMessage(data.message);
 }
 
+async function rewriteScene(operation) {
+  if (!yamlOutput.value) {
+    setMessage("请先生成或输入 YAML 剧本。", true);
+    return;
+  }
+
+  rewriteButtons.forEach((button) => {
+    button.disabled = true;
+  });
+  setMessage("正在局部重写场景……");
+
+  try {
+    const response = await fetch("/api/scenes/rewrite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        yaml_text: yamlOutput.value,
+        scene_id: sceneIdInput.value,
+        operation,
+        character_id: rewriteCharacterInput.value,
+        tone: rewriteToneInput.value,
+      }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(errorMessage(data, "局部重写失败"));
+    }
+
+    yamlOutput.value = data.yaml_text;
+    emptyState.classList.add("hidden");
+    yamlOutput.classList.remove("hidden");
+    setMessage(`${data.message} 已更新 ${data.scene_id}。`);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    rewriteButtons.forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
 function downloadYaml() {
   if (!yamlOutput.value) {
     setMessage("请先生成 YAML 剧本。", true);
@@ -174,5 +224,8 @@ document.querySelector("#convertButton").addEventListener("click", convertNovel)
 document.querySelector("#analyzeCharactersButton").addEventListener("click", analyzeCharacters);
 document.querySelector("#validateButton").addEventListener("click", validateYaml);
 document.querySelector("#downloadButton").addEventListener("click", downloadYaml);
+rewriteButtons.forEach((button) => {
+  button.addEventListener("click", () => rewriteScene(button.dataset.rewriteOperation));
+});
 novelInput.addEventListener("input", updateChapterCount);
 

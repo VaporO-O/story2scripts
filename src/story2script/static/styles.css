@@ -194,15 +194,38 @@ textarea {
   position: relative;
 }
 
+.rewrite-tools {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rewrite-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.rewrite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-top: 12px;
+}
+
+.rewrite-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 .script-panel textarea {
-  height: 491px;
+  height: 354px;
   background: #18231d;
   color: #dfe9e1;
   font: 13px/1.65 Consolas, "Courier New", monospace;
 }
 
 .empty-state {
-  height: 491px;
+  height: 354px;
   display: grid;
   place-content: center;
   text-align: center;
@@ -347,6 +370,10 @@ textarea {
   }
 
   .metadata {
+    grid-template-columns: 1fr;
+  }
+
+  .rewrite-fields {
     grid-template-columns: 1fr;
   }
 }
