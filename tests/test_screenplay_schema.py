@@ -116,6 +116,15 @@ def test_screenplay_model_accepts_valid_structure() -> None:
     assert screenplay.source.chapter_count == 3
 
 
+def test_screenplay_model_allows_empty_genre() -> None:
+    data = sample_screenplay()
+    data["genre"] = ""
+
+    screenplay = Screenplay.model_validate(data)
+
+    assert screenplay.genre == ""
+
+
 def test_screenplay_model_rejects_unknown_character_reference() -> None:
     data = sample_screenplay()
     data["scenes"][0]["characters"] = ["missing-character"]

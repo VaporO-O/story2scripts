@@ -32,7 +32,7 @@ src/story2script/screenplay.py
 | --- | --- | --- | --- |
 | `schema_version` | string | 是 | 当前固定为 `1.0`，用于未来兼容升级 |
 | `title` | string | 是 | 剧本标题 |
-| `genre` | string | 是 | 剧本类型，例如悬疑、剧情、科幻 |
+| `genre` | string | 是，可空 | 剧本类型，例如悬疑、剧情、科幻；未填写时可为空字符串 |
 | `adaptation_type` | enum | 是 | 改编类型，例如短剧、影视剧、舞台剧、广播剧、分镜脚本 |
 | `logline` | string | 是 | 一句话故事梗概 |
 | `source` | object | 是 | 原小说来源章节信息 |
