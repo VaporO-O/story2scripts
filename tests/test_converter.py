@@ -118,10 +118,20 @@ def test_demo_converter_applies_adaptation_type_profile() -> None:
     )
 
     screenplay = DemoConverter().convert(chapters, adaptation_type="广播剧")
+    scene = screenplay.scenes[0]
 
     assert screenplay.adaptation_type == "广播剧"
-    assert "声音提示" in screenplay.scenes[0].elements[0].text
-    assert "广播剧冲突" in screenplay.scenes[0].conflict
-    assert screenplay.scenes[0].beat.startswith("声音节拍")
-    assert "声音设计" in screenplay.scenes[0].camera_hints[0]
+    # 改编风格只体现在制作指导（camera_hints），不污染剧本正文
+    assert any("声音设计" in hint for hint in scene.camera_hints)
+    # 正文字段保持干净，不再混入写作指令式前缀
+    assert "声音提示" not in scene.elements[0].text
+    assert "广播剧冲突" not in scene.conflict
+    assert not scene.beat.startswith("声音节拍")
+    assert all("节拍" not in scene.beat for scene in screenplay.scenes)
+    assert all(
+        "调度" not in element.text and "提示" not in element.text
+        for s in screenplay.scenes
+        for element in s.elements
+        if element.type == "action"
+    )
 

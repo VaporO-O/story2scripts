@@ -32,10 +32,6 @@ class SceneSlice:
 
 @dataclass(frozen=True)
 class AdaptationStyleProfile:
-    action_cue: str
-    conflict_cue: str
-    beat_cue: str
-    subtext_cue: str
     production_hints: tuple[str, ...]
     arc_cue: str
     prompt_instruction: str
@@ -56,46 +52,26 @@ class Converter(Protocol):
 
 ADAPTATION_STYLE_PROFILES: dict[AdaptationType, AdaptationStyleProfile] = {
     "短剧": AdaptationStyleProfile(
-        action_cue="短剧节奏：动作直接切入冲突点。",
-        conflict_cue="短剧冲突：提高阻力密度，保留强反转空间。",
-        beat_cue="短剧节拍",
-        subtext_cue="潜台词强调欲望、误会和反转压力。",
         production_hints=("节奏提示：场景尽快抛出钩子和反转点。",),
         arc_cue="在密集冲突和反转中快速暴露人物选择。",
         prompt_instruction="短剧：节奏快，冲突密集，每场保留钩子和强反转。",
     ),
     "影视剧": AdaptationStyleProfile(
-        action_cue="影视剧调度：动作兼顾空间、人物反应和镜头感。",
-        conflict_cue="影视剧冲突：用完整场景推进人物关系和信息变化。",
-        beat_cue="影视剧节拍",
-        subtext_cue="潜台词保留在动作、停顿和人物反应中。",
         production_hints=("镜头提示：建立空间关系后切入人物近景。",),
         arc_cue="在完整场景推进中逐步显露人物变化。",
         prompt_instruction="影视剧：场景完整，镜头感强，动作和人物反应清晰。",
     ),
     "舞台剧": AdaptationStyleProfile(
-        action_cue="舞台提示：用走位、停顿和空间关系表现行动。",
-        conflict_cue="舞台冲突：让人物在同一空间内形成可见对峙。",
-        beat_cue="舞台节拍",
-        subtext_cue="潜台词通过停顿、目光和舞台距离表现。",
         production_hints=("舞台调度：标注人物站位、进退和视线方向。",),
         arc_cue="在舞台走位和对峙关系中显露人物转变。",
         prompt_instruction="舞台剧：增加舞台提示、人物走位、停顿和空间对峙。",
     ),
     "广播剧": AdaptationStyleProfile(
-        action_cue="声音提示：用环境音、动作声和旁白承接画面信息。",
-        conflict_cue="广播剧冲突：通过声音距离、语气和沉默制造阻力。",
-        beat_cue="声音节拍",
-        subtext_cue="潜台词通过语气、呼吸、停顿和音效反差表现。",
         production_hints=("声音设计：环境音先行，关键动作配合音效。",),
         arc_cue="在声音表演、旁白和沉默中显露人物变化。",
         prompt_instruction="广播剧：强调音效、旁白、声音距离和声音表演。",
     ),
     "分镜脚本": AdaptationStyleProfile(
-        action_cue="分镜提示：动作按画面推进，突出景别和构图。",
-        conflict_cue="分镜冲突：用画面调度和景别变化呈现阻力。",
-        beat_cue="分镜节拍",
-        subtext_cue="潜台词通过构图、视线方向和画面留白表现。",
         production_hints=("分镜：全景建立环境。", "分镜：近景捕捉人物反应。"),
         arc_cue="在镜头景别和画面调度变化中显露人物弧光。",
         prompt_instruction="分镜脚本：增加镜头、画面、景别、构图和镜头转换。",
@@ -312,20 +288,8 @@ def _scene_subtext(
     return "动作背后保留未明说的压力与选择。"
 
 
-def _styled_action_text(text: str, style: AdaptationStyleProfile) -> str:
-    return f"{style.action_cue} {text}"
-
-
-def _styled_conflict(text: str, style: AdaptationStyleProfile) -> str:
-    return f"{style.conflict_cue} {text}"
-
-
-def _styled_beat(reasons: list[str], style: AdaptationStyleProfile) -> str:
-    return f"{style.beat_cue}：{'、'.join(reasons)}"
-
-
-def _styled_subtext(text: str, style: AdaptationStyleProfile) -> str:
-    return f"{style.subtext_cue} {text}"
+def _scene_beat(reasons: list[str]) -> str:
+    return "、".join(reasons)
 
 
 def _scene_time_of_day(text: str) -> TimeOfDay:
@@ -577,10 +541,7 @@ class DemoConverter:
                 elements: list[Action | Dialogue] = [
                     Action(
                         type="action",
-                        text=_styled_action_text(
-                            _first_sentence(scene_slice.text),
-                            style,
-                        ),
+                        text=_first_sentence(scene_slice.text),
                     )
                 ]
                 scene_characters: list[str] = []
@@ -613,7 +574,7 @@ class DemoConverter:
                 int_ext = _scene_int_ext(scene_slice.text, location)
                 time_of_day = _scene_time_of_day(scene_slice.text)
                 action_text = elements[0].text
-                scene_subtext = _styled_subtext(_scene_subtext(dialogue, inner_state), style)
+                scene_subtext = _scene_subtext(dialogue, inner_state)
                 scenes.append(
                     Scene(
                         id=f"scene-{scene_index}",
@@ -624,15 +585,12 @@ class DemoConverter:
                         source_chapter=chapter.title,
                         summary=_first_sentence(scene_slice.text, 60),
                         goal=_scene_goal(scene_slice.text, dialogue, inner_state),
-                        conflict=_styled_conflict(
-                            _scene_conflict(
-                                scene_slice.break_reasons,
-                                dialogue,
-                                inner_state,
-                            ),
-                            style,
+                        conflict=_scene_conflict(
+                            scene_slice.break_reasons,
+                            dialogue,
+                            inner_state,
                         ),
-                        beat=_styled_beat(scene_slice.break_reasons, style),
+                        beat=_scene_beat(scene_slice.break_reasons),
                         subtext=scene_subtext,
                         characters=scene_characters,
                         characters_present=list(scene_characters),
