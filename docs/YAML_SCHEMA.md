@@ -33,6 +33,7 @@ src/story2script/screenplay.py
 | `schema_version` | string | 是 | 当前固定为 `1.0`，用于未来兼容升级 |
 | `title` | string | 是 | 剧本标题 |
 | `genre` | string | 是 | 剧本类型，例如悬疑、剧情、科幻 |
+| `adaptation_type` | enum | 是 | 改编类型，例如短剧、影视剧、舞台剧、广播剧、分镜脚本 |
 | `logline` | string | 是 | 一句话故事梗概 |
 | `source` | object | 是 | 原小说来源章节信息 |
 | `characters` | array | 是 | 全局角色表 |
@@ -41,9 +42,22 @@ src/story2script/screenplay.py
 设计原因：
 
 - `schema_version` 让未来升级 Schema 时可以做版本迁移。
+- `adaptation_type` 记录同一段小说面向哪种媒介和节奏进行改编，方便作者比较不同输出版本。
 - `source` 让剧本内容能追溯到原小说章节。
 - `characters` 放在顶层，方便对白和场景通过稳定 ID 引用角色。
 - `scenes` 是剧本主体，按叙事顺序排列。
+
+### 改编类型
+
+同一段小说可以按不同媒介和节奏输出不同剧本初稿：
+
+| 改编类型 | 输出特点 |
+| --- | --- |
+| `短剧` | 节奏快，冲突密集，强反转 |
+| `影视剧` | 场景完整，镜头感强 |
+| `舞台剧` | 舞台提示、人物走位更多 |
+| `广播剧` | 音效、旁白、声音表演更多 |
+| `分镜脚本` | 镜头、画面、景别更多 |
 
 ## 3. Source：来源章节信息
 
@@ -248,6 +262,7 @@ camera_hints:
 schema_version: '1.0'
 title: 雾港来信
 genre: 悬疑 / 剧情
+adaptation_type: 影视剧
 logline: 围绕《雾港来信》核心冲突展开的剧本初稿。
 source:
   chapter_count: 3
@@ -291,6 +306,7 @@ scenes:
 基础结构校验：
 
 - `schema_version` 必须为 `1.0`
+- `adaptation_type` 必须是 `短剧`、`影视剧`、`舞台剧`、`广播剧`、`分镜脚本` 之一
 - `title`、`logline`、`heading`、`summary` 等核心文本不能为空
 - `characters[].arc` 不能为空
 - `scenes[].goal`、`scenes[].conflict`、`scenes[].beat`、`scenes[].subtext` 不能为空

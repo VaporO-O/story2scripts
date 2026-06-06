@@ -14,6 +14,7 @@ def test_demo_converter_returns_valid_screenplay() -> None:
 
     assert isinstance(screenplay, Screenplay)
     assert screenplay.title == "测试故事"
+    assert screenplay.adaptation_type == "影视剧"
     assert screenplay.source.chapter_count == 3
     assert len(screenplay.scenes) == 3
 
@@ -65,4 +66,20 @@ def test_demo_converter_splits_chapter_into_dramatic_scenes() -> None:
     assert all(scene.subtext for scene in first_chapter_scenes)
     assert any("地点变化" in scene.beat for scene in first_chapter_scenes)
     assert any("情节转折" in scene.beat for scene in first_chapter_scenes)
+
+
+def test_demo_converter_applies_adaptation_type_profile() -> None:
+    chapters = parse_chapters(
+        "第一章 开始\n林夏说：“出发吧。”\n"
+        "第二章 转折\n雨落下来。\n"
+        "第三章 结局\n太阳升起。"
+    )
+
+    screenplay = DemoConverter().convert(chapters, adaptation_type="广播剧")
+
+    assert screenplay.adaptation_type == "广播剧"
+    assert "声音提示" in screenplay.scenes[0].elements[0].text
+    assert "广播剧冲突" in screenplay.scenes[0].conflict
+    assert screenplay.scenes[0].beat.startswith("声音节拍")
+    assert "声音设计" in screenplay.scenes[0].camera_hints[0]
 

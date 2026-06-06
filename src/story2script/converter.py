@@ -7,7 +7,14 @@ from typing import Protocol
 import httpx
 
 from .parser import Chapter
-from .screenplay import Action, Character, Dialogue, Scene, Screenplay, SourceInfo
+from .screenplay import DEFAULT_ADAPTATION_TYPE
+from .screenplay import Action
+from .screenplay import AdaptationType
+from .screenplay import Character
+from .screenplay import Dialogue
+from .screenplay import Scene
+from .screenplay import Screenplay
+from .screenplay import SourceInfo
 
 
 @dataclass(frozen=True)
@@ -16,11 +23,77 @@ class SceneSlice:
     break_reasons: list[str]
 
 
+@dataclass(frozen=True)
+class AdaptationStyleProfile:
+    action_cue: str
+    conflict_cue: str
+    beat_cue: str
+    subtext_cue: str
+    production_hints: tuple[str, ...]
+    arc_cue: str
+    prompt_instruction: str
+
+
 class Converter(Protocol):
     mode: str
 
-    def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
+    def convert(
+        self,
+        chapters: list[Chapter],
+        title: str = "",
+        genre: str = "",
+        adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
+    ) -> Screenplay:
         raise NotImplementedError
+
+
+ADAPTATION_STYLE_PROFILES: dict[AdaptationType, AdaptationStyleProfile] = {
+    "短剧": AdaptationStyleProfile(
+        action_cue="短剧节奏：动作直接切入冲突点。",
+        conflict_cue="短剧冲突：提高阻力密度，保留强反转空间。",
+        beat_cue="短剧节拍",
+        subtext_cue="潜台词强调欲望、误会和反转压力。",
+        production_hints=("节奏提示：场景尽快抛出钩子和反转点。",),
+        arc_cue="在密集冲突和反转中快速暴露人物选择。",
+        prompt_instruction="短剧：节奏快，冲突密集，每场保留钩子和强反转。",
+    ),
+    "影视剧": AdaptationStyleProfile(
+        action_cue="影视剧调度：动作兼顾空间、人物反应和镜头感。",
+        conflict_cue="影视剧冲突：用完整场景推进人物关系和信息变化。",
+        beat_cue="影视剧节拍",
+        subtext_cue="潜台词保留在动作、停顿和人物反应中。",
+        production_hints=("镜头提示：建立空间关系后切入人物近景。",),
+        arc_cue="在完整场景推进中逐步显露人物变化。",
+        prompt_instruction="影视剧：场景完整，镜头感强，动作和人物反应清晰。",
+    ),
+    "舞台剧": AdaptationStyleProfile(
+        action_cue="舞台提示：用走位、停顿和空间关系表现行动。",
+        conflict_cue="舞台冲突：让人物在同一空间内形成可见对峙。",
+        beat_cue="舞台节拍",
+        subtext_cue="潜台词通过停顿、目光和舞台距离表现。",
+        production_hints=("舞台调度：标注人物站位、进退和视线方向。",),
+        arc_cue="在舞台走位和对峙关系中显露人物转变。",
+        prompt_instruction="舞台剧：增加舞台提示、人物走位、停顿和空间对峙。",
+    ),
+    "广播剧": AdaptationStyleProfile(
+        action_cue="声音提示：用环境音、动作声和旁白承接画面信息。",
+        conflict_cue="广播剧冲突：通过声音距离、语气和沉默制造阻力。",
+        beat_cue="声音节拍",
+        subtext_cue="潜台词通过语气、呼吸、停顿和音效反差表现。",
+        production_hints=("声音设计：环境音先行，关键动作配合音效。",),
+        arc_cue="在声音表演、旁白和沉默中显露人物变化。",
+        prompt_instruction="广播剧：强调音效、旁白、声音距离和声音表演。",
+    ),
+    "分镜脚本": AdaptationStyleProfile(
+        action_cue="分镜提示：动作按画面推进，突出景别和构图。",
+        conflict_cue="分镜冲突：用画面调度和景别变化呈现阻力。",
+        beat_cue="分镜节拍",
+        subtext_cue="潜台词通过构图、视线方向和画面留白表现。",
+        production_hints=("分镜：全景建立环境。", "分镜：近景捕捉人物反应。"),
+        arc_cue="在镜头景别和画面调度变化中显露人物弧光。",
+        prompt_instruction="分镜脚本：增加镜头、画面、景别、构图和镜头转换。",
+    ),
+}
 
 
 SCENE_BREAK_PATTERNS = [
@@ -65,6 +138,10 @@ SCENE_BREAK_PATTERNS = [
         ),
     ),
 ]
+
+
+def _adaptation_style_profile(adaptation_type: AdaptationType) -> AdaptationStyleProfile:
+    return ADAPTATION_STYLE_PROFILES[adaptation_type]
 
 
 def _first_sentence(text: str, limit: int = 100) -> str:
@@ -196,12 +273,35 @@ def _scene_subtext(
     return "动作背后保留未明说的压力与选择。"
 
 
+def _styled_action_text(text: str, style: AdaptationStyleProfile) -> str:
+    return f"{style.action_cue} {text}"
+
+
+def _styled_conflict(text: str, style: AdaptationStyleProfile) -> str:
+    return f"{style.conflict_cue} {text}"
+
+
+def _styled_beat(reasons: list[str], style: AdaptationStyleProfile) -> str:
+    return f"{style.beat_cue}：{'、'.join(reasons)}"
+
+
+def _styled_subtext(text: str, style: AdaptationStyleProfile) -> str:
+    return f"{style.subtext_cue} {text}"
+
+
 class DemoConverter:
     """Deterministic converter used for offline demos and repeatable tests."""
 
     mode = "demo"
 
-    def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
+    def convert(
+        self,
+        chapters: list[Chapter],
+        title: str = "",
+        genre: str = "",
+        adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
+    ) -> Screenplay:
+        style = _adaptation_style_profile(adaptation_type)
         character_names: list[str] = []
         chapter_slices: list[tuple[Chapter, list[SceneSlice]]] = []
 
@@ -222,7 +322,7 @@ class DemoConverter:
                 name=name,
                 description="从原文对白中自动识别的角色。",
                 motivation="待作者进一步补充。",
-                arc="在场景目标与冲突中逐步显露变化。",
+                arc=style.arc_cue,
             )
             for index, name in enumerate(character_names, start=1)
         ]
@@ -235,10 +335,16 @@ class DemoConverter:
                 dialogue = _dialogue_from_text(scene_slice.text)
                 inner_state = _inner_state_from_text(scene_slice.text)
                 elements: list[Action | Dialogue] = [
-                    Action(type="action", text=_first_sentence(scene_slice.text))
+                    Action(
+                        type="action",
+                        text=_styled_action_text(
+                            _first_sentence(scene_slice.text),
+                            style,
+                        ),
+                    )
                 ]
                 scene_characters: list[str] = []
-                camera_hints: list[str] = []
+                camera_hints: list[str] = list(style.production_hints)
 
                 if dialogue:
                     character_id = character_ids[dialogue[0]]
@@ -276,13 +382,16 @@ class DemoConverter:
                         source_chapter=chapter.title,
                         summary=_first_sentence(scene_slice.text, 60),
                         goal=_scene_goal(scene_slice.text, dialogue, inner_state),
-                        conflict=_scene_conflict(
-                            scene_slice.break_reasons,
-                            dialogue,
-                            inner_state,
+                        conflict=_styled_conflict(
+                            _scene_conflict(
+                                scene_slice.break_reasons,
+                                dialogue,
+                                inner_state,
+                            ),
+                            style,
                         ),
-                        beat="、".join(scene_slice.break_reasons),
-                        subtext=_scene_subtext(dialogue, inner_state),
+                        beat=_styled_beat(scene_slice.break_reasons, style),
+                        subtext=_styled_subtext(_scene_subtext(dialogue, inner_state), style),
                         characters=scene_characters,
                         elements=elements,
                         camera_hints=camera_hints,
@@ -295,7 +404,8 @@ class DemoConverter:
             schema_version="1.0",
             title=resolved_title,
             genre=genre.strip(),
-            logline=f"围绕《{resolved_title}》核心冲突展开的剧本初稿。",
+            adaptation_type=adaptation_type,
+            logline=f"以{adaptation_type}方式围绕《{resolved_title}》核心冲突展开的剧本初稿。",
             source=SourceInfo(
                 chapter_count=len(chapters),
                 chapter_titles=[chapter.title for chapter in chapters],
@@ -333,7 +443,13 @@ class AIConverter:
     def timeout_seconds(self) -> float:
         return float(os.getenv("AI_TIMEOUT_SECONDS", "120"))
 
-    def convert(self, chapters: list[Chapter], title: str = "", genre: str = "") -> Screenplay:
+    def convert(
+        self,
+        chapters: list[Chapter],
+        title: str = "",
+        genre: str = "",
+        adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
+    ) -> Screenplay:
         if not self.api_key:
             raise ValueError("AI mode requires AI_API_KEY.")
         if not self.base_url:
@@ -341,6 +457,7 @@ class AIConverter:
         if not self.model:
             raise ValueError("AI mode requires AI_MODEL.")
 
+        style = _adaptation_style_profile(adaptation_type)
         source_text = "\n\n".join(f"{chapter.title}\n{chapter.content}" for chapter in chapters)
         prompt = (
             "你是专业影视编剧。请将小说改编成结构化剧本 JSON。"
@@ -349,9 +466,12 @@ class AIConverter:
             "只返回符合 Story2Script Screenplay Schema 的 JSON，不要 Markdown。\n\n"
             f"标题：{title or '请根据内容拟定'}\n"
             f"类型：{genre or '请根据内容判断'}\n"
+            f"改编类型：{adaptation_type}\n"
+            f"改编要求：{style.prompt_instruction}\n"
             "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
-            "character 必须包含 arc; scene 必须包含 goal, conflict, beat, subtext, "
-            "elements 和 camera_hints; dialogue 可包含 emotion。\n\n"
+            "顶层必须包含 adaptation_type; character 必须包含 arc; "
+            "scene 必须包含 goal, conflict, beat, subtext, elements 和 camera_hints; "
+            "dialogue 可包含 emotion。\n\n"
             f"小说原文：\n{source_text}"
         )
         response = self.client.post(
@@ -366,7 +486,10 @@ class AIConverter:
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
-        return Screenplay.model_validate(json.loads(content))
+        screenplay = Screenplay.model_validate(json.loads(content))
+        if screenplay.adaptation_type != adaptation_type:
+            raise ValueError("AI output adaptation_type must match requested adaptation_type.")
+        return screenplay
 
 
 def get_converter(mode: str = "demo") -> Converter:

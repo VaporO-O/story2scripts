@@ -19,6 +19,8 @@ def test_index_page() -> None:
     assert response.status_code == 200
     assert "Story2Script" in response.text
     assert "人物小传" in response.text
+    assert "adaptationTypeInput" in response.text
+    assert "分镜脚本" in response.text
 
 
 def test_static_assets_are_served() -> None:

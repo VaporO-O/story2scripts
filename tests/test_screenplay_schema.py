@@ -17,6 +17,7 @@ def sample_screenplay() -> dict:
         "schema_version": "1.0",
         "title": "雾港来信",
         "genre": "悬疑",
+        "adaptation_type": "影视剧",
         "logline": "一名记者追查父亲失踪真相。",
         "source": {
             "chapter_count": 3,
@@ -93,6 +94,13 @@ def test_screenplay_schema_endpoint() -> None:
     assert response.status_code == 200
     assert response.json()["title"] == "Story2Script Screenplay"
     assert "scenes" in response.json()["properties"]
+    assert response.json()["properties"]["adaptation_type"]["enum"] == [
+        "短剧",
+        "影视剧",
+        "舞台剧",
+        "广播剧",
+        "分镜脚本",
+    ]
     scene_schema = response.json()["properties"]["scenes"]["items"]
     assert "conflict" in scene_schema["required"]
 
@@ -102,5 +110,6 @@ def test_schema_file_is_valid_json() -> None:
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     assert schema["title"] == "Story2Script Screenplay"
+    assert "adaptation_type" in schema["required"]
     assert schema["properties"]["source"]["properties"]["chapter_count"]["minimum"] == 3
     assert "arc" in schema["properties"]["characters"]["items"]["required"]
