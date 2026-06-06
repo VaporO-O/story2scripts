@@ -221,14 +221,14 @@ def _split_scene_slices(text: str) -> list[SceneSlice]:
 
 
 def _dialogue_from_text(text: str) -> tuple[str, str] | None:
-    quote = re.search(r"[“\"]([^”\"]{2,100})[”\"]", text)
-    if not quote:
-        return None
-
-    prefix = text[max(0, quote.start() - 12) : quote.start()]
-    speaker_match = re.search(r"([\u4e00-\u9fff]{2,5})(?:说|问|喊|答道|低声道)[，,:：]?$", prefix)
-    speaker = speaker_match.group(1) if speaker_match else "叙述者"
-    return speaker, quote.group(1)
+    for quote in re.finditer(r"[“\"]([^”\"]{2,100})[”\"]", text):
+        prefix = text[max(0, quote.start() - 12) : quote.start()]
+        speaker_match = re.search(
+            r"([\u4e00-\u9fff]{2,5})(?:说|问|喊|答道|低声道)[，,:：]?$", prefix
+        )
+        if speaker_match:
+            return speaker_match.group(1), quote.group(1)
+    return None
 
 
 def _inner_state_from_text(text: str) -> tuple[str, list[str], str, str, list[str]] | None:
