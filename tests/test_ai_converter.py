@@ -252,11 +252,11 @@ def test_ai_converter_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> N
         converter.convert(chapters, adaptation_type="短剧")
 
 
-def test_ai_converter_rejects_schema_validation_failure(
+def test_ai_converter_backfills_missing_scene_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    invalid_data = json.loads(valid_screenplay_json())
-    del invalid_data["scenes"][0]["conflict"]
+    repaired_data = json.loads(valid_screenplay_json())
+    del repaired_data["scenes"][0]["conflict"]
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -265,7 +265,7 @@ def test_ai_converter_rejects_schema_validation_failure(
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps(invalid_data, ensure_ascii=False),
+                            "content": json.dumps(repaired_data, ensure_ascii=False),
                         }
                     }
                 ]
@@ -278,15 +278,19 @@ def test_ai_converter_rejects_schema_validation_failure(
     converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
     chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
 
-    with pytest.raises(ValueError, match="不符合 Screenplay Schema"):
-        converter.convert(chapters, adaptation_type="短剧")
+    # 缺失的剧本内容字段会被补成可编辑的占位文本，而不是直接 422。
+    screenplay = converter.convert(chapters, adaptation_type="短剧")
+
+    assert screenplay.scenes[0].id == "scene-1"
+    assert screenplay.scenes[0].conflict
+    assert "待补充" in screenplay.scenes[0].conflict
 
 
-def test_ai_converter_rejects_missing_adaptation_type(
+def test_ai_converter_backfills_missing_adaptation_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    invalid_data = json.loads(valid_screenplay_json())
-    del invalid_data["adaptation_type"]
+    repaired_data = json.loads(valid_screenplay_json())
+    del repaired_data["adaptation_type"]
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -295,7 +299,7 @@ def test_ai_converter_rejects_missing_adaptation_type(
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps(invalid_data, ensure_ascii=False),
+                            "content": json.dumps(repaired_data, ensure_ascii=False),
                         }
                     }
                 ]
@@ -308,8 +312,10 @@ def test_ai_converter_rejects_missing_adaptation_type(
     converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
     chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
 
-    with pytest.raises(ValueError, match="adaptation_type"):
-        converter.convert(chapters, adaptation_type="短剧")
+    # 模型遗漏 adaptation_type 时，按请求的改编类型回填。
+    screenplay = converter.convert(chapters, adaptation_type="短剧")
+
+    assert screenplay.adaptation_type == "短剧"
 
 
 def test_ai_converter_rejects_adaptation_type_mismatch(
@@ -339,4 +345,80 @@ def test_ai_converter_rejects_adaptation_type_mismatch(
     chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
 
     with pytest.raises(ValueError, match="adaptation_type"):
+        converter.convert(chapters, adaptation_type="短剧")
+
+
+def test_ai_converter_normalizes_imperfect_scene_structure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    imperfect_data = json.loads(valid_screenplay_json())
+    scene = imperfect_data["scenes"][0]
+    del scene["id"]  # 模型常见遗漏：缺 scene.id
+    scene["int_ext"] = "内景"  # 中文写法
+    scene["time_of_day"] = "夜晚"  # 中文写法
+    scene["heading"] = "走廊夜戏"  # 与 slug line 不一致
+    scene["duration"] = "2 分钟"  # Schema 不允许的多余字段
+    del scene["characters_present"]  # 缺可选列表字段
+    scene["characters"] = ["林澈"]  # 用人物名而非 id 引用
+    scene["elements"] = [
+        {"type": "dialogue", "character": "林澈", "text": "不对……这不是意外。"}
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(imperfect_data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    screenplay = converter.convert(chapters, adaptation_type="短剧")
+    result_scene = screenplay.scenes[0]
+
+    assert result_scene.id == "scene-1"
+    assert result_scene.int_ext == "INT."
+    assert result_scene.time_of_day == "NIGHT"
+    assert result_scene.heading == "INT. 走廊 - NIGHT"
+    # 用人物名引用的对白被映射回稳定 id
+    assert result_scene.characters == ["character-1"]
+    assert result_scene.elements[0].character == "character-1"
+
+
+def test_ai_converter_rejects_when_no_scenes(monkeypatch: pytest.MonkeyPatch) -> None:
+    empty_data = json.loads(valid_screenplay_json())
+    empty_data["scenes"] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(empty_data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    with pytest.raises(ValueError, match="没有返回任何有效场景"):
         converter.convert(chapters, adaptation_type="短剧")
