@@ -8,6 +8,8 @@ const emptyState = document.querySelector("#emptyState");
 const message = document.querySelector("#message");
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
+const importNovelFileButton = document.querySelector("#importNovelFileButton");
+const novelFileInput = document.querySelector("#novelFileInput");
 const sceneIdInput = document.querySelector("#sceneIdInput");
 const rewriteModeInput = document.querySelector("#rewriteModeInput");
 const rewriteCharacterInput = document.querySelector("#rewriteCharacterInput");
@@ -15,6 +17,7 @@ const rewriteToneInput = document.querySelector("#rewriteToneInput");
 const rewriteButtons = document.querySelectorAll("[data-rewrite-operation]");
 const profileGrid = document.querySelector("#profileGrid");
 const profileEmptyState = document.querySelector("#profileEmptyState");
+const supportedNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
 
 function setMessage(text, isError = false) {
   message.textContent = text;
@@ -28,6 +31,31 @@ function updateChapterCount() {
 
 function errorMessage(data, fallback) {
   return typeof data.detail === "string" ? data.detail : fallback;
+}
+
+function fileExtension(fileName) {
+  const dotIndex = fileName.lastIndexOf(".");
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : "";
+}
+
+function fileTitle(fileName) {
+  const dotIndex = fileName.lastIndexOf(".");
+  return dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+}
+
+function isSupportedNovelFile(file) {
+  if (file.type.startsWith("text/")) {
+    return true;
+  }
+  return supportedNovelFileExtensions.includes(fileExtension(file.name));
+}
+
+function decodeNovelFileContent(buffer) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder("gb18030").decode(buffer);
+  }
 }
 
 function createProfileRow(label, value) {
@@ -82,6 +110,32 @@ async function loadExample() {
   novelInput.value = data.novel_text;
   updateChapterCount();
   setMessage("示例小说已填入。");
+}
+
+function importNovelFile(file) {
+  if (!file) {
+    return;
+  }
+  if (!isSupportedNovelFile(file)) {
+    setMessage("暂支持导入 txt、md、csv、log 等纯文本小说文件。", true);
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    const content =
+      reader.result instanceof ArrayBuffer ? decodeNovelFileContent(reader.result) : "";
+    novelInput.value = content;
+    if (!titleInput.value.trim()) {
+      titleInput.value = fileTitle(file.name);
+    }
+    updateChapterCount();
+    setMessage(`已导入 ${file.name}。`);
+  });
+  reader.addEventListener("error", () => {
+    setMessage("文件读取失败，请确认文件未被占用或损坏。", true);
+  });
+  reader.readAsArrayBuffer(file);
 }
 
 async function convertNovel() {
@@ -225,6 +279,13 @@ function downloadYaml() {
 
 document.querySelector("#loadExampleButton").addEventListener("click", () => {
   loadExample().catch((error) => setMessage(error.message, true));
+});
+importNovelFileButton.addEventListener("click", () => {
+  novelFileInput.click();
+});
+novelFileInput.addEventListener("change", () => {
+  importNovelFile(novelFileInput.files[0]);
+  novelFileInput.value = "";
 });
 document.querySelector("#convertButton").addEventListener("click", convertNovel);
 document.querySelector("#analyzeCharactersButton").addEventListener("click", analyzeCharacters);

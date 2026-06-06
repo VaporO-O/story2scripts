@@ -29,7 +29,16 @@
               <span>01</span>
               <h2>小说原文</h2>
             </div>
-            <button id="loadExampleButton" class="ghost-button">填入示例</button>
+            <div class="button-row">
+              <button id="importNovelFileButton" class="ghost-button">导入文件</button>
+              <button id="loadExampleButton" class="ghost-button">填入示例</button>
+            </div>
+            <input
+              id="novelFileInput"
+              class="hidden"
+              type="file"
+              accept=".txt,.text,.md,.markdown,.csv,.log,text/*"
+            />
           </div>
 
           <div class="metadata">
