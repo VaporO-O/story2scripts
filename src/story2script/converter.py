@@ -12,9 +12,12 @@ from .screenplay import Action
 from .screenplay import AdaptationType
 from .screenplay import Character
 from .screenplay import Dialogue
+from .screenplay import GlobalCharacterState
+from .screenplay import GlobalStoryState
 from .screenplay import Scene
 from .screenplay import Screenplay
 from .screenplay import SourceInfo
+from .story_state import extract_global_story_state
 
 
 @dataclass(frozen=True)
@@ -289,6 +292,58 @@ def _styled_subtext(text: str, style: AdaptationStyleProfile) -> str:
     return f"{style.subtext_cue} {text}"
 
 
+def _append_character_id(scene_characters: list[str], character_id: str) -> None:
+    if character_id and character_id not in scene_characters:
+        scene_characters.append(character_id)
+
+
+def _ensure_global_character(
+    global_state: GlobalStoryState,
+    name: str,
+    chapter_title: str,
+    arc_cue: str,
+    consistency_note: str,
+) -> None:
+    for state in global_state.characters:
+        if state.name != name:
+            continue
+        if chapter_title not in state.appearance_chapters:
+            state.appearance_chapters.append(chapter_title)
+        return
+
+    character_id = f"character-{len(global_state.characters) + 1}"
+    global_state.characters.append(
+        GlobalCharacterState(
+            id=character_id,
+            name=name,
+            aliases=[],
+            first_appearance=chapter_title,
+            appearance_chapters=[chapter_title],
+            traits=[],
+            goal="待作者进一步补充。",
+            arc=arc_cue,
+            consistency_note=consistency_note,
+        )
+    )
+
+
+def _character_description_from_state(state: GlobalCharacterState) -> str:
+    description = f"全局状态表识别角色；首次出场：{state.first_appearance}。"
+    if state.traits:
+        description = f"{description} 稳定特征：{'、'.join(state.traits)}。"
+    return description
+
+
+def _state_character_data(state: GlobalCharacterState) -> dict[str, str]:
+    return {
+        "id": state.id,
+        "name": state.name,
+        "description": _character_description_from_state(state),
+        "motivation": state.goal,
+        "arc": state.arc,
+    }
+
+
 class DemoConverter:
     """Deterministic converter used for offline demos and repeatable tests."""
 
@@ -302,7 +357,7 @@ class DemoConverter:
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
     ) -> Screenplay:
         style = _adaptation_style_profile(adaptation_type)
-        character_names: list[str] = []
+        global_state = extract_global_story_state(chapters)
         chapter_slices: list[tuple[Chapter, list[SceneSlice]]] = []
 
         for chapter in chapters:
@@ -311,20 +366,32 @@ class DemoConverter:
             for scene_slice in scene_slices:
                 dialogue = _dialogue_from_text(scene_slice.text)
                 inner_state = _inner_state_from_text(scene_slice.text)
-                if dialogue and dialogue[0] not in character_names:
-                    character_names.append(dialogue[0])
-                if inner_state and inner_state[0] not in character_names:
-                    character_names.append(inner_state[0])
+                if dialogue:
+                    _ensure_global_character(
+                        global_state=global_state,
+                        name=dialogue[0],
+                        chapter_title=chapter.title,
+                        arc_cue=style.arc_cue,
+                        consistency_note="转换时补充识别；后续场景应保持称呼和语气一致。",
+                    )
+                if inner_state:
+                    _ensure_global_character(
+                        global_state=global_state,
+                        name=inner_state[0],
+                        chapter_title=chapter.title,
+                        arc_cue=style.arc_cue,
+                        consistency_note="转换时补充识别；后续场景应保持称呼和人物判断一致。",
+                    )
 
         characters = [
             Character(
-                id=f"character-{index}",
-                name=name,
-                description="从原文对白中自动识别的角色。",
-                motivation="待作者进一步补充。",
-                arc=style.arc_cue,
+                id=state.id,
+                name=state.name,
+                description=_character_description_from_state(state),
+                motivation=state.goal,
+                arc=state.arc if state.arc != "待作者进一步补充。" else style.arc_cue,
             )
-            for index, name in enumerate(character_names, start=1)
+            for state in global_state.characters
         ]
         character_ids = {character.name: character.id for character in characters}
 
@@ -346,9 +413,13 @@ class DemoConverter:
                 scene_characters: list[str] = []
                 camera_hints: list[str] = list(style.production_hints)
 
+                for state in global_state.characters:
+                    if state.name in scene_slice.text:
+                        _append_character_id(scene_characters, state.id)
+
                 if dialogue:
                     character_id = character_ids[dialogue[0]]
-                    scene_characters.append(character_id)
+                    _append_character_id(scene_characters, character_id)
                     elements.append(
                         Dialogue(
                             type="dialogue",
@@ -361,8 +432,7 @@ class DemoConverter:
                 if inner_state:
                     character_name, actions, line, emotion, hints = inner_state
                     character_id = character_ids[character_name]
-                    if character_id not in scene_characters:
-                        scene_characters.append(character_id)
+                    _append_character_id(scene_characters, character_id)
                     elements.extend(Action(type="action", text=action) for action in actions)
                     elements.append(
                         Dialogue(
@@ -410,6 +480,7 @@ class DemoConverter:
                 chapter_count=len(chapters),
                 chapter_titles=[chapter.title for chapter in chapters],
             ),
+            global_state=global_state,
             characters=characters,
             scenes=scenes,
         )
@@ -458,6 +529,7 @@ class AIConverter:
             raise ValueError("AI mode requires AI_MODEL.")
 
         style = _adaptation_style_profile(adaptation_type)
+        global_state = extract_global_story_state(chapters)
         source_text = "\n\n".join(f"{chapter.title}\n{chapter.content}" for chapter in chapters)
         prompt = (
             "你是专业影视编剧。请将小说改编成结构化剧本 JSON。"
@@ -468,8 +540,10 @@ class AIConverter:
             f"类型：{genre or '请根据内容判断'}\n"
             f"改编类型：{adaptation_type}\n"
             f"改编要求：{style.prompt_instruction}\n"
+            "全局状态表是固定上下文，分块转换时必须保持人物姓名、性格、地点和时间线一致："
+            f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
             "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
-            "顶层必须包含 adaptation_type; character 必须包含 arc; "
+            "顶层必须包含 adaptation_type 和 global_state; character 必须包含 arc; "
             "scene 必须包含 goal, conflict, beat, subtext, elements 和 camera_hints; "
             "dialogue 可包含 emotion。\n\n"
             f"小说原文：\n{source_text}"
@@ -486,7 +560,28 @@ class AIConverter:
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
-        screenplay = Screenplay.model_validate(json.loads(content))
+        screenplay_data = json.loads(content)
+        screenplay_data["global_state"] = global_state.model_dump(mode="json")
+        existing_characters = {
+            character.get("id"): character for character in screenplay_data.setdefault("characters", [])
+        }
+        for state in global_state.characters:
+            state_data = _state_character_data(state)
+            if state.id in existing_characters:
+                existing_characters[state.id].update(
+                    {
+                        "name": state.name,
+                        "description": existing_characters[state.id].get("description")
+                        or state_data["description"],
+                        "motivation": existing_characters[state.id].get("motivation")
+                        or state_data["motivation"],
+                        "arc": existing_characters[state.id].get("arc") or state_data["arc"],
+                    }
+                )
+            else:
+                screenplay_data["characters"].append(state_data)
+
+        screenplay = Screenplay.model_validate(screenplay_data)
         if screenplay.adaptation_type != adaptation_type:
             raise ValueError("AI output adaptation_type must match requested adaptation_type.")
         return screenplay

@@ -19,6 +19,11 @@ def valid_screenplay_json() -> str:
                 "chapter_count": 3,
                 "chapter_titles": ["第一章", "第二章", "第三章"],
             },
+            "global_state": {
+                "characters": [],
+                "locations": [],
+                "timeline": [],
+            },
             "characters": [
                 {
                     "id": "character-1",
@@ -106,5 +111,7 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert "goal, conflict, beat, subtext" in captured["payload"]["messages"][0]["content"]
     assert "改编类型：短剧" in captured["payload"]["messages"][0]["content"]
     assert "强反转" in captured["payload"]["messages"][0]["content"]
+    assert "全局状态表" in captured["payload"]["messages"][0]["content"]
     assert screenplay.adaptation_type == "短剧"
+    assert screenplay.global_state.timeline[0].chapter == "第一章"
     assert screenplay.scenes[0].camera_hints == ["近景：林澈绷紧的表情。"]

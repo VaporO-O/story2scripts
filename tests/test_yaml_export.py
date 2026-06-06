@@ -18,7 +18,9 @@ def test_screenplay_to_yaml_can_round_trip() -> None:
     assert restored.title == "测试故事"
     assert restored.adaptation_type == "影视剧"
     assert restored.source.chapter_count == 3
+    assert restored.global_state.timeline[0].chapter == "第一章 A"
     assert "adaptation_type: 影视剧" in yaml_text
+    assert "global_state:" in yaml_text
     assert "林夏" in yaml_text
 
 

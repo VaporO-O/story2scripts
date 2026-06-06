@@ -267,6 +267,7 @@ class AISceneRewriter:
                 "genre": screenplay.genre,
                 "adaptation_type": screenplay.adaptation_type,
                 "logline": screenplay.logline,
+                "global_state": screenplay.global_state.model_dump(mode="json"),
                 "characters": [character.model_dump(mode="json") for character in screenplay.characters],
             },
             "target_scene": target_scene.model_dump(mode="json"),
@@ -280,6 +281,7 @@ class AISceneRewriter:
             "只返回一个符合 Story2Script Scene Schema 的 JSON 对象，不要 Markdown，不要返回完整剧本。\n"
             "硬性要求：id 必须保持不变；source_chapter 必须保持不变；"
             "characters 和 dialogue.character 只能引用已存在角色 id；"
+            "必须遵守 global_state 中的人物表、地点表和时间线，不要改写跨章节事实；"
             "必须保留 heading, summary, goal, conflict, beat, subtext, characters, elements, camera_hints。\n"
             "本次局部操作："
             f"{OPERATION_PROMPTS[operation]}\n"

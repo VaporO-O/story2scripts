@@ -16,6 +16,7 @@ def test_demo_converter_returns_valid_screenplay() -> None:
     assert screenplay.title == "测试故事"
     assert screenplay.adaptation_type == "影视剧"
     assert screenplay.source.chapter_count == 3
+    assert len(screenplay.global_state.timeline) == 3
     assert len(screenplay.scenes) == 3
 
 
@@ -30,6 +31,7 @@ def test_demo_converter_extracts_dialogue_character() -> None:
     dialogue = screenplay.scenes[0].elements[1]
 
     assert screenplay.characters[0].name == "林夏"
+    assert screenplay.global_state.characters[0].id == screenplay.characters[0].id
     assert screenplay.characters[0].arc
     assert isinstance(dialogue, Dialogue)
     assert dialogue.character == "character-1"
@@ -66,6 +68,22 @@ def test_demo_converter_splits_chapter_into_dramatic_scenes() -> None:
     assert all(scene.subtext for scene in first_chapter_scenes)
     assert any("地点变化" in scene.beat for scene in first_chapter_scenes)
     assert any("情节转折" in scene.beat for scene in first_chapter_scenes)
+
+
+def test_demo_converter_uses_global_state_for_repeated_character() -> None:
+    chapters = parse_chapters(
+        "第一章 开始\n林夏说：“我会查下去。”\n"
+        "第二章 转折\n林夏来到旧钟楼。\n"
+        "第三章 结局\n林夏回到码头。林夏从逃避到主动调查。"
+    )
+
+    screenplay = DemoConverter().convert(chapters)
+    lin_xia = screenplay.global_state.characters[0]
+
+    assert lin_xia.name == "林夏"
+    assert lin_xia.id == "character-1"
+    assert lin_xia.appearance_chapters == ["第一章 开始", "第二章 转折", "第三章 结局"]
+    assert screenplay.characters[0].id == lin_xia.id
 
 
 def test_demo_converter_applies_adaptation_type_profile() -> None:

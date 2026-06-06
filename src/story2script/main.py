@@ -12,6 +12,8 @@ from .api_models import CharacterProfileResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
 from .api_models import ExampleNovelResponse
+from .api_models import GlobalStateRequest
+from .api_models import GlobalStateResponse
 from .api_models import SceneRewriteRequest
 from .api_models import SceneRewriteResponse
 from .api_models import ValidateYamlRequest
@@ -22,6 +24,7 @@ from .examples import load_example_novel
 from .parser import parse_chapters
 from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
+from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
 
@@ -81,6 +84,16 @@ async def analyze_character_profiles(request: CharacterProfileRequest) -> Charac
 @app.get("/api/screenplay/schema")
 async def get_screenplay_schema() -> dict:
     return screenplay_json_schema()
+
+
+@app.post("/api/consistency/global-state", response_model=GlobalStateResponse)
+async def preview_global_state(request: GlobalStateRequest) -> GlobalStateResponse:
+    try:
+        chapters = parse_chapters(request.novel_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return GlobalStateResponse(global_state=extract_global_story_state(chapters))
 
 
 @app.get("/api/examples/novel", response_model=ExampleNovelResponse)
