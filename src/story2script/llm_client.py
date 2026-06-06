@@ -1,7 +1,65 @@
 import json
 import os
+from pathlib import Path
 
 import httpx
+
+
+DOTENV_FILENAME = ".env"
+DOTENV_DISABLE_ENV = "STORY2SCRIPT_DISABLE_DOTENV"
+DOTENV_DISABLED_VALUES = {"1", "true", "yes", "on"}
+
+
+def _default_env_path() -> Path:
+    return Path.cwd() / DOTENV_FILENAME
+
+
+def _dotenv_is_disabled() -> bool:
+    return os.getenv(DOTENV_DISABLE_ENV, "").strip().lower() in DOTENV_DISABLED_VALUES
+
+
+def _unquote_env_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _parse_env_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("export "):
+        stripped = stripped.removeprefix("export ").strip()
+    if "=" not in stripped:
+        return None
+
+    key, value = stripped.split("=", 1)
+    key = key.strip()
+    if not key:
+        return None
+
+    value = value.strip()
+    if value and value[0] not in {"'", '"'}:
+        value = value.split(" #", 1)[0].strip()
+    return key, _unquote_env_value(value)
+
+
+def _load_env_file(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise ValueError(f"Unable to read .env file: {exc}") from exc
+
+    values: dict[str, str] = {}
+    for line in lines:
+        parsed = _parse_env_line(line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        values[key] = value
+    return values
 
 
 class LLMClient:
@@ -11,25 +69,31 @@ class LLMClient:
         self,
         client: httpx.Client | None = None,
         usage_label: str = "AI mode",
+        env_file: str | Path | None = None,
+        load_dotenv: bool = True,
     ) -> None:
         self.usage_label = usage_label
+        self.env_file = Path(env_file) if env_file is not None else _default_env_path()
+        self.env_values = (
+            _load_env_file(self.env_file) if load_dotenv and not _dotenv_is_disabled() else {}
+        )
         self.client = client or httpx.Client(timeout=self.timeout_seconds)
 
     @property
     def api_key(self) -> str:
-        return os.getenv("AI_API_KEY", "").strip()
+        return self._config_value("AI_API_KEY")
 
     @property
     def base_url(self) -> str:
-        return os.getenv("AI_BASE_URL", "").strip().rstrip("/")
+        return self._config_value("AI_BASE_URL").rstrip("/")
 
     @property
     def model(self) -> str:
-        return os.getenv("AI_MODEL", "").strip()
+        return self._config_value("AI_MODEL")
 
     @property
     def timeout_seconds(self) -> float:
-        raw_value = os.getenv("AI_TIMEOUT_SECONDS", "120").strip()
+        raw_value = self._config_value("AI_TIMEOUT_SECONDS", "120")
         try:
             return float(raw_value)
         except ValueError as exc:
@@ -81,3 +145,9 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} requires AI_BASE_URL.")
         if not self.model:
             raise ValueError(f"{self.usage_label} requires AI_MODEL.")
+
+    def _config_value(self, name: str, default: str = "") -> str:
+        env_value = os.getenv(name)
+        if env_value is not None:
+            return env_value.strip()
+        return self.env_values.get(name, default).strip()
