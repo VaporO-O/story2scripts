@@ -32,6 +32,19 @@ class GlobalStateResponse(BaseModel):
     global_state: GlobalStoryState
 
 
+class NovelImportRequest(BaseModel):
+    file_name: str = Field(min_length=1)
+    content_base64: str = Field(min_length=1)
+
+
+class NovelImportResponse(BaseModel):
+    file_name: str
+    file_type: str
+    title: str
+    novel_text: str
+    character_count: int
+
+
 class ConvertRequest(BaseModel):
     novel_text: str = Field(min_length=1)
     title: str = ""

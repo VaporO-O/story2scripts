@@ -234,7 +234,8 @@ python -m compileall -q src tests
 项目首页 `http://127.0.0.1:8000` 提供左右对照工作台：
 
 - 左侧输入或填入示例小说
-- 支持导入 `.txt`、`.md`、`.markdown`、`.csv`、`.log` 等纯文本小说文件
+- 支持导入 `.epub`、`.txt`、`.md`、`.markdown`、`.csv`、`.log` 等小说文件
+- 对 `.mobi`、`.azw`、`.azw3` 给出明确提示，建议先转换为 EPUB 或 TXT
 - 支持选择改编类型
 - 支持在生成按钮旁切换本地 / AI 全文转换模式
 - 右侧展示生成后的 YAML 剧本
