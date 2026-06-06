@@ -81,6 +81,20 @@ def sample_screenplay() -> dict:
                 "characters": ["character-1"],
                 "characters_present": ["character-1"],
                 "props": ["匿名信"],
+                "dramatization_decisions": [
+                    {
+                        "source_text": "雾气笼罩码头。",
+                        "target": "scene_description",
+                        "rendering": "雾气笼罩码头。",
+                        "reason": "环境叙述用于建立可拍摄的场景氛围。",
+                    },
+                    {
+                        "source_text": "林夏发现匿名信。",
+                        "target": "action",
+                        "rendering": "林夏发现匿名信。",
+                        "reason": "可见行为转成动作行。",
+                    },
+                ],
                 "elements": [
                     {"type": "action", "text": "雾气笼罩码头。"},
                     {
@@ -142,6 +156,14 @@ def test_screenplay_model_requires_production_scene_fields() -> None:
         Screenplay.model_validate(data)
 
 
+def test_screenplay_model_requires_dramatization_decisions() -> None:
+    data = sample_screenplay()
+    del data["scenes"][0]["dramatization_decisions"]
+
+    with pytest.raises(ValidationError, match="dramatization_decisions"):
+        Screenplay.model_validate(data)
+
+
 def test_screenplay_model_rejects_heading_mismatch_with_production_fields() -> None:
     data = sample_screenplay()
     data["scenes"][0]["heading"] = "INT. 雾港码头 - DAY"
@@ -178,6 +200,14 @@ def test_screenplay_schema_endpoint() -> None:
     assert "int_ext" in scene_schema["required"]
     assert scene_schema["properties"]["int_ext"]["enum"] == ["INT.", "EXT."]
     assert scene_schema["properties"]["time_of_day"]["enum"] == ["DAY", "NIGHT"]
+    assert "dramatization_decisions" in scene_schema["required"]
+    decision_schema = scene_schema["properties"]["dramatization_decisions"]["items"]
+    assert decision_schema["properties"]["target"]["enum"] == [
+        "action",
+        "dialogue",
+        "subtext",
+        "scene_description",
+    ]
 
 
 def test_schema_file_is_valid_json() -> None:
@@ -192,3 +222,4 @@ def test_schema_file_is_valid_json() -> None:
     scene_schema = schema["properties"]["scenes"]["items"]
     assert "characters_present" in scene_schema["required"]
     assert "props" in scene_schema["required"]
+    assert "dramatization_decisions" in scene_schema["required"]

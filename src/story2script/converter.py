@@ -12,6 +12,8 @@ from .screenplay import Action
 from .screenplay import AdaptationType
 from .screenplay import Character
 from .screenplay import Dialogue
+from .screenplay import DramatizationDecision
+from .screenplay import DramatizationTarget
 from .screenplay import GlobalCharacterState
 from .screenplay import GlobalStoryState
 from .screenplay import IntExt
@@ -159,6 +161,18 @@ PROP_BOUNDARY_PATTERN = re.compile(
     r"(?:出现|落下|掉下|放在|拿起|递给|藏在|打开|关上|写着|留下|发现|看见|"
     r"说|问|喊|答道|低声道)"
 )
+PSYCHOLOGICAL_NARRATION_PATTERN = re.compile(
+    r"(?:觉得|意识到|隐约意识到|心里|内心|害怕|担心|怀疑|明白|想起|希望|以为|"
+    r"不安|发冷|恐惧|后悔|犹豫)"
+)
+ENVIRONMENT_NARRATION_PATTERN = re.compile(
+    r"(?:雨|雪|雾|风|灯光|影子|空气|周围|窗|门|墙|走廊|房间|街|路|码头|"
+    r"广场|夜色|天色|海|山|湖|河|声音)"
+)
+ACTION_NARRATION_PATTERN = re.compile(
+    r"(?:走|跑|停|推|拉|拿|放|递|捡|打开|关上|回头|转身|离开|进入|来到|"
+    r"发现|看见|望向|握住|坐下|站起|冲进)"
+)
 
 
 def _adaptation_style_profile(adaptation_type: AdaptationType) -> AdaptationStyleProfile:
@@ -169,6 +183,10 @@ def _first_sentence(text: str, limit: int = 100) -> str:
     match = re.search(r"^(.+?[。！？.!?][”\"]?)", text.strip(), re.DOTALL)
     sentence = match.group(1).strip() if match else text.strip()
     return sentence[:limit] or "故事在沉默中展开。"
+
+
+def _snippet(text: str, limit: int = 80) -> str:
+    return _first_sentence(text, limit).strip()
 
 
 def _text_units(text: str) -> list[str]:
@@ -344,6 +362,84 @@ def _scene_props(text: str) -> list[str]:
     return props
 
 
+def _append_decision(
+    decisions: list[DramatizationDecision],
+    *,
+    source_text: str,
+    target: DramatizationTarget,
+    rendering: str,
+    reason: str,
+) -> None:
+    if any(decision.target == target and decision.source_text == source_text for decision in decisions):
+        return
+    decisions.append(
+        DramatizationDecision(
+            source_text=source_text,
+            target=target,
+            rendering=rendering,
+            reason=reason,
+        )
+    )
+
+
+def _dramatization_decisions(
+    text: str,
+    action_text: str,
+    dialogue: tuple[str, str] | None,
+    inner_state: tuple[str, list[str], str, str, list[str]] | None,
+    scene_subtext: str,
+) -> list[DramatizationDecision]:
+    source = _snippet(text)
+    decisions: list[DramatizationDecision] = []
+
+    if ENVIRONMENT_NARRATION_PATTERN.search(text):
+        _append_decision(
+            decisions,
+            source_text=source,
+            target="scene_description",
+            rendering=source,
+            reason="环境、空间或氛围信息用于建立可拍摄的场景描述。",
+        )
+
+    if ACTION_NARRATION_PATTERN.search(text) or not dialogue:
+        _append_decision(
+            decisions,
+            source_text=source,
+            target="action",
+            rendering=action_text,
+            reason="可见行为或场面推进优先改写成动作行，而不是解释性旁白。",
+        )
+
+    if dialogue:
+        _append_decision(
+            decisions,
+            source_text=f"“{dialogue[1]}”",
+            target="dialogue",
+            rendering=dialogue[1],
+            reason="原文存在明确说话内容，可保留为推动冲突和信息交换的对白。",
+        )
+
+    if inner_state or PSYCHOLOGICAL_NARRATION_PATTERN.search(text):
+        _append_decision(
+            decisions,
+            source_text=source,
+            target="subtext",
+            rendering=scene_subtext,
+            reason="心理活动不直接搬成台词，而是通过潜台词、动作反应和镜头压力间接表现。",
+        )
+
+    if not decisions:
+        _append_decision(
+            decisions,
+            source_text=source,
+            target="action",
+            rendering=action_text,
+            reason="缺少明确对白和心理线索时，默认转成可见行动，保证剧本可演可拍。",
+        )
+
+    return decisions
+
+
 def _append_character_id(scene_characters: list[str], character_id: str) -> None:
     if character_id and character_id not in scene_characters:
         scene_characters.append(character_id)
@@ -482,24 +578,17 @@ class DemoConverter:
                     )
 
                 if inner_state:
-                    character_name, actions, line, emotion, hints = inner_state
+                    character_name, actions, _line, _emotion, hints = inner_state
                     character_id = character_ids[character_name]
                     _append_character_id(scene_characters, character_id)
                     elements.extend(Action(type="action", text=action) for action in actions)
-                    elements.append(
-                        Dialogue(
-                            type="dialogue",
-                            character=character_id,
-                            parenthetical="",
-                            text=line,
-                            emotion=emotion,
-                        )
-                    )
                     camera_hints.extend(hints)
 
                 location = _scene_location(scene_slice.text, chapter.title, global_state)
                 int_ext = _scene_int_ext(scene_slice.text, location)
                 time_of_day = _scene_time_of_day(scene_slice.text)
+                action_text = elements[0].text
+                scene_subtext = _styled_subtext(_scene_subtext(dialogue, inner_state), style)
                 scenes.append(
                     Scene(
                         id=f"scene-{scene_index}",
@@ -519,10 +608,17 @@ class DemoConverter:
                             style,
                         ),
                         beat=_styled_beat(scene_slice.break_reasons, style),
-                        subtext=_styled_subtext(_scene_subtext(dialogue, inner_state), style),
+                        subtext=scene_subtext,
                         characters=scene_characters,
                         characters_present=list(scene_characters),
                         props=_scene_props(scene_slice.text),
+                        dramatization_decisions=_dramatization_decisions(
+                            scene_slice.text,
+                            action_text,
+                            dialogue,
+                            inner_state,
+                            scene_subtext,
+                        ),
                         elements=elements,
                         camera_hints=camera_hints,
                     )
@@ -605,8 +701,13 @@ class AIConverter:
             "Schema 要点：schema_version, title, genre, logline, source, characters, scenes; "
             "顶层必须包含 adaptation_type 和 global_state; character 必须包含 arc; "
             "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
-            "goal, conflict, beat, subtext, elements 和 camera_hints; "
+            "dramatization_decisions, goal, conflict, beat, subtext, elements 和 camera_hints; "
             "heading 必须与 int_ext/location/time_of_day 对齐，使用类似 INT. LIBRARY - DAY 的 slug line; "
+            "每个 scene 的 dramatization_decisions 必须显式记录叙述到戏剧表达的分类决策，"
+            "target 只能是 action、dialogue、subtext、scene_description。"
+            "分类规则：可见行为转 action；明确说话内容或需要外化的信息交换转 dialogue；"
+            "心理活动、情绪判断和未说出口的意图转 subtext，不能直接搬成台词；"
+            "天气、空间、背景和氛围转 scene_description。"
             "dialogue 可包含 emotion。\n\n"
             f"小说原文：\n{source_text}"
         )

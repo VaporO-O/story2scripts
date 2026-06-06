@@ -117,6 +117,7 @@ def test_rewrite_scene_can_use_ai_for_single_scene(monkeypatch: pytest.MonkeyPat
     assert "加强本场戏剧冲突" in prompt
     assert "global_state" in prompt
     assert "int_ext、time_of_day、location 必须保持不变" in prompt
+    assert "dramatization_decisions" in prompt
     assert updated.scenes[0].conflict.startswith("AI冲突")
     assert updated.scenes[1].model_dump(mode="json") == screenplay.scenes[1].model_dump(mode="json")
     assert message == "AI 已加强本场戏剧冲突。"
