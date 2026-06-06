@@ -1,6 +1,8 @@
 import json
+import re
 from typing import Literal
 
+from .converter import _normalize_screenplay_scene_data
 from .llm_client import LLMClient
 from .screenplay import Action, Dialogue, Scene, Screenplay
 
@@ -179,6 +181,28 @@ def _adjust_character_voice(
     scene.subtext = f"人物语气：{tone}。{scene.subtext}"
 
 
+def _backfill_scene_invariants(raw_scene: dict, target_scene: Scene) -> dict:
+    """Fill invariants the model omitted with the target scene's values.
+
+    A local rewrite must keep id / source_chapter / int_ext / time_of_day /
+    location. Missing or malformed values are restored from the target so a
+    minor omission does not fail the rewrite; values the model explicitly
+    changed are left in place so the guards below can reject them.
+    """
+    if not re.fullmatch(r"scene-[0-9]+", str(raw_scene.get("id", "")).strip()):
+        raw_scene["id"] = target_scene.id
+    for key, value in (
+        ("source_chapter", target_scene.source_chapter),
+        ("int_ext", target_scene.int_ext),
+        ("time_of_day", target_scene.time_of_day),
+        ("location", target_scene.location),
+    ):
+        current = raw_scene.get(key)
+        if not (isinstance(current, str) and current.strip()):
+            raw_scene[key] = value
+    return raw_scene
+
+
 class AISceneRewriter:
     """OpenAI-compatible local scene rewriter.
 
@@ -207,7 +231,26 @@ class AISceneRewriter:
 
         prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone)
         content = self.llm_client.complete_json(prompt)
-        replacement_scene = Scene.model_validate(json.loads(content))
+        raw_scene = json.loads(content)
+        if not isinstance(raw_scene, dict):
+            raise ValueError("AI 局部重写失败：模型返回的内容不是 Scene 对象。")
+
+        _backfill_scene_invariants(raw_scene, target_scene)
+        known_ids = {character.id for character in screenplay.characters}
+        name_to_id = {
+            character.name: character.id
+            for character in screenplay.characters
+            if character.name
+        }
+        normalized = _normalize_screenplay_scene_data(
+            [raw_scene],
+            known_ids,
+            name_to_id,
+            list(screenplay.source.chapter_titles),
+        )
+        if not normalized:
+            raise ValueError("AI 局部重写失败：模型没有返回有效场景。")
+        replacement_scene = Scene.model_validate(normalized[0])
 
         if replacement_scene.id != target_scene.id:
             raise ValueError("AI scene rewrite must keep the original scene id.")

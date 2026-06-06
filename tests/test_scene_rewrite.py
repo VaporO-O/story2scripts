@@ -159,6 +159,95 @@ def test_ai_scene_rewrite_rejects_changed_scene_id(monkeypatch: pytest.MonkeyPat
         )
 
 
+def test_ai_scene_rewrite_merges_dialogue_key_into_elements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    screenplay = sample_screenplay()
+    character_id = screenplay.characters[0].id
+    replacement = screenplay.scenes[0].model_dump(mode="json")
+    # 模型把对白放进了独立的 dialogue 键（Schema 不允许），并漏掉了 elements。
+    replacement.pop("elements", None)
+    replacement["dialogue"] = [
+        {"character": character_id, "text": "今晚之后，别想睡安稳了。"}
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(replacement, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+
+    updated, _ = rewrite_scene(
+        screenplay,
+        "scene-1",
+        "rewrite_dialogue",
+        mode="ai",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    dialogues = [
+        element for element in updated.scenes[0].elements if isinstance(element, Dialogue)
+    ]
+
+    assert any(dialogue.text == "今晚之后，别想睡安稳了。" for dialogue in dialogues)
+    assert all(dialogue.character == character_id for dialogue in dialogues)
+
+
+def test_ai_scene_rewrite_backfills_missing_invariants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    screenplay = sample_screenplay()
+    target = screenplay.scenes[0]
+    replacement = target.model_dump(mode="json")
+    # 模型遗漏了不变量字段，应按目标场景回填而不是直接失败。
+    for key in ("id", "source_chapter", "int_ext", "time_of_day", "location", "heading"):
+        replacement.pop(key, None)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(replacement, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+
+    updated, _ = rewrite_scene(
+        screenplay,
+        "scene-1",
+        "add_camera_hints",
+        mode="ai",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    result_scene = updated.scenes[0]
+
+    assert result_scene.id == target.id
+    assert result_scene.source_chapter == target.source_chapter
+    assert result_scene.int_ext == target.int_ext
+    assert result_scene.time_of_day == target.time_of_day
+    assert result_scene.location == target.location
+
+
 def test_ai_scene_rewrite_rejects_changed_location(monkeypatch: pytest.MonkeyPatch) -> None:
     screenplay = sample_screenplay()
     replacement = screenplay.scenes[0].model_copy(deep=True)

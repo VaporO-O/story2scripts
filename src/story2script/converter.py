@@ -576,9 +576,39 @@ def _normalize_heading(value: object, int_ext: str, location: str, time_of_day: 
     return f"{int_ext} {location} - {time_of_day}"
 
 
+def _collect_raw_elements(scene: dict) -> list:
+    """Gather scene elements, merging alternative keys the LLM may use.
+
+    Some models emit dialogue / action under their own top-level keys instead of
+    a single ``elements`` list. They are merged here so the content is preserved
+    before the Scene's forbidden extra fields get pruned away.
+    """
+    collected: list = []
+    elements = scene.get("elements")
+    if isinstance(elements, list):
+        collected.extend(elements)
+    for key, element_type in (
+        ("dialogue", "dialogue"),
+        ("dialogues", "dialogue"),
+        ("action", "action"),
+        ("actions", "action"),
+    ):
+        value = scene.get(key)
+        items = value if isinstance(value, list) else [value] if value else []
+        for item in items:
+            if isinstance(item, dict):
+                collected.append({**item, "type": item.get("type") or element_type})
+            elif isinstance(item, str) and item.strip():
+                collected.append({"type": element_type, "text": item.strip()})
+    return collected
+
+
 def _normalize_scene_element(
     element: object, known_ids: set[str], name_to_id: dict[str, str]
 ) -> dict | None:
+    if isinstance(element, str):
+        text = element.strip()
+        return {"type": "action", "text": text} if text else None
     if not isinstance(element, dict):
         return None
     element_type = _as_text(element.get("type")).lower()
@@ -706,7 +736,7 @@ def _normalize_screenplay_scene_data(
             pruned.get("dramatization_decisions"), summary
         )
         pruned["elements"] = _normalize_scene_elements(
-            pruned.get("elements"), known_ids, name_to_id, summary
+            _collect_raw_elements(scene), known_ids, name_to_id, summary
         )
         normalized.append(pruned)
     return normalized
