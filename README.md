@@ -289,9 +289,6 @@ AI 转换 prompt 会显式要求模型做这个分类决策，避免把小说里
 当前支持：
 
 - `demo`：本地规则转换器，不需要外部 API Key
-
-后续会扩展：
-
 - `ai`：调用外部 LLM，智能识别心理描写、场景改编和人物信息
 
 ### 外部 LLM 配置
@@ -320,6 +317,10 @@ AI_TIMEOUT_SECONDS=120
 如果暂时没有配置 API Key，继续使用默认 `demo` 模式即可。
 AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务端会用这份固定状态表回填并校验最终
 `Screenplay`，确保分块改编不会丢失跨章节一致性。
+
+全文转换和局部重写共用 `src/story2script/llm_client.py` 中的统一 LLM 客户端。该客户端集中读取
+`AI_API_KEY`、`AI_BASE_URL`、`AI_MODEL` 和 `AI_TIMEOUT_SECONDS`，调用 `/chat/completions`，
+并统一处理超时、网络错误、HTTP 错误和模型空响应。
 
 ## Schema 文档
 

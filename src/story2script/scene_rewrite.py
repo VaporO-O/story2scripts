@@ -1,9 +1,7 @@
 import json
-import os
 from typing import Literal
 
-import httpx
-
+from .llm_client import LLMClient
 from .screenplay import Action, Dialogue, Scene, Screenplay
 
 
@@ -189,24 +187,11 @@ class AISceneRewriter:
     leak into YAML output.
     """
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
-        self.client = client or httpx.Client(timeout=self.timeout_seconds)
-
-    @property
-    def api_key(self) -> str:
-        return os.getenv("AI_API_KEY", "").strip()
-
-    @property
-    def base_url(self) -> str:
-        return os.getenv("AI_BASE_URL", "").strip().rstrip("/")
-
-    @property
-    def model(self) -> str:
-        return os.getenv("AI_MODEL", "").strip()
-
-    @property
-    def timeout_seconds(self) -> float:
-        return float(os.getenv("AI_TIMEOUT_SECONDS", "120"))
+    def __init__(self, llm_client: LLMClient | None = None, client=None) -> None:
+        self.llm_client = llm_client or LLMClient(
+            client=client,
+            usage_label="AI scene rewrite",
+        )
 
     def rewrite(
         self,
@@ -216,30 +201,12 @@ class AISceneRewriter:
         character_id: str = "",
         tone: str = "更克制",
     ) -> Screenplay:
-        if not self.api_key:
-            raise ValueError("AI scene rewrite requires AI_API_KEY.")
-        if not self.base_url:
-            raise ValueError("AI scene rewrite requires AI_BASE_URL.")
-        if not self.model:
-            raise ValueError("AI scene rewrite requires AI_MODEL.")
-
         target_scene = _find_scene(screenplay, scene_id)
         if character_id:
             _resolve_character_id(screenplay, scene_id, character_id)
 
         prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone)
-        response = self.client.post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "response_format": {"type": "json_object"},
-            },
-        )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        content = self.llm_client.complete_json(prompt)
         replacement_scene = Scene.model_validate(json.loads(content))
 
         if replacement_scene.id != target_scene.id:
@@ -306,7 +273,7 @@ def _rewrite_scene_with_ai(
     operation: SceneRewriteOperation,
     character_id: str = "",
     tone: str = "更克制",
-    client: httpx.Client | None = None,
+    client=None,
 ) -> Screenplay:
     return AISceneRewriter(client=client).rewrite(
         screenplay=screenplay,
@@ -324,7 +291,7 @@ def rewrite_scene(
     character_id: str = "",
     tone: str = "更克制",
     mode: SceneRewriteMode = "demo",
-    client: httpx.Client | None = None,
+    client=None,
 ) -> tuple[Screenplay, str]:
     if mode == "ai":
         updated = _rewrite_scene_with_ai(

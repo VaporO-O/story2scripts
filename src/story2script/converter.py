@@ -1,11 +1,9 @@
 import json
-import os
 import re
 from dataclasses import dataclass
 from typing import Protocol
 
-import httpx
-
+from .llm_client import LLMClient
 from .parser import Chapter
 from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import Action
@@ -651,24 +649,8 @@ class AIConverter:
 
     mode = "ai"
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
-        self.client = client or httpx.Client(timeout=self.timeout_seconds)
-
-    @property
-    def api_key(self) -> str:
-        return os.getenv("AI_API_KEY", "").strip()
-
-    @property
-    def base_url(self) -> str:
-        return os.getenv("AI_BASE_URL", "").strip().rstrip("/")
-
-    @property
-    def model(self) -> str:
-        return os.getenv("AI_MODEL", "").strip()
-
-    @property
-    def timeout_seconds(self) -> float:
-        return float(os.getenv("AI_TIMEOUT_SECONDS", "120"))
+    def __init__(self, llm_client: LLMClient | None = None, client=None) -> None:
+        self.llm_client = llm_client or LLMClient(client=client, usage_label="AI mode")
 
     def convert(
         self,
@@ -677,13 +659,6 @@ class AIConverter:
         genre: str = "",
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
     ) -> Screenplay:
-        if not self.api_key:
-            raise ValueError("AI mode requires AI_API_KEY.")
-        if not self.base_url:
-            raise ValueError("AI mode requires AI_BASE_URL.")
-        if not self.model:
-            raise ValueError("AI mode requires AI_MODEL.")
-
         style = _adaptation_style_profile(adaptation_type)
         global_state = extract_global_story_state(chapters)
         source_text = "\n\n".join(f"{chapter.title}\n{chapter.content}" for chapter in chapters)
@@ -711,18 +686,7 @@ class AIConverter:
             "dialogue 可包含 emotion。\n\n"
             f"小说原文：\n{source_text}"
         )
-        response = self.client.post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "response_format": {"type": "json_object"},
-            },
-        )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        content = self.llm_client.complete_json(prompt)
         screenplay_data = json.loads(content)
         screenplay_data["global_state"] = global_state.model_dump(mode="json")
         existing_characters = {
