@@ -39,3 +39,21 @@ def test_extract_global_story_state_builds_locations_and_timeline() -> None:
     assert [event.order for event in global_state.timeline] == [1, 2, 3]
     assert global_state.timeline[0].time_marker == "清晨"
     assert global_state.timeline[2].chapter == "第三章 潮汐"
+
+
+def test_extract_locations_rejects_time_and_event_phrases() -> None:
+    chapters = parse_chapters(
+        "第一章 雾起\n"
+        "林夏来到旧钟楼。墙上的钟停在十年前父亲失踪的时刻。\n"
+        "第二章 旧楼\n林夏在码头等待。\n"
+        "第三章 潮汐\n夜里，林夏回到码头。"
+    )
+
+    global_state = extract_global_story_state(chapters)
+    location_names = {location.name for location in global_state.locations}
+
+    # 真实地点保留
+    assert "旧钟楼" in location_names
+    assert "码头" in location_names
+    # “十年前父亲失踪”这类时间/事件短语不应被当成地点
+    assert all("失踪" not in name and "年前" not in name for name in location_names)
