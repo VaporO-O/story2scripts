@@ -138,6 +138,9 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     assert "source 会由后端根据章节解析结果回填为对象" in captured["payload"]["messages"][0][
         "content"
     ]
+    assert "顶层 characters 的每个对象只能包含 id, name, description, motivation, arc" in captured[
+        "payload"
+    ]["messages"][0]["content"]
     assert "心理描写" in captured["payload"]["messages"][0]["content"]
     assert "goal, conflict, beat, subtext" in captured["payload"]["messages"][0]["content"]
     assert "改编类型：短剧" in captured["payload"]["messages"][0]["content"]
@@ -187,6 +190,49 @@ def test_ai_converter_backfills_source_from_parsed_chapters(
 
     assert screenplay.source.chapter_count == 3
     assert screenplay.source.chapter_titles == ["第一章", "第二章", "第三章"]
+
+
+def test_ai_converter_prunes_extra_top_level_character_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = json.loads(valid_screenplay_json())
+    data["characters"][0]["aliases"] = ["林澈"]
+    data["characters"][0]["first_appearance"] = "第一章"
+    data["characters"][0]["appearance_chapters"] = ["第一章"]
+    data["characters"][0]["traits"] = ["敏锐"]
+    data["characters"][0]["goal"] = "追查真相"
+    data["characters"][0]["consistency_note"] = "这些字段只属于 global_state.characters。"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    screenplay = converter.convert(chapters, adaptation_type="短剧")
+    character_data = screenplay.characters[0].model_dump(mode="json")
+
+    assert character_data == {
+        "id": "character-1",
+        "name": "林澈",
+        "description": "追查姐姐失踪真相的人。",
+        "motivation": "找到姐姐失踪真相。",
+        "arc": "从怀疑到主动面对真相。",
+    }
 
 
 def test_ai_converter_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:

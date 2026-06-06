@@ -481,6 +481,18 @@ def _source_info_from_chapters(chapters: list[Chapter]) -> SourceInfo:
     )
 
 
+def _prune_screenplay_character_data(character: dict) -> dict:
+    allowed_fields = Character.model_fields.keys()
+    return {key: value for key, value in character.items() if key in allowed_fields}
+
+
+def _normalize_screenplay_character_data(characters: list) -> list:
+    return [
+        _prune_screenplay_character_data(character) if isinstance(character, dict) else character
+        for character in characters
+    ]
+
+
 def _format_validation_error(exc: ValidationError) -> str:
     first_error = exc.errors()[0] if exc.errors() else {"loc": (), "msg": str(exc)}
     location = ".".join(str(item) for item in first_error.get("loc", ())) or "root"
@@ -687,6 +699,9 @@ class AIConverter:
             "source 会由后端根据章节解析结果回填为对象，不要输出字符串或数组; "
             f"顶层必须包含 adaptation_type，且 adaptation_type 必须等于 {adaptation_type}; "
             "顶层必须包含 global_state; 每个 character 必须包含 arc; "
+            "顶层 characters 的每个对象只能包含 id, name, description, motivation, arc; "
+            "aliases、first_appearance、appearance_chapters、traits、goal 和 consistency_note "
+            "只能出现在 global_state.characters，不要放入顶层 characters; "
             "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
             "dramatization_decisions, goal, conflict, beat, subtext, elements 和 camera_hints; "
             "heading 必须与 int_ext/location/time_of_day 对齐，使用类似 INT. LIBRARY - DAY 的 slug line; "
@@ -720,6 +735,9 @@ class AIConverter:
                 )
             else:
                 screenplay_data["characters"].append(state_data)
+        screenplay_data["characters"] = _normalize_screenplay_character_data(
+            screenplay_data["characters"]
+        )
 
         screenplay = _validate_ai_screenplay_data(screenplay_data)
         if screenplay.adaptation_type != adaptation_type:
