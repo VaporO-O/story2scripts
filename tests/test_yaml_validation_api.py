@@ -17,12 +17,14 @@ def valid_yaml_text() -> str:
 
 def test_validate_yaml_api_accepts_valid_yaml() -> None:
     response = client.post("/api/yaml/validate", json={"yaml_text": valid_yaml_text()})
+    body = response.json()
 
     assert response.status_code == 200
-    assert response.json() == {
-        "valid": True,
-        "message": "YAML 符合 Story2Script 剧本 Schema。",
-    }
+    assert body["valid"] is True
+    assert body["message"] == "YAML 符合 Story2Script 剧本 Schema。"
+    # 校验成功时一并返回解析后的剧本，供前端刷新分场预览。
+    assert body["screenplay"]["title"] == "测试故事"
+    assert len(body["screenplay"]["scenes"]) >= 1
 
 
 def test_validate_yaml_api_rejects_invalid_yaml() -> None:

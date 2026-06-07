@@ -4,8 +4,14 @@ const adaptationTypeInput = document.querySelector("#adaptationTypeInput");
 const convertModeInput = document.querySelector("#convertModeInput");
 const novelInput = document.querySelector("#novelInput");
 const yamlOutput = document.querySelector("#yamlOutput");
+const scriptPreview = document.querySelector("#scriptPreview");
+const previewViewButton = document.querySelector("#previewViewButton");
+const sourceViewButton = document.querySelector("#sourceViewButton");
 const emptyState = document.querySelector("#emptyState");
 const message = document.querySelector("#message");
+
+let currentScriptView = "preview";
+let latestScreenplay = null;
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
 const importNovelFileButton = document.querySelector("#importNovelFileButton");
@@ -105,6 +111,202 @@ function createProfileRow(label, value) {
   row.append(heading, cell);
 
   return row;
+}
+
+function createElement(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== undefined && text !== null && text !== "") {
+    node.textContent = text;
+  }
+  return node;
+}
+
+function characterNameMap(screenplay) {
+  const map = new Map();
+  (screenplay.characters || []).forEach((character) => {
+    map.set(character.id, character.name || character.id);
+  });
+  return map;
+}
+
+function dialogueCue(element, names) {
+  const speaker = names.get(element.character) || element.character || "未署名";
+  const notes = [element.parenthetical, element.emotion].filter((item) => item && item.trim());
+  return notes.length ? `${speaker}（${notes.join(" · ")}）` : speaker;
+}
+
+function renderSceneMeta(scene) {
+  const meta = createElement("div", "scene-beats");
+  [
+    ["目标", scene.goal],
+    ["冲突", scene.conflict],
+    ["节拍", scene.beat],
+    ["潜台词", scene.subtext],
+  ].forEach(([label, value]) => {
+    if (!value) {
+      return;
+    }
+    const row = createElement("div", "scene-beat");
+    row.append(createElement("span", "beat-label", label), createElement("span", "beat-text", value));
+    meta.appendChild(row);
+  });
+  return meta;
+}
+
+function renderChips(label, values) {
+  if (!values || values.length === 0) {
+    return null;
+  }
+  const wrap = createElement("div", "scene-chips");
+  wrap.appendChild(createElement("span", "chips-label", label));
+  values.forEach((value) => wrap.appendChild(createElement("span", "chip", value)));
+  return wrap;
+}
+
+function renderSceneBody(scene, names) {
+  const body = createElement("div", "scene-body");
+  (scene.elements || []).forEach((element) => {
+    if (element.type === "dialogue") {
+      const block = createElement("div", "line-dialogue");
+      block.append(
+        createElement("span", "cue", dialogueCue(element, names)),
+        createElement("p", "dlg", element.text),
+      );
+      body.appendChild(block);
+      return;
+    }
+    body.appendChild(createElement("p", "line-action", element.text));
+  });
+  return body;
+}
+
+function renderDecisions(scene) {
+  const decisions = scene.dramatization_decisions || [];
+  if (decisions.length === 0) {
+    return null;
+  }
+  const details = createElement("details", "scene-decisions");
+  details.appendChild(createElement("summary", null, `叙述 → 戏剧化决策（${decisions.length}）`));
+  decisions.forEach((decision) => {
+    const row = createElement("div", "decision-row");
+    row.appendChild(createElement("span", `decision-target target-${decision.target}`, decision.target));
+    const detail = createElement("div", "decision-detail");
+    detail.appendChild(createElement("p", "decision-source", decision.source_text));
+    if (decision.rendering && decision.rendering !== decision.source_text) {
+      detail.appendChild(createElement("p", "decision-rendering", `→ ${decision.rendering}`));
+    }
+    if (decision.reason) {
+      detail.appendChild(createElement("p", "decision-reason", decision.reason));
+    }
+    row.appendChild(detail);
+    details.appendChild(row);
+  });
+  return details;
+}
+
+function renderScene(scene, index, names) {
+  const article = createElement("article", "scene");
+  article.dataset.sceneId = scene.id;
+
+  const slug = createElement("div", "scene-slug");
+  const number = createElement("button", "scene-no", `SCENE ${index + 1}`);
+  number.type = "button";
+  number.title = "点击把此场景填入重写工具";
+  number.addEventListener("click", () => {
+    sceneIdInput.value = scene.id;
+    setMessage(`已选择 ${scene.id} 进行局部重写。`);
+  });
+  slug.append(
+    number,
+    createElement("span", "slug-line", scene.heading),
+    createElement("span", "scene-source", scene.source_chapter),
+  );
+  article.appendChild(slug);
+
+  if (scene.summary) {
+    article.appendChild(createElement("p", "scene-summary", scene.summary));
+  }
+  article.appendChild(renderSceneMeta(scene));
+
+  const presentNames = (scene.characters_present || []).map((id) => names.get(id) || id);
+  const present = renderChips("出场", presentNames);
+  if (present) {
+    article.appendChild(present);
+  }
+  const props = renderChips("道具", scene.props || []);
+  if (props) {
+    article.appendChild(props);
+  }
+
+  article.appendChild(renderSceneBody(scene, names));
+
+  if (scene.camera_hints && scene.camera_hints.length) {
+    const camera = createElement("div", "scene-camera");
+    camera.appendChild(createElement("span", "camera-label", "镜头"));
+    scene.camera_hints.forEach((hint) => camera.appendChild(createElement("p", "camera-hint", hint)));
+    article.appendChild(camera);
+  }
+
+  const decisions = renderDecisions(scene);
+  if (decisions) {
+    article.appendChild(decisions);
+  }
+  return article;
+}
+
+function renderScreenplay(screenplay) {
+  scriptPreview.innerHTML = "";
+  if (!screenplay) {
+    return;
+  }
+  const names = characterNameMap(screenplay);
+
+  const header = createElement("header", "script-meta");
+  header.appendChild(createElement("h3", "script-title", screenplay.title));
+  if (screenplay.logline) {
+    header.appendChild(createElement("p", "script-logline", screenplay.logline));
+  }
+  const tags = createElement("div", "script-tags");
+  if (screenplay.genre) {
+    tags.appendChild(createElement("span", "tag", screenplay.genre));
+  }
+  if (screenplay.adaptation_type) {
+    tags.appendChild(createElement("span", "tag tag-accent", screenplay.adaptation_type));
+  }
+  tags.appendChild(createElement("span", "tag", `${(screenplay.scenes || []).length} 场`));
+  header.appendChild(tags);
+  scriptPreview.appendChild(header);
+
+  (screenplay.scenes || []).forEach((scene, index) => {
+    scriptPreview.appendChild(renderScene(scene, index, names));
+  });
+}
+
+function setScriptView(view) {
+  currentScriptView = view;
+  previewViewButton.classList.toggle("is-active", view === "preview");
+  sourceViewButton.classList.toggle("is-active", view === "source");
+
+  if (!yamlOutput.value) {
+    emptyState.classList.remove("hidden");
+    scriptPreview.classList.add("hidden");
+    yamlOutput.classList.add("hidden");
+    return;
+  }
+
+  emptyState.classList.add("hidden");
+  scriptPreview.classList.toggle("hidden", view !== "preview");
+  yamlOutput.classList.toggle("hidden", view !== "source");
+}
+
+function showScreenplay(screenplay, yamlText) {
+  latestScreenplay = screenplay;
+  yamlOutput.value = yamlText;
+  renderScreenplay(screenplay);
+  setScriptView(currentScriptView);
 }
 
 function renderProfiles(profiles) {
@@ -226,9 +428,7 @@ async function convertNovel() {
       throw new Error(data.detail || "转换失败");
     }
 
-    yamlOutput.value = data.yaml_text;
-    emptyState.classList.add("hidden");
-    yamlOutput.classList.remove("hidden");
+    showScreenplay(data.screenplay, data.yaml_text);
     setMessage(
       `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。`,
     );
@@ -282,6 +482,11 @@ async function validateYaml() {
     return;
   }
 
+  if (data.screenplay) {
+    latestScreenplay = data.screenplay;
+    renderScreenplay(data.screenplay);
+    setScriptView(currentScriptView);
+  }
   setMessage(data.message);
 }
 
@@ -315,9 +520,7 @@ async function rewriteScene(operation) {
       throw new Error(errorMessage(data, "局部重写失败"));
     }
 
-    yamlOutput.value = data.yaml_text;
-    emptyState.classList.add("hidden");
-    yamlOutput.classList.remove("hidden");
+    showScreenplay(data.screenplay, data.yaml_text);
     setMessage(`${data.message} 已更新 ${data.scene_id}，模式：${data.mode}。`);
   } catch (error) {
     setMessage(error.message, true);
@@ -356,6 +559,8 @@ document.querySelector("#convertButton").addEventListener("click", convertNovel)
 document.querySelector("#analyzeCharactersButton").addEventListener("click", analyzeCharacters);
 document.querySelector("#validateButton").addEventListener("click", validateYaml);
 document.querySelector("#downloadButton").addEventListener("click", downloadYaml);
+previewViewButton.addEventListener("click", () => setScriptView("preview"));
+sourceViewButton.addEventListener("click", () => setScriptView("source"));
 rewriteButtons.forEach((button) => {
   button.addEventListener("click", () => rewriteScene(button.dataset.rewriteOperation));
 });

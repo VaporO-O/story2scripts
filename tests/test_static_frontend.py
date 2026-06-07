@@ -19,6 +19,24 @@ def test_workbench_sends_selected_full_conversion_mode() -> None:
     assert "mode: convertModeInput.value" in script
 
 
+def test_workbench_exposes_screenplay_preview_toggle() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="scriptPreview"' in html
+    assert 'id="previewViewButton"' in html
+    assert 'id="sourceViewButton"' in html
+
+
+def test_workbench_renders_structured_screenplay_preview() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "function renderScreenplay(" in script
+    assert "function setScriptView(" in script
+    assert "showScreenplay(data.screenplay, data.yaml_text)" in script
+    assert "line-dialogue" in script
+    assert "line-action" in script
+
+
 def test_workbench_exposes_novel_file_import() -> None:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 

@@ -67,6 +67,7 @@ class ValidateYamlRequest(BaseModel):
 class ValidateYamlResponse(BaseModel):
     valid: bool
     message: str
+    screenplay: Screenplay | None = None
 
 
 class SceneRewriteRequest(BaseModel):
