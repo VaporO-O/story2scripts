@@ -20,7 +20,7 @@ from .api_models import SceneRewriteRequest
 from .api_models import SceneRewriteResponse
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
-from .character_profiles import extract_character_profiles
+from .character_profiles_ai import get_character_profiler
 from .converter import get_converter
 from .examples import load_example_novel
 from .novel_import import import_novel_content
@@ -81,7 +81,13 @@ async def analyze_character_profiles(request: CharacterProfileRequest) -> Charac
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return CharacterProfileResponse(profiles=extract_character_profiles(chapters))
+    try:
+        profiler = get_character_profiler(request.mode)
+        profiles = profiler.extract(chapters)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return CharacterProfileResponse(profiles=profiles, mode=profiler.mode)
 
 
 @app.get("/api/screenplay/schema")

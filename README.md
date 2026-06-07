@@ -259,7 +259,41 @@ python -m compileall -q src tests
 - `appearance_chapters`：出场章节
 - `key_change`：关键变化
 
-当前版本使用规则提取，适合本地演示和稳定测试；后续可在不改变接口结构的前提下接入 AI 增强。
+接口支持 `mode` 字段，用于在本地规则与 AI 增强之间切换：
+
+| mode | 说明 |
+| --- | --- |
+| `demo` | 默认。纯本地规则提取，无需 API Key，稳定可复现 |
+| `ai` | 调用外部 LLM，理解原文并补全性格、目标、人物关系和关键变化 |
+
+请求示例：
+
+```json
+{
+  "mode": "ai",
+  "novel_text": "第一章 ...\n第二章 ...\n第三章 ..."
+}
+```
+
+### 为什么需要 AI 增强
+
+本地规则只能做精确的模板匹配，无法“理解”原文：`personality` 仅命中固定的性格关键词、
+`goal` 只截取含触发词的句子、`key_change` 需要字面的“从 X 到 Y”、`relationships` 需要字面的
+“X 是 Y 的弟弟”。自然行文很少正好用这些模板，因此这些字段经常落回“待作者进一步补充”。
+性格、动机、人物弧光与人物关系本质上需要阅读理解，正是 LLM 擅长、硬规则做不到的部分。
+
+`ai` 模式采用“本地定名单、LLM 补语义”的混合策略，复用与 `/api/convert` 相同的
+OpenAI-compatible 配置（`AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` / `AI_TIMEOUT_SECONDS`）：
+
+- 人物名单与 `appearance_chapters` 仍由本地规则确定，**LLM 不能新增、漏掉或改写人物**，
+  从而继承上面稳定的人名识别结果
+- LLM 只负责补全 `role`、`personality`、`goal`、`relationships`、`key_change`
+- 服务端逐条按 `CharacterProfile` Schema 校验并以本地结果兜底：LLM 留空或给占位文字的
+  字段会自动回退到本地值；模型返回非法 JSON、缺少 `profiles` 列表等硬错误才返回 `422`
+
+没有配置 API Key 时继续使用默认 `demo` 模式即可。
+
+### 本地人名识别
 
 人名识别采用“姓氏闸门 + 多重证据”策略，确保稳定可复现：
 

@@ -96,6 +96,7 @@ class ExampleNovelResponse(BaseModel):
 
 class CharacterProfileRequest(BaseModel):
     novel_text: str = Field(min_length=1)
+    mode: str = "demo"
 
 
 class CharacterProfile(BaseModel):
@@ -110,4 +111,5 @@ class CharacterProfile(BaseModel):
 
 class CharacterProfileResponse(BaseModel):
     profiles: list[CharacterProfile]
+    mode: str = "demo"
 
