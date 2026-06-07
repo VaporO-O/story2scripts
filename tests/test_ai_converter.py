@@ -123,6 +123,40 @@ def test_ai_converter_merges_chapter_scenes_and_renumbers(monkeypatch: pytest.Mo
     ]
 
 
+def test_ai_converter_splits_long_chapters_into_bounded_chunk_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        prompts.append(payload["messages"][0]["content"])
+        return chapter_response([scene_dict(summary=f"片段 {len(prompts)}")])
+
+    long_paragraphs = [
+        f"林澈在走廊停下，记录第 {index} 个线索。"
+        for index in range(120)
+    ]
+    long_novel = (
+        "第一章 长夜\n"
+        + "\n\n".join(long_paragraphs)
+        + "\n第二章 线索\n林澈在码头等待。\n"
+        "第三章 收束\n林澈回头看了一眼。"
+    )
+
+    configure_ai(monkeypatch)
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    screenplay = converter.convert(parse_chapters(long_novel), adaptation_type="短剧")
+
+    assert len(prompts) > 3
+    assert "本章片段：第 1/" in prompts[0]
+    assert all("本章片段原文" in prompt for prompt in prompts)
+    assert [scene.id for scene in screenplay.scenes] == [
+        f"scene-{index}" for index in range(1, len(prompts) + 1)
+    ]
+
+
 def test_ai_converter_builds_characters_from_global_state(monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return chapter_response([scene_dict()])
