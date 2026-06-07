@@ -441,13 +441,14 @@ async function convertNovel() {
 
 async function analyzeCharacters() {
   analyzeCharactersButton.disabled = true;
-  setMessage("正在分析人物小传……");
+  const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
+  setMessage(`正在使用${modeName}模式分析人物小传……`);
 
   try {
     const response = await fetch("/api/characters/profiles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ novel_text: novelInput.value }),
+      body: JSON.stringify({ novel_text: novelInput.value, mode: convertModeInput.value }),
     });
     const data = await response.json();
 
@@ -456,7 +457,7 @@ async function analyzeCharacters() {
     }
 
     renderProfiles(data.profiles);
-    setMessage(`已提取 ${data.profiles.length} 个人物小传。`);
+    setMessage(`已提取 ${data.profiles.length} 个人物小传，当前模式：${data.mode}。`);
   } catch (error) {
     setMessage(error.message, true);
   } finally {
