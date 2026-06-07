@@ -272,6 +272,53 @@ textarea {
   cursor: wait;
 }
 
+.conversion-progress {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfa;
+}
+
+.progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.progress-track {
+  height: 8px;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.progress-bar {
+  width: 0%;
+  height: 100%;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.conversion-progress p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.conversion-progress.is-error .progress-meta {
+  color: #c33b26;
+}
+
+.conversion-progress.is-error .progress-bar {
+  background: #c33b26;
+}
+
 .script-panel textarea {
   height: 354px;
   background: #18231d;

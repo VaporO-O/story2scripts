@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .screenplay import DEFAULT_ADAPTATION_TYPE
@@ -58,6 +60,27 @@ class ConvertResponse(BaseModel):
     yaml_text: str
     mode: str
     adaptation_type: AdaptationType
+
+
+ConvertJobStatus = Literal["queued", "running", "succeeded", "failed"]
+
+
+class ConvertJobStartResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+
+
+class ConvertJobStatusResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+    result: ConvertResponse | None = None
+    error: str = ""
 
 
 class ValidateYamlRequest(BaseModel):
