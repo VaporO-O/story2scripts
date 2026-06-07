@@ -356,7 +356,13 @@ AI_API_KEY=your-api-key
 AI_BASE_URL=https://your-provider.example/v1
 AI_MODEL=your-model-name
 AI_TIMEOUT_SECONDS=120
+# 可选：长剧本 JSON 可能超出服务商默认输出上限被截断，按需调高
+AI_MAX_TOKENS=8192
 ```
+
+`AI_MAX_TOKENS` 为可选项：默认不发送该参数、沿用服务商默认上限；当整篇剧本 JSON 较大、
+出现“模型返回内容不是有效 JSON”时，多半是输出被截断，可显式调高它。容错解析失败时，错误
+信息会附带模型原始响应的前 500 字，便于判断是被截断、返回了说明文字，还是根本没返回 JSON。
 
 随后调用 `/api/convert` 时传入：
 

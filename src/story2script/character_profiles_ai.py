@@ -67,7 +67,7 @@ class AICharacterProfiler:
         try:
             payload = loads_json_object(content)
         except ValueError as exc:
-            raise ValueError("AI 人物小传失败：模型返回的内容不是合法 JSON。") from exc
+            raise ValueError(f"AI 人物小传失败：模型返回的内容不是合法 JSON。{exc}") from exc
 
         raw_profiles = payload.get("profiles") if isinstance(payload, dict) else payload
         if not isinstance(raw_profiles, list):
