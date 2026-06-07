@@ -234,7 +234,7 @@ class AISceneRewriter:
         try:
             raw_scene = loads_json_object(content)
         except ValueError as exc:
-            raise ValueError("AI 局部重写失败：模型返回的内容不是合法 JSON。") from exc
+            raise ValueError(f"AI 局部重写失败：模型返回的内容不是合法 JSON。{exc}") from exc
         if not isinstance(raw_scene, dict):
             raise ValueError("AI 局部重写失败：模型返回的内容不是 Scene 对象。")
 

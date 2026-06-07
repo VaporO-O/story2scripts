@@ -846,7 +846,7 @@ def _load_ai_screenplay_data(content: str) -> dict:
     try:
         data = loads_json_object(content)
     except ValueError as exc:
-        raise ValueError("AI 全文转换失败：模型返回内容不是有效 JSON。") from exc
+        raise ValueError(f"AI 全文转换失败：模型返回内容不是有效 JSON。{exc}") from exc
 
     if not isinstance(data, dict):
         raise ValueError("AI 全文转换失败：模型返回的 JSON 必须是 Screenplay 对象。")

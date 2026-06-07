@@ -18,9 +18,58 @@ def test_loads_json_object_extracts_from_surrounding_prose() -> None:
     assert loads_json_object('好的，这是结果：{"a": 1, "b": [2, 3]}') == {"a": 1, "b": [2, 3]}
 
 
+def test_loads_json_object_strips_think_block() -> None:
+    assert loads_json_object("<think>先想一下</think>\n{\"a\": 1}") == {"a": 1}
+
+
+def test_loads_json_object_tolerates_trailing_commas() -> None:
+    assert loads_json_object('{"a": 1, "b": [2, 3,],}') == {"a": 1, "b": [2, 3]}
+
+
 def test_loads_json_object_rejects_non_json() -> None:
     with pytest.raises(ValueError):
         loads_json_object("这里没有任何 JSON")
+
+
+def test_loads_json_object_error_includes_response_preview() -> None:
+    with pytest.raises(ValueError, match="抱歉，我无法完成"):
+        loads_json_object("抱歉，我无法完成。")
+
+
+def test_complete_json_includes_max_tokens_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    monkeypatch.setenv("AI_MAX_TOKENS", "8192")
+    client = LLMClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    client.complete_json("prompt")
+
+    assert captured["body"]["max_tokens"] == 8192
+
+
+def test_complete_json_omits_max_tokens_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    monkeypatch.delenv("AI_MAX_TOKENS", raising=False)
+    client = LLMClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    client.complete_json("prompt")
+
+    assert "max_tokens" not in captured["body"]
 
 
 def configure_ai(monkeypatch: pytest.MonkeyPatch) -> None:

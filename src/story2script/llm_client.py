@@ -63,40 +63,60 @@ def _load_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-_CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_CODE_FENCE_PATTERN = re.compile(r"```(?:json|json5)?\s*(.*?)```", re.DOTALL)
+_THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_TRAILING_COMMA_PATTERN = re.compile(r",(\s*[}\]])")
+
+
+def _try_json(candidate: str) -> tuple[bool, object]:
+    candidate = candidate.strip()
+    if not candidate:
+        return False, None
+    try:
+        return True, json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+    # 容忍尾随逗号（LLM 常见错误，如 [1, 2,] / {"a": 1,}）。
+    repaired = _TRAILING_COMMA_PATTERN.sub(r"\1", candidate)
+    if repaired != candidate:
+        try:
+            return True, json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+    return False, None
 
 
 def loads_json_object(content: str) -> object:
     """Parse a JSON value from an LLM response, tolerating common wrappers.
 
-    Models frequently wrap the JSON in Markdown ``` fences or add a sentence
-    before/after it, which makes a bare ``json.loads`` fail even though the
-    payload is valid. This tries the raw text, then a fenced block, then the
-    outermost ``{...}`` / ``[...]`` span before giving up.
+    Models frequently wrap the JSON in Markdown ``` fences, prepend reasoning /
+    ``<think>`` blocks, add a sentence before/after it, or leave a trailing
+    comma, any of which makes a bare ``json.loads`` fail even though a valid
+    object is present. This strips those wrappers, then tries the raw text, a
+    fenced block, and finally the outermost ``{...}`` / ``[...]`` span. On total
+    failure it raises with a preview of the raw response so the real cause
+    (e.g. truncated output, prose instead of JSON) is visible.
     """
-    text = content.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    text = content.strip().lstrip("﻿").strip()
+    text = _THINK_BLOCK_PATTERN.sub("", text).strip()
 
+    candidates: list[str] = [text]
     fenced = _CODE_FENCE_PATTERN.search(text)
     if fenced:
-        try:
-            return json.loads(fenced.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
+        candidates.append(fenced.group(1))
     for open_char, close_char in (("{", "}"), ("[", "]")):
         start = text.find(open_char)
         end = text.rfind(close_char)
         if start != -1 and end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                continue
+            candidates.append(text[start : end + 1])
 
-    raise ValueError("无法从模型响应中解析出 JSON。")
+    for candidate in candidates:
+        ok, value = _try_json(candidate)
+        if ok:
+            return value
+
+    preview = text[:500].replace("\n", "\\n") or "(空响应)"
+    raise ValueError(f"无法从模型响应中解析出 JSON（原始响应前 500 字：{preview}）")
 
 
 class LLMClient:
@@ -136,20 +156,35 @@ class LLMClient:
         except ValueError as exc:
             raise ValueError(f"{self.usage_label} requires numeric AI_TIMEOUT_SECONDS.") from exc
 
+    @property
+    def max_tokens(self) -> int | None:
+        raw_value = self._config_value("AI_MAX_TOKENS")
+        if not raw_value:
+            return None
+        try:
+            return int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{self.usage_label} requires integer AI_MAX_TOKENS.") from exc
+
     def complete_json(self, prompt: str, temperature: float = 0.3) -> str:
         """Return the model's JSON text response for a single user prompt."""
         self._ensure_configured()
+
+        body: dict = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+        }
+        # 长剧本 JSON 可能超出服务商默认输出上限被截断；配置 AI_MAX_TOKENS 可显式调高。
+        if self.max_tokens is not None:
+            body["max_tokens"] = self.max_tokens
 
         try:
             response = self.client.post(
                 f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": temperature,
-                    "response_format": {"type": "json_object"},
-                },
+                json=body,
             )
             response.raise_for_status()
         except httpx.TimeoutException as exc:
