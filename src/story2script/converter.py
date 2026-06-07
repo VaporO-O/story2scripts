@@ -37,6 +37,9 @@ class AdaptationStyleProfile:
     prompt_instruction: str
 
 
+AI_CHAPTER_CHUNK_CHAR_LIMIT = 1800
+
+
 class Converter(Protocol):
     mode: str
 
@@ -227,6 +230,85 @@ def _split_scene_slices(text: str) -> list[SceneSlice]:
         )
     )
     return slices
+
+
+def _split_oversized_text(text: str, limit: int) -> list[str]:
+    units = _text_units(text)
+    if not units:
+        stripped = text.strip()
+        return [stripped] if stripped else []
+
+    chunks: list[str] = []
+    current_units: list[str] = []
+    current_length = 0
+
+    def flush_current() -> None:
+        nonlocal current_length
+        if current_units:
+            chunks.append("\n".join(current_units).strip())
+            current_units.clear()
+            current_length = 0
+
+    for unit in units:
+        if len(unit) > limit:
+            flush_current()
+            chunks.extend(
+                unit[index : index + limit].strip()
+                for index in range(0, len(unit), limit)
+                if unit[index : index + limit].strip()
+            )
+            continue
+
+        separator_length = 1 if current_units else 0
+        projected_length = current_length + separator_length + len(unit)
+        if current_units and projected_length > limit:
+            flush_current()
+            projected_length = len(unit)
+
+        current_units.append(unit)
+        current_length = projected_length
+
+    flush_current()
+    return chunks
+
+
+def _chapter_text_chunks(
+    chapter: Chapter,
+    limit: int = AI_CHAPTER_CHUNK_CHAR_LIMIT,
+) -> list[str]:
+    chunks: list[str] = []
+    current_slices: list[str] = []
+    current_length = 0
+
+    def flush_current() -> None:
+        nonlocal current_length
+        if current_slices:
+            chunks.append("\n\n".join(current_slices).strip())
+            current_slices.clear()
+            current_length = 0
+
+    for scene_slice in _split_scene_slices(chapter.content):
+        text = scene_slice.text.strip()
+        if not text:
+            continue
+
+        if len(text) > limit:
+            flush_current()
+            chunks.extend(_split_oversized_text(text, limit))
+            continue
+
+        separator_length = 2 if current_slices else 0
+        projected_length = current_length + separator_length + len(text)
+        if current_slices and projected_length > limit:
+            flush_current()
+            projected_length = len(text)
+
+        current_slices.append(text)
+        current_length = projected_length
+
+    flush_current()
+    fallback = chapter.content.strip()
+    return chunks or ([fallback] if fallback else [])
 
 
 def _resolve_known_name(raw: str, known_names: set[str]) -> str | None:
@@ -1010,11 +1092,10 @@ class AIConverter:
     The provider is intentionally configured by environment variables so the
     project is not tied to one vendor.
 
-    Conversion runs chapter by chapter (the "分块转换" the project documents):
+    Conversion runs in chapter-sized slices (the "分块转换" the project documents):
     the local ``global_state`` and a stable character roster are fixed context,
-    and each LLM call only has to return the scenes of a single chapter. This
-    keeps every response small enough to fit the model's output limit, so a
-    multi-chapter novel no longer fails with a truncated, unparseable JSON.
+    and each LLM call only has to return the scenes for one bounded chunk. This
+    keeps every response small enough to reduce truncated, unparseable JSON.
     """
 
     mode = "ai"
@@ -1044,12 +1125,23 @@ class AIConverter:
 
         scenes: list[dict] = []
         for chapter in chapters:
-            raw_scenes = self._convert_chapter(chapter, global_state, characters, adaptation_type, style)
-            scenes.extend(
-                _normalize_screenplay_scene_data(
-                    raw_scenes, known_ids, name_to_id, [chapter.title]
+            chapter_chunks = _chapter_text_chunks(chapter)
+            for chunk_index, chunk_text in enumerate(chapter_chunks, start=1):
+                raw_scenes = self._convert_chapter_chunk(
+                    chapter,
+                    chunk_text,
+                    chunk_index,
+                    len(chapter_chunks),
+                    global_state,
+                    characters,
+                    adaptation_type,
+                    style,
                 )
-            )
+                scenes.extend(
+                    _normalize_screenplay_scene_data(
+                        raw_scenes, known_ids, name_to_id, [chapter.title]
+                    )
+                )
         if not scenes:
             raise ValueError("AI 全文转换失败：模型没有返回任何有效场景。")
         # 合并各章场景后统一重排 scene id，避免分块产生的编号冲突。
@@ -1070,9 +1162,12 @@ class AIConverter:
         }
         return _validate_ai_screenplay_data(screenplay_data)
 
-    def _convert_chapter(
+    def _convert_chapter_chunk(
         self,
         chapter: Chapter,
+        chunk_text: str,
+        chunk_index: int,
+        chunk_count: int,
         global_state: GlobalStoryState,
         characters: list[dict],
         adaptation_type: AdaptationType,
@@ -1080,11 +1175,13 @@ class AIConverter:
     ) -> list[dict]:
         roster = [{"id": item["id"], "name": item["name"]} for item in characters]
         prompt = (
-            "你是专业影视编剧。请只把【本章】小说改编成 Story2Script 的场景列表。"
+            "你是专业影视编剧。请只把【本章】中的【当前片段】小说改编成 Story2Script 的场景列表。"
             "只返回可被 json.loads 解析的 JSON 对象，形如 {\"scenes\": [...]}，"
             "不要 YAML、Markdown 或解释文字。\n"
             "重点：心理描写不能照搬，要外化为动作、对白 emotion 和 camera_hints；"
-            "按时间、地点、人物进出、情节转折和冲突变化把本章拆成多个场景。\n"
+            "按时间、地点、人物进出、情节转折和冲突变化把当前片段拆成场景；"
+            "当前片段只覆盖本章的一部分，不要补写片段外剧情；"
+            "每个片段返回 1 到 3 个 scene，保持 JSON 精简完整，避免超长响应。\n"
             f"改编类型：{adaptation_type}\n"
             f"改编要求：{style.prompt_instruction}\n"
             "稳定人物表（characters 和 dialogue.character 只能引用这里的 id，不要新造人物）："
@@ -1102,14 +1199,25 @@ class AIConverter:
             "dramatization_decisions 每条要给出真实的 source_text（取自原文）和 rendering（改写后文本），"
             "target 只能是 action、dialogue、subtext、scene_description; "
             "dialogue 可包含 emotion。\n\n"
-            f"本章标题：{chapter.title}\n本章原文：\n{chapter.content}"
+            f"本章标题：{chapter.title}\n"
+            f"本章片段：第 {chunk_index}/{chunk_count} 段\n"
+            f"本章片段原文：\n{chunk_text}"
         )
-        content = self.llm_client.complete_json(prompt)
+        try:
+            content = self.llm_client.complete_json(prompt)
+        except ValueError as exc:
+            message = (
+                f"AI 全文转换失败：章节《{chapter.title}》"
+                f"第 {chunk_index}/{chunk_count} 个片段调用失败。{exc}"
+            )
+            raise ValueError(message) from exc
+
         try:
             data = loads_json_object(content)
         except ValueError as exc:
             raise ValueError(
-                f"AI 全文转换失败：章节《{chapter.title}》返回内容不是有效 JSON。{exc}"
+                f"AI 全文转换失败：章节《{chapter.title}》"
+                f"第 {chunk_index}/{chunk_count} 个片段返回内容不是有效 JSON。{exc}"
             ) from exc
 
         if isinstance(data, dict):
@@ -1120,7 +1228,8 @@ class AIConverter:
             scenes = None
         if not isinstance(scenes, list):
             raise ValueError(
-                f"AI 全文转换失败：章节《{chapter.title}》未返回有效的 scenes 列表。"
+                f"AI 全文转换失败：章节《{chapter.title}》"
+                f"第 {chunk_index}/{chunk_count} 个片段未返回有效的 scenes 列表。"
             )
         return scenes
 
