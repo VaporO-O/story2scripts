@@ -46,6 +46,33 @@ def test_workbench_exposes_novel_file_import() -> None:
     assert ".txt,.text,.md,.markdown,.csv,.log,.epub,.mobi,.azw,.azw3,text/*" in html
 
 
+def test_workbench_exposes_chapter_view() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="novelEditViewButton"' in html
+    assert 'id="novelChapterViewButton"' in html
+    assert 'id="chapterView"' in html
+
+
+def test_workbench_chapter_detection_skips_empty_toc_headings() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # 章节识别要与后端一致：标题后没有正文（目录项）的不计入章节。
+    assert "function detectChapters(" in script
+    assert "if (content)" in script
+    assert "detectChapters(novelInput.value)" in script
+    assert "function renderChapterView(" in script
+
+
+def test_workbench_rewrite_selects_character_by_name() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert '<select id="rewriteCharacterInput">' in html
+    assert "function populateCharacterOptions(" in script
+    assert "populateCharacterOptions(screenplay)" in script
+
+
 def test_workbench_reads_imported_novel_file() -> None:
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 

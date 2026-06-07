@@ -164,6 +164,38 @@ textarea {
   font: 14px/1.85 "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+.chapter-view {
+  height: 425px;
+  overflow-y: auto;
+  padding: 16px 22px;
+}
+
+.chapter-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chapter-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: #fbfcfa;
+}
+
+.chapter-title {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.chapter-text {
+  padding: 0 14px 14px;
+  color: var(--ink);
+  font: 13px/1.85 "PingFang SC", "Microsoft YaHei", sans-serif;
+  white-space: pre-wrap;
+}
+
 .panel-footer {
   border-top: 1px solid var(--line);
   border-bottom: 0;

@@ -30,6 +30,10 @@
               <h2>小说原文</h2>
             </div>
             <div class="button-row">
+              <div class="view-toggle" role="group" aria-label="小说视图切换">
+                <button id="novelEditViewButton" class="view-button is-active" type="button">编辑</button>
+                <button id="novelChapterViewButton" class="view-button" type="button">按章节</button>
+              </div>
               <button id="importNovelFileButton" class="ghost-button">导入文件</button>
               <button id="loadExampleButton" class="ghost-button">填入示例</button>
             </div>
@@ -57,6 +61,7 @@
           </div>
 
           <textarea id="novelInput" placeholder="请粘贴小说正文，并使用“第一章 标题”格式标记至少三个章节……"></textarea>
+          <div id="chapterView" class="chapter-view hidden"></div>
 
           <div class="panel-footer">
             <span id="chapterCount">已识别 0 个章节</span>
@@ -102,7 +107,12 @@
                   <option value="ai">AI</option>
                 </select>
               </label>
-              <label>角色 ID<input id="rewriteCharacterInput" placeholder="可选，例如 character-1" /></label>
+              <label>
+                角色
+                <select id="rewriteCharacterInput">
+                  <option value="">（自动选择）</option>
+                </select>
+              </label>
               <label>语气<input id="rewriteToneInput" value="更克制" /></label>
             </div>
             <div class="rewrite-actions">

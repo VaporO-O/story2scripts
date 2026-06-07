@@ -60,6 +60,24 @@ def test_rewrite_scene_can_adjust_character_voice() -> None:
     assert dialogue.emotion == "更锋利"
 
 
+def test_rewrite_scene_accepts_character_name() -> None:
+    screenplay = sample_screenplay()
+    character = screenplay.characters[0]
+
+    # 用户传入角色“名字”而非 id，也能解析回稳定 id。
+    updated, _ = rewrite_scene(
+        screenplay,
+        "scene-1",
+        "adjust_character_voice",
+        character_id=character.name,
+        tone="更锋利",
+    )
+    dialogue = updated.scenes[0].elements[1]
+
+    assert isinstance(dialogue, Dialogue)
+    assert dialogue.character == character.id
+
+
 def test_rewrite_scene_rejects_unknown_scene() -> None:
     screenplay = sample_screenplay()
 

@@ -59,9 +59,13 @@ def _first_scene_character(screenplay: Screenplay, scene_id: str) -> str:
 
 def _resolve_character_id(screenplay: Screenplay, scene_id: str, character_id: str = "") -> str:
     if character_id:
-        if character_id not in _known_character_ids(screenplay):
-            raise ValueError(f"未找到角色：{character_id}")
-        return character_id
+        if character_id in _known_character_ids(screenplay):
+            return character_id
+        # 用户通常只知道角色名字，不知道 id：允许直接传入角色名并解析回稳定 id。
+        for character in screenplay.characters:
+            if character.name == character_id:
+                return character.id
+        raise ValueError(f"未找到角色：{character_id}")
     return _first_scene_character(screenplay, scene_id)
 
 
