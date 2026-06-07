@@ -396,6 +396,76 @@ def test_ai_converter_normalizes_imperfect_scene_structure(
     assert result_scene.elements[0].character == "character-1"
 
 
+def test_ai_converter_does_not_leak_placeholder_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sparse_data = json.loads(valid_screenplay_json())
+    scene = sparse_data["scenes"][0]
+    # 复现线上情况：正文只放进 camera_hints，缺 summary、缺 elements，
+    # dramatization_decisions 是没有 source_text/rendering 的空残桩。
+    del scene["summary"]
+    scene["elements"] = []
+    scene["camera_hints"] = ["俯拍林澈蹲下捡信，特写信纸上的字。"]
+    scene["dramatization_decisions"] = [{"target": "scene_description"}, {"target": "dialogue"}]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(sparse_data, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    screenplay = converter.convert(chapters, adaptation_type="短剧")
+    blob = json.dumps(screenplay.model_dump(mode="json"), ensure_ascii=False)
+    scene = screenplay.scenes[0]
+
+    # 不允许把工具元注释或占位摘要写进剧本正文。
+    assert "由 AI 输出补全" not in blob
+    assert "待补充摘要" not in blob
+    # summary 与决策从真实内容派生。
+    assert "俯拍林澈" in scene.summary
+    assert all(decision.rendering for decision in scene.dramatization_decisions)
+    assert all("由 AI" not in decision.reason for decision in scene.dramatization_decisions)
+
+
+def test_ai_converter_prompt_requires_preserving_dialogue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": valid_screenplay_json()}}]},
+        )
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    chapters = parse_chapters("第一章\n内容\n第二章\n内容\n第三章\n内容")
+
+    converter.convert(chapters, adaptation_type="短剧")
+    prompt = captured["payload"]["messages"][0]["content"]
+
+    assert "原文里出现的台词必须原句保留" in prompt
+    assert "camera_hints 只放简短镜头" in prompt
+
+
 def test_ai_converter_rejects_when_no_scenes(monkeypatch: pytest.MonkeyPatch) -> None:
     empty_data = json.loads(valid_screenplay_json())
     empty_data["scenes"] = []

@@ -634,7 +634,6 @@ def _normalize_scene_elements(
     elements: object,
     known_ids: set[str],
     name_to_id: dict[str, str],
-    fallback_text: str,
 ) -> list[dict]:
     normalized: list[dict] = []
     if isinstance(elements, list):
@@ -642,24 +641,71 @@ def _normalize_scene_elements(
             resolved = _normalize_scene_element(element, known_ids, name_to_id)
             if resolved:
                 normalized.append(resolved)
-    if not normalized:
-        normalized.append({"type": "action", "text": fallback_text})
     return normalized
 
 
-def _normalize_dramatization_decisions(decisions: object, fallback_text: str) -> list[dict]:
-    valid_targets = {"action", "dialogue", "subtext", "scene_description"}
+_DECISION_REASONS: dict[str, str] = {
+    "action": "可见行为改写成动作行，推动场面前进。",
+    "dialogue": "原文对白保留为推动冲突与信息交换的台词。",
+    "subtext": "心理活动通过潜台词和反应间接表现，不直接搬成台词。",
+    "scene_description": "环境、空间与氛围信息用于建立可拍摄的场景描述。",
+}
+
+
+def _decision_reason(target: str) -> str:
+    return _DECISION_REASONS.get(target, _DECISION_REASONS["action"])
+
+
+def _scene_summary_from_content(elements: list[dict], camera_hints: list[str]) -> str:
+    for element in elements:
+        text = _as_text(element.get("text"))
+        if text:
+            return text[:60]
+    for hint in camera_hints:
+        text = _as_text(hint)
+        if text:
+            return text[:60]
+    return "本场内容待补充。"
+
+
+def _decisions_from_elements(elements: list[dict]) -> list[dict]:
+    decisions: list[dict] = []
+    for element in elements:
+        text = _as_text(element.get("text"))
+        if not text:
+            continue
+        target = "dialogue" if element.get("type") == "dialogue" else "action"
+        decisions.append(
+            {
+                "source_text": text,
+                "target": target,
+                "rendering": text,
+                "reason": _decision_reason(target),
+            }
+        )
+    return decisions
+
+
+def _normalize_dramatization_decisions(
+    decisions: object, elements: list[dict], summary: str
+) -> list[dict]:
+    valid_targets = set(_DECISION_REASONS)
     normalized: list[dict] = []
     if isinstance(decisions, list):
         for decision in decisions:
             if not isinstance(decision, dict):
                 continue
+            source_text = _as_text(decision.get("source_text"))
+            rendering = _as_text(decision.get("rendering"))
+            # 丢弃没有任何真实内容的决策残桩，避免用占位文本充数。
+            if not source_text and not rendering:
+                continue
             target = _as_text(decision.get("target")).lower()
             if target not in valid_targets:
                 target = "action"
-            source_text = _as_text(decision.get("source_text")) or fallback_text
-            rendering = _as_text(decision.get("rendering")) or source_text
-            reason = _as_text(decision.get("reason")) or "由 AI 输出补全的戏剧化决策。"
+            source_text = source_text or rendering
+            rendering = rendering or source_text
+            reason = _as_text(decision.get("reason")) or _decision_reason(target)
             normalized.append(
                 {
                     "source_text": source_text,
@@ -669,12 +715,14 @@ def _normalize_dramatization_decisions(decisions: object, fallback_text: str) ->
                 }
             )
     if not normalized:
+        normalized = _decisions_from_elements(elements)
+    if not normalized:
         normalized.append(
             {
-                "source_text": fallback_text,
+                "source_text": summary,
                 "target": "action",
-                "rendering": fallback_text,
-                "reason": "缺少分类决策时默认转为可见动作。",
+                "rendering": summary,
+                "reason": _decision_reason("action"),
             }
         )
     return normalized
@@ -719,7 +767,20 @@ def _normalize_screenplay_scene_data(
             )
         pruned["source_chapter"] = source_chapter
 
-        summary = _as_text(pruned.get("summary")) or f"第 {index} 场，待补充摘要。"
+        camera_hints = _as_text_list(pruned.get("camera_hints"))
+        pruned["camera_hints"] = camera_hints
+
+        elements = _normalize_scene_elements(
+            _collect_raw_elements(scene), known_ids, name_to_id
+        )
+        # 摘要优先取模型原值，否则从真实场景内容派生，避免出现占位式摘要。
+        summary = _as_text(pruned.get("summary")) or _scene_summary_from_content(
+            elements, camera_hints
+        )
+        if not elements:
+            elements = [{"type": "action", "text": summary}]
+        pruned["elements"] = elements
+
         pruned["summary"] = summary
         pruned["goal"] = _as_text(pruned.get("goal")) or "待补充：本场角色可见目标。"
         pruned["conflict"] = _as_text(pruned.get("conflict")) or "待补充：本场戏剧冲突。"
@@ -731,12 +792,8 @@ def _normalize_screenplay_scene_data(
             pruned.get("characters_present"), known_ids, name_to_id
         )
         pruned["props"] = _as_text_list(pruned.get("props"))
-        pruned["camera_hints"] = _as_text_list(pruned.get("camera_hints"))
         pruned["dramatization_decisions"] = _normalize_dramatization_decisions(
-            pruned.get("dramatization_decisions"), summary
-        )
-        pruned["elements"] = _normalize_scene_elements(
-            _collect_raw_elements(scene), known_ids, name_to_id, summary
+            pruned.get("dramatization_decisions"), elements, summary
         )
         normalized.append(pruned)
     return normalized
@@ -952,9 +1009,15 @@ class AIConverter:
             "aliases、first_appearance、appearance_chapters、traits、goal 和 consistency_note "
             "只能出现在 global_state.characters，不要放入顶层 characters; "
             "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
-            "dramatization_decisions, goal, conflict, beat, subtext, elements 和 camera_hints; "
+            "dramatization_decisions, summary, goal, conflict, beat, subtext, elements 和 camera_hints; "
+            "summary 必须是本场剧情的一句话概括，不能为空或写占位文字; "
             "heading 必须与 int_ext/location/time_of_day 对齐，使用类似 INT. LIBRARY - DAY 的 slug line; "
+            "elements 是本场正文，必须包含本场的动作行（type=action）和对白（type=dialogue）; "
+            "原文里出现的台词必须原句保留为一个 type=dialogue 元素，character 用对应角色 id，不能丢失对白，"
+            "也不能只把对白写进 dramatization_decisions 而不放进 elements; "
+            "camera_hints 只放简短镜头/调度提示，不要把动作行或对白塞进 camera_hints; "
             "每个 scene 的 dramatization_decisions 必须显式记录叙述到戏剧表达的分类决策，"
+            "每条决策都要给出真实的 source_text（取自原文）和 rendering（改写后的剧本文本），不能为空; "
             "target 只能是 action、dialogue、subtext、scene_description。"
             "分类规则：可见行为转 action；明确说话内容或需要外化的信息交换转 dialogue；"
             "心理活动、情绪判断和未说出口的意图转 subtext，不能直接搬成台词；"
