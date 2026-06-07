@@ -24,6 +24,9 @@ python -m uvicorn story2script.main:app --reload
 ```bash
 python -m uvicorn story2script.main:app --reload --port 8001
 ```
+## Demo演示
+
+- 健康检查：<https://www.bilibili.com/video/BV1ZyE86bEAY/>
 
 ## 工作台能力
 
