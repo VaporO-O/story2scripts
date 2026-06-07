@@ -695,6 +695,52 @@ def _normalize_heading(value: object, int_ext: str, location: str, time_of_day: 
     return f"{int_ext} {location} - {time_of_day}"
 
 
+_DIALOGUE_TYPE_ALIASES = {
+    "dialogue",
+    "dialog",
+    "line",
+    "speech",
+    "utterance",
+    "台词",
+    "对白",
+    "对话",
+}
+_ACTION_TYPE_ALIASES = {
+    "action",
+    "actions",
+    "description",
+    "scene_description",
+    "stage_direction",
+    "narration",
+    "动作",
+    "动作行",
+    "场景描述",
+    "旁白",
+}
+_ELEMENT_TEXT_KEYS = (
+    "text",
+    "line",
+    "dialogue",
+    "speech",
+    "utterance",
+    "content",
+    "description",
+    "台词",
+    "对白",
+    "内容",
+)
+_ELEMENT_CHARACTER_KEYS = (
+    "character",
+    "speaker",
+    "name",
+    "role",
+    "actor",
+    "人物",
+    "角色",
+    "说话人",
+)
+
+
 def _collect_raw_elements(scene: dict) -> list:
     """Gather scene elements, merging alternative keys the LLM may use.
 
@@ -722,31 +768,171 @@ def _collect_raw_elements(scene: dict) -> list:
     return collected
 
 
+def _first_text_by_keys(element: dict, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = element.get(key)
+        if isinstance(value, (dict, list)):
+            continue
+        text = _as_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _normalize_element_type(value: object) -> str:
+    element_type = _as_text(value).casefold()
+    if element_type in _DIALOGUE_TYPE_ALIASES:
+        return "dialogue"
+    if element_type in _ACTION_TYPE_ALIASES:
+        return "action"
+    return element_type
+
+
+def _resolve_character_reference(
+    value: object,
+    known_ids: set[str],
+    name_to_id: dict[str, str],
+) -> str:
+    raw = _as_text(value)
+    if not raw:
+        return ""
+
+    candidates = [
+        raw,
+        re.sub(r"[（(][^）)]{1,20}[）)]", "", raw).strip(" \t-—:："),
+    ]
+    for candidate in candidates:
+        if candidate in known_ids:
+            return candidate
+        if candidate in name_to_id:
+            return name_to_id[candidate]
+
+    name_matches = [
+        (name, character_id)
+        for name, character_id in name_to_id.items()
+        if name and name in raw
+    ]
+    if name_matches:
+        return max(name_matches, key=lambda item: len(item[0]))[1]
+
+    id_matches = [character_id for character_id in known_ids if character_id in raw]
+    return max(id_matches, key=len) if id_matches else ""
+
+
+def _dialogue_element(
+    character: str,
+    text: str,
+    parenthetical: str = "",
+    emotion: str = "",
+) -> dict | None:
+    line = text.strip()
+    if not character or not line:
+        return None
+    return {
+        "type": "dialogue",
+        "character": character,
+        "parenthetical": parenthetical.strip(),
+        "text": line,
+        "emotion": emotion.strip(),
+    }
+
+
+def _dialogue_from_speaker_line(
+    text: str,
+    known_ids: set[str],
+    name_to_id: dict[str, str],
+    parenthetical: str = "",
+    emotion: str = "",
+) -> dict | None:
+    match = re.match(r"^\s*[-—]?\s*(?P<speaker>[^:：\n]{1,40})\s*[:：]\s*(?P<line>.+)$", text)
+    if not match:
+        return None
+
+    speaker = match.group("speaker").strip()
+    note_match = re.search(r"[（(](?P<note>[^）)]{1,20})[）)]", speaker)
+    note = parenthetical or (note_match.group("note").strip() if note_match else "")
+    character = _resolve_character_reference(speaker, known_ids, name_to_id)
+    return _dialogue_element(character, match.group("line"), note, emotion)
+
+
+def _speaker_token_pattern(known_ids: set[str], name_to_id: dict[str, str]) -> str:
+    tokens = sorted({*known_ids, *name_to_id.keys()}, key=len, reverse=True)
+    return "|".join(re.escape(token) for token in tokens if token)
+
+
+def _split_text_scene_elements(
+    text: str,
+    known_ids: set[str],
+    name_to_id: dict[str, str],
+) -> list[dict]:
+    speaker_pattern = _speaker_token_pattern(known_ids, name_to_id)
+    if not speaker_pattern:
+        return [{"type": "action", "text": text}]
+
+    pattern = re.compile(
+        rf"(?P<speaker>{speaker_pattern})(?P<note>[（(][^）)]{{1,20}}[）)])?\s*[:：]"
+    )
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return [{"type": "action", "text": text}]
+
+    elements: list[dict] = []
+    cursor = 0
+    for index, match in enumerate(matches):
+        prefix = text[cursor : match.start()].strip()
+        if prefix:
+            elements.append({"type": "action", "text": prefix})
+
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        line = text[match.end() : end].strip()
+        note = (match.group("note") or "").strip("（）()")
+        character = _resolve_character_reference(match.group("speaker"), known_ids, name_to_id)
+        dialogue = _dialogue_element(character, line, note)
+        if dialogue:
+            elements.append(dialogue)
+
+        cursor = end
+
+    suffix = text[cursor:].strip()
+    if suffix:
+        elements.append({"type": "action", "text": suffix})
+    return elements or [{"type": "action", "text": text}]
+
+
 def _normalize_scene_element(
     element: object, known_ids: set[str], name_to_id: dict[str, str]
-) -> dict | None:
+) -> list[dict]:
     if isinstance(element, str):
         text = element.strip()
-        return {"type": "action", "text": text} if text else None
+        return _split_text_scene_elements(text, known_ids, name_to_id) if text else []
     if not isinstance(element, dict):
-        return None
-    element_type = _as_text(element.get("type")).lower()
-    text = _as_text(element.get("text")) or _as_text(element.get("description"))
-    if element_type == "dialogue":
-        character = _as_text(element.get("character"))
-        if character not in known_ids:
-            character = name_to_id.get(character, "")
-        if character in known_ids and text:
-            return {
-                "type": "dialogue",
-                "character": character,
-                "parenthetical": _as_text(element.get("parenthetical")),
-                "text": text,
-                "emotion": _as_text(element.get("emotion")),
-            }
+        return []
+
+    element_type = _normalize_element_type(element.get("type"))
+    text = _first_text_by_keys(element, _ELEMENT_TEXT_KEYS)
+    character = _resolve_character_reference(
+        _first_text_by_keys(element, _ELEMENT_CHARACTER_KEYS),
+        known_ids,
+        name_to_id,
+    )
+    parenthetical = _as_text(element.get("parenthetical"))
+    emotion = _as_text(element.get("emotion"))
+
+    if element_type == "dialogue" or character:
+        dialogue = _dialogue_element(character, text, parenthetical, emotion)
+        if dialogue:
+            return [dialogue]
+
+        if text:
+            parsed = _dialogue_from_speaker_line(
+                text, known_ids, name_to_id, parenthetical, emotion
+            )
+            if parsed:
+                return [parsed]
+
     if text:
-        return {"type": "action", "text": text}
-    return None
+        return _split_text_scene_elements(text, known_ids, name_to_id)
+    return []
 
 
 def _normalize_scene_elements(
@@ -758,8 +944,7 @@ def _normalize_scene_elements(
     if isinstance(elements, list):
         for element in elements:
             resolved = _normalize_scene_element(element, known_ids, name_to_id)
-            if resolved:
-                normalized.append(resolved)
+            normalized.extend(resolved)
     return normalized
 
 
