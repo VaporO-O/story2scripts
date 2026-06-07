@@ -1271,6 +1271,9 @@ class DemoConverter:
         )
 
 
+_CHUNK_CONVERSION_ATTEMPTS = 3
+
+
 class AIConverter:
     """OpenAI-compatible LLM converter.
 
@@ -1309,26 +1312,35 @@ class AIConverter:
         }
 
         scenes: list[dict] = []
+        failures: list[str] = []
         for chapter in chapters:
             chapter_chunks = _chapter_text_chunks(chapter)
             for chunk_index, chunk_text in enumerate(chapter_chunks, start=1):
-                raw_scenes = self._convert_chapter_chunk(
-                    chapter,
-                    chunk_text,
-                    chunk_index,
-                    len(chapter_chunks),
-                    global_state,
-                    characters,
-                    adaptation_type,
-                    style,
-                )
+                try:
+                    raw_scenes = self._convert_chapter_chunk(
+                        chapter,
+                        chunk_text,
+                        chunk_index,
+                        len(chapter_chunks),
+                        global_state,
+                        characters,
+                        adaptation_type,
+                        style,
+                    )
+                except ValueError as exc:
+                    # 单个片段多次重试仍失败时跳过，避免一个片段（空响应 / 截断 /
+                    # 内容审查）让整篇转换前功尽弃；只要还有其它片段成功即可出稿。
+                    failures.append(str(exc))
+                    continue
                 scenes.extend(
                     _normalize_screenplay_scene_data(
                         raw_scenes, known_ids, name_to_id, [chapter.title]
                     )
                 )
         if not scenes:
-            raise ValueError("AI 全文转换失败：模型没有返回任何有效场景。")
+            raise ValueError(
+                failures[-1] if failures else "AI 全文转换失败：模型没有返回任何有效场景。"
+            )
         # 合并各章场景后统一重排 scene id，避免分块产生的编号冲突。
         for index, scene in enumerate(scenes, start=1):
             scene["id"] = f"scene-{index}"
@@ -1388,35 +1400,27 @@ class AIConverter:
             f"本章片段：第 {chunk_index}/{chunk_count} 段\n"
             f"本章片段原文：\n{chunk_text}"
         )
-        try:
-            content = self.llm_client.complete_json(prompt)
-        except ValueError as exc:
-            message = (
-                f"AI 全文转换失败：章节《{chapter.title}》"
-                f"第 {chunk_index}/{chunk_count} 个片段调用失败。{exc}"
-            )
-            raise ValueError(message) from exc
-
-        try:
-            data = loads_json_object(content)
-        except ValueError as exc:
-            raise ValueError(
-                f"AI 全文转换失败：章节《{chapter.title}》"
-                f"第 {chunk_index}/{chunk_count} 个片段返回内容不是有效 JSON。{exc}"
-            ) from exc
-
-        if isinstance(data, dict):
-            scenes = data.get("scenes")
-        elif isinstance(data, list):
-            scenes = data
-        else:
+        # 空响应、超时、网络抖动、偶发非法 JSON 多为瞬时问题，重试几次往往能恢复。
+        last_error: str = "未知错误"
+        for _attempt in range(_CHUNK_CONVERSION_ATTEMPTS):
+            try:
+                content = self.llm_client.complete_json(prompt)
+                data = loads_json_object(content)
+            except ValueError as exc:
+                last_error = str(exc)
+                continue
             scenes = None
-        if not isinstance(scenes, list):
-            raise ValueError(
-                f"AI 全文转换失败：章节《{chapter.title}》"
-                f"第 {chunk_index}/{chunk_count} 个片段未返回有效的 scenes 列表。"
-            )
-        return scenes
+            if isinstance(data, dict):
+                scenes = data.get("scenes")
+            elif isinstance(data, list):
+                scenes = data
+            if isinstance(scenes, list):
+                return scenes
+            last_error = "片段未返回有效的 scenes 列表。"
+        raise ValueError(
+            f"AI 全文转换失败：章节《{chapter.title}》第 {chunk_index}/{chunk_count} 个片段"
+            f"在重试 {_CHUNK_CONVERSION_ATTEMPTS} 次后仍失败。{last_error}"
+        )
 
 
 def get_converter(mode: str = "demo") -> Converter:

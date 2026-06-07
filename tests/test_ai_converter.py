@@ -178,8 +178,51 @@ def test_ai_converter_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> N
     configure_ai(monkeypatch)
     converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
 
-    with pytest.raises(ValueError, match="不是有效 JSON"):
+    with pytest.raises(ValueError, match="解析出 JSON"):
         converter.convert(NOVEL_CHAPTERS, adaptation_type="短剧")
+
+
+def test_ai_converter_retries_transient_empty_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = {"calls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["calls"] += 1
+        if state["calls"] == 1:
+            # 首次返回空响应（瞬时问题），随后正常返回。
+            return httpx.Response(200, json={"choices": [{"message": {"content": ""}}]})
+        return chapter_response([scene_dict()])
+
+    configure_ai(monkeypatch)
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    screenplay = converter.convert(NOVEL_CHAPTERS, adaptation_type="短剧")
+
+    assert state["calls"] >= 2  # 进行了重试
+    assert screenplay.scenes  # 重试后成功出稿
+
+
+def test_ai_converter_skips_persistently_failing_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
+    novel = parse_chapters(
+        "第一章 甲\n林澈说：“出发。”\n"
+        "第二章 乙\n普通的开场叙述。\n这一段正文总是触发空响应ZZZQQQ需要跳过。\n"
+        "第三章 丙\n林澈说：“收工。”"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if "ZZZQQQ" in prompt:
+            return httpx.Response(200, json={"choices": [{"message": {"content": ""}}]})
+        return chapter_response([scene_dict()])
+
+    configure_ai(monkeypatch)
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    screenplay = converter.convert(novel, adaptation_type="短剧")
+
+    # 持续失败的“第二章 乙”被跳过，其它章节仍正常出稿，整篇不再前功尽弃。
+    assert screenplay.scenes
+    assert any(scene.source_chapter == "第一章 甲" for scene in screenplay.scenes)
+    assert not any(scene.source_chapter == "第二章 乙" for scene in screenplay.scenes)
 
 
 def test_ai_converter_reports_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
