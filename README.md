@@ -238,6 +238,7 @@ python -m compileall -q src tests
 - 对 `.mobi`、`.azw`、`.azw3` 给出明确提示，建议先转换为 EPUB 或 TXT
 - 支持选择改编类型
 - 支持在生成按钮旁切换本地 / AI 全文转换模式
+- 支持显示全文转换任务进度和当前阶段
 - 右侧展示生成后的 YAML 剧本
 - 支持 YAML 校验
 - 支持下载 `screenplay.yaml`

@@ -11,6 +11,8 @@ from .api_models import CharacterProfileRequest
 from .api_models import CharacterProfileResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
+from .api_models import ConvertJobStartResponse
+from .api_models import ConvertJobStatusResponse
 from .api_models import ExampleNovelResponse
 from .api_models import GlobalStateRequest
 from .api_models import GlobalStateResponse
@@ -21,6 +23,7 @@ from .api_models import SceneRewriteResponse
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
 from .character_profiles_ai import get_character_profiler
+from .conversion_jobs import conversion_jobs
 from .converter import get_converter
 from .examples import load_example_novel
 from .novel_import import import_novel_content
@@ -154,6 +157,25 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
         mode=converter.mode,
         adaptation_type=request.adaptation_type,
     )
+
+
+@app.post("/api/convert/jobs", response_model=ConvertJobStartResponse)
+async def start_convert_job(request: ConvertRequest) -> ConvertJobStartResponse:
+    snapshot = conversion_jobs.create(request)
+    return ConvertJobStartResponse(
+        job_id=snapshot.job_id,
+        status=snapshot.status,
+        progress=snapshot.progress,
+        stage=snapshot.stage,
+        message=snapshot.message,
+    )
+
+
+@app.get("/api/convert/jobs/{job_id}", response_model=ConvertJobStatusResponse)
+async def get_convert_job(job_id: str) -> ConvertJobStatusResponse:
+    if not conversion_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="转换任务不存在。")
+    return conversion_jobs.snapshot(job_id)
 
 
 @app.post("/api/yaml/validate", response_model=ValidateYamlResponse)

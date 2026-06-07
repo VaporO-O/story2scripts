@@ -19,6 +19,25 @@ def test_workbench_sends_selected_full_conversion_mode() -> None:
     assert "mode: convertModeInput.value" in script
 
 
+def test_workbench_exposes_conversion_progress() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="conversionProgress"' in html
+    assert 'id="conversionProgressStage"' in html
+    assert 'id="conversionProgressPercent"' in html
+    assert 'id="conversionProgressBar"' in html
+    assert 'id="conversionProgressMessage"' in html
+
+
+def test_workbench_uses_conversion_job_progress_api() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/convert/jobs"' in script
+    assert "fetch(`/api/convert/jobs/${jobId}`)" in script
+    assert "function setConversionProgress(" in script
+    assert "async function waitForConversionJob(" in script
+
+
 def test_workbench_exposes_screenplay_preview_toggle() -> None:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 

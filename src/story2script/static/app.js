@@ -12,10 +12,17 @@ const previewViewButton = document.querySelector("#previewViewButton");
 const sourceViewButton = document.querySelector("#sourceViewButton");
 const emptyState = document.querySelector("#emptyState");
 const message = document.querySelector("#message");
+const conversionProgress = document.querySelector("#conversionProgress");
+const conversionProgressStage = document.querySelector("#conversionProgressStage");
+const conversionProgressPercent = document.querySelector("#conversionProgressPercent");
+const conversionProgressBar = document.querySelector("#conversionProgressBar");
+const conversionProgressMessage = document.querySelector("#conversionProgressMessage");
 
 let currentScriptView = "preview";
 let currentNovelView = "edit";
 let latestScreenplay = null;
+const conversionPollIntervalMs = 1000;
+const conversionMaxPolls = 720;
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
 const importNovelFileButton = document.querySelector("#importNovelFileButton");
@@ -33,6 +40,31 @@ const unsupportedEbookFileExtensions = [".mobi", ".azw", ".azw3"];
 function setMessage(text, isError = false) {
   message.textContent = text;
   message.style.color = isError ? "#c33b26" : "";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function setConversionProgress(snapshot, isError = false) {
+  const progress = Math.max(0, Math.min(100, snapshot.progress || 0));
+  conversionProgress.classList.remove("hidden");
+  conversionProgress.classList.toggle("is-error", isError || snapshot.status === "failed");
+  conversionProgressStage.textContent = snapshot.stage || "转换中";
+  conversionProgressPercent.textContent = `${progress}%`;
+  conversionProgressBar.style.width = `${progress}%`;
+  conversionProgressMessage.textContent = snapshot.message || snapshot.error || "转换任务正在处理。";
+}
+
+function resetConversionProgress() {
+  setConversionProgress({
+    status: "queued",
+    progress: 0,
+    stage: "等待转换",
+    message: "转换任务已准备启动。",
+  });
 }
 
 // 与后端 parser.py 一致：只把“标题后到下一个标题之间有正文”的才算章节，
@@ -477,35 +509,80 @@ function importNovelFile(file) {
   });
 }
 
+function conversionPayload() {
+  return {
+    title: titleInput.value,
+    genre: genreInput.value,
+    adaptation_type: adaptationTypeInput.value,
+    mode: convertModeInput.value,
+    novel_text: novelInput.value,
+  };
+}
+
+async function startConversionJob() {
+  const response = await fetch("/api/convert/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(conversionPayload()),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "转换任务创建失败"));
+  }
+  setConversionProgress(data);
+  return data.job_id;
+}
+
+async function fetchConversionJob(jobId) {
+  const response = await fetch(`/api/convert/jobs/${jobId}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "转换进度查询失败"));
+  }
+  setConversionProgress(data);
+  return data;
+}
+
+async function waitForConversionJob(jobId) {
+  for (let attempt = 0; attempt < conversionMaxPolls; attempt += 1) {
+    await sleep(conversionPollIntervalMs);
+    const snapshot = await fetchConversionJob(jobId);
+    if (snapshot.status === "succeeded" || snapshot.status === "failed") {
+      return snapshot;
+    }
+  }
+
+  throw new Error("转换任务等待超时，请稍后重试。");
+}
+
 async function convertNovel() {
   convertButton.disabled = true;
   const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
   setMessage(`正在使用${modeName}模式生成 YAML 剧本……`);
+  resetConversionProgress();
 
   try {
-    const response = await fetch("/api/convert", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: titleInput.value,
-        genre: genreInput.value,
-        adaptation_type: adaptationTypeInput.value,
-        mode: convertModeInput.value,
-        novel_text: novelInput.value,
-      }),
-    });
-    const data = await response.json();
+    const jobId = await startConversionJob();
+    const snapshot = await waitForConversionJob(jobId);
 
-    if (!response.ok) {
-      throw new Error(data.detail || "转换失败");
+    if (snapshot.status === "failed") {
+      setConversionProgress(snapshot, true);
+      throw new Error(snapshot.error || snapshot.message || "转换失败");
+    }
+    if (!snapshot.result) {
+      throw new Error("转换任务完成但缺少结果。");
     }
 
+    const data = snapshot.result;
     showScreenplay(data.screenplay, data.yaml_text);
     setMessage(
       `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。`,
     );
   } catch (error) {
     setMessage(error.message, true);
+    conversionProgress.classList.add("is-error");
   } finally {
     convertButton.disabled = false;
   }
