@@ -332,6 +332,11 @@ OpenAI-compatible 配置（`AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` / `AI_TIMEO
 
 AI 转换 prompt 会显式要求模型做这个分类决策，避免把小说里的心理描写、环境叙述和背景说明直接搬进剧本。
 
+`dramatization_decisions` 作为“原文 → 改写方向”的分类记录保留在结构化数据中；可读剧本预览
+只展示这层分类分析，不再展示方法论式的说明文字（reason），避免说明性内容混进剧本阅读视图。
+台词说话人识别同时支持前置与后置写法（“方超说：…” 与 “…”方超握紧手枪），开场对白不会被
+误当成动作行；场景 `location` 会排除人物名等非地点候选，避免出现“EXT. 刘直 - DAY”这类错误。
+
 ## 转换器模式
 
 `POST /api/convert` 支持 `mode` 字段，用于选择转换器实现。
@@ -375,11 +380,14 @@ AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务�
 AI 全文转换遵循固定校验链路：
 
 ```text
-llm_json -> json.loads -> normalize -> Screenplay.model_validate -> screenplay_to_yaml
+llm_json -> 容错解析 -> normalize -> Screenplay.model_validate -> screenplay_to_yaml
 ```
 
 LLM 只负责生成 JSON；服务端会先做一层归一化修复，再用 `Screenplay` Schema 做最终校验，校验通过后
-才会导出 YAML。归一化会自动修复 LLM 常见的小偏差，避免动辄整篇失败：
+才会导出 YAML。容错解析会先尝试直接解析，再自动剥离 Markdown ``` 代码块围栏、忽略 JSON 前后的
+说明文字，最后回退到提取最外层 `{...}`，避免模型把合法 JSON 包在围栏或解释里时被误判为“非法 JSON”。
+（全文转换、局部重写、人物小传 AI 增强共用 `src/story2script/llm_client.py` 的 `loads_json_object`。）
+归一化会自动修复 LLM 常见的小偏差，避免动辄整篇失败：
 
 - 回填或修正缺失 / 格式不对的 `scene.id`（统一为 `scene-数字`）
 - 把中文或不规范的 `int_ext`、`time_of_day` 归一为 `INT./EXT.` 与 `DAY/NIGHT`，并据此重建 `heading`

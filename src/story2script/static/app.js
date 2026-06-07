@@ -198,9 +198,7 @@ function renderDecisions(scene) {
     if (decision.rendering && decision.rendering !== decision.source_text) {
       detail.appendChild(createElement("p", "decision-rendering", `→ ${decision.rendering}`));
     }
-    if (decision.reason) {
-      detail.appendChild(createElement("p", "decision-reason", decision.reason));
-    }
+    // 只展示“原文 → 改写方向”的分类分析，不再展示方法论式的 reason 说明文字。
     row.appendChild(detail);
     details.appendChild(row);
   });

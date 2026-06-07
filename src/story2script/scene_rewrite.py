@@ -3,7 +3,7 @@ import re
 from typing import Literal
 
 from .converter import _normalize_screenplay_scene_data
-from .llm_client import LLMClient
+from .llm_client import LLMClient, loads_json_object
 from .screenplay import Action, Dialogue, Scene, Screenplay
 
 
@@ -231,7 +231,10 @@ class AISceneRewriter:
 
         prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone)
         content = self.llm_client.complete_json(prompt)
-        raw_scene = json.loads(content)
+        try:
+            raw_scene = loads_json_object(content)
+        except ValueError as exc:
+            raise ValueError("AI 局部重写失败：模型返回的内容不是合法 JSON。") from exc
         if not isinstance(raw_scene, dict):
             raise ValueError("AI 局部重写失败：模型返回的内容不是 Scene 对象。")
 

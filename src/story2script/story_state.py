@@ -22,6 +22,12 @@ LOCATION_SUFFIX_PATTERN = re.compile(
     r"^(.{0,10}?(?:楼|室|房|厅|馆|店|院|街|路|桥|港|站|城|村|镇|门口|"
     r"走廊|码头|广场|仓库|学校|医院|公寓|办公室|屋|山|湖|海边))"
 )
+# 真实地点通常带有表示场所的语素；缺少这些语素的候选词（如“刘直 / 一千万 / 我们 /
+# 推销”）一律剔除，避免人物名、数量词、动词短语被误当成地点。
+LOCATION_INDICATOR_PATTERN = re.compile(
+    r"(?:楼|室|房|厅|馆|店|院|街|路|桥|港|站|城|村|镇|屋|山|湖|河|海|巷|口|区|园|场|局|郊|滩|"
+    r"门口|走廊|码头|广场|仓库|学校|医院|公寓|办公室|会议室|绿地|现场|公园|机场|车站|酒店)"
+)
 LOCATION_ACTION_BOUNDARY_PATTERN = re.compile(
     r"(?:等待|停下|发现|看见|遇见|寻找|找到|调查|争执|质问|追问|站着|坐着|"
     r"走来|出现|说|问|喊|答道|低声道)"
@@ -30,6 +36,13 @@ NON_LOCATION_PATTERN = re.compile(
     r"(?:年前|年后|之前|之后|时刻|时候|当年|那天|今天|昨天|明天|"
     r"失踪|死亡|意外|事故|真相|秘密|回忆|记忆|事情|样子|声音|心里|内心)"
 )
+# 地点名前的数量词、方位泛指词，截掉后才能得到干净的场所名（“一条巷子”→“巷子”）。
+LOCATION_LEADING_FILLER_PATTERN = re.compile(
+    r"^(?:[一二两三四五六七八九十几数]+[条个座间所处块片家张道堵]?|这|那|某|"
+    r"到处|市面上?|外面|旁边|周围|附近|前面|后面|里面|上面|下面)"
+)
+# 含有这些句子虚词/代词的候选词不是干净的地点名（多为正则过度抓取的句子片段）。
+LOCATION_FILLER_CHARS = set("了个是和都们尽我你他她想这那")
 
 
 def _sentences(text: str) -> list[str]:
@@ -53,6 +66,7 @@ def _clean_location_name(raw_name: str) -> str:
     name = raw_name.strip("，。！？、：:；;（）() ")
     if "的" in name:
         name = name.split("的", 1)[0]
+    name = LOCATION_LEADING_FILLER_PATTERN.sub("", name)
     suffix_match = LOCATION_SUFFIX_PATTERN.match(name)
     if suffix_match:
         name = suffix_match.group(1)
@@ -62,6 +76,12 @@ def _clean_location_name(raw_name: str) -> str:
     name = name[:12]
     # 时间、事件或抽象描述被地点提示词误捕获时（如“在十年前父亲失踪的时刻”），予以剔除。
     if NON_LOCATION_PATTERN.search(name):
+        return ""
+    # 没有任何场所语素的候选词不是地点。
+    if not LOCATION_INDICATOR_PATTERN.search(name):
+        return ""
+    # 过长或仍含句子虚词的，多为正则过度抓取的句子片段，不是干净的地点名。
+    if not (2 <= len(name) <= 6) or any(char in LOCATION_FILLER_CHARS for char in name):
         return ""
     return name
 
@@ -90,14 +110,16 @@ def _extract_global_characters(chapters: list[Chapter]) -> list[GlobalCharacterS
     return characters
 
 
-def _extract_locations(chapters: list[Chapter]) -> list[GlobalLocationState]:
+def _extract_locations(
+    chapters: list[Chapter], exclude_names: frozenset[str] = frozenset()
+) -> list[GlobalLocationState]:
     appearances: dict[str, list[str]] = defaultdict(list)
     descriptions: dict[str, str] = {}
 
     for chapter in chapters:
         for match in LOCATION_CUE_PATTERN.finditer(chapter.content):
             name = _clean_location_name(match.group("name"))
-            if len(name) < 2:
+            if len(name) < 2 or name in exclude_names:
                 continue
             if chapter.title not in appearances[name]:
                 appearances[name].append(chapter.title)
@@ -134,8 +156,10 @@ def _extract_timeline(chapters: list[Chapter]) -> list[TimelineEvent]:
 
 def extract_global_story_state(chapters: list[Chapter]) -> GlobalStoryState:
     """Build a fixed cross-chapter state table for conversion consistency."""
+    characters = _extract_global_characters(chapters)
+    character_names = frozenset(character.name for character in characters)
     return GlobalStoryState(
-        characters=_extract_global_characters(chapters),
-        locations=_extract_locations(chapters),
+        characters=characters,
+        locations=_extract_locations(chapters, character_names),
         timeline=_extract_timeline(chapters),
     )
