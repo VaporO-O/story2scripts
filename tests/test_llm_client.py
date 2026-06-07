@@ -3,7 +3,24 @@ import json
 import httpx
 import pytest
 
-from story2script.llm_client import LLMClient
+from story2script.llm_client import LLMClient, loads_json_object
+
+
+def test_loads_json_object_handles_plain_object() -> None:
+    assert loads_json_object('{"a": 1}') == {"a": 1}
+
+
+def test_loads_json_object_strips_markdown_code_fence() -> None:
+    assert loads_json_object('```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_loads_json_object_extracts_from_surrounding_prose() -> None:
+    assert loads_json_object('好的，这是结果：{"a": 1, "b": [2, 3]}') == {"a": 1, "b": [2, 3]}
+
+
+def test_loads_json_object_rejects_non_json() -> None:
+    with pytest.raises(ValueError):
+        loads_json_object("这里没有任何 JSON")
 
 
 def configure_ai(monkeypatch: pytest.MonkeyPatch) -> None:

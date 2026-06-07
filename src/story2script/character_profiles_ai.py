@@ -2,7 +2,7 @@ import json
 from typing import Protocol
 
 from .character_profiles import extract_character_profiles
-from .llm_client import LLMClient
+from .llm_client import LLMClient, loads_json_object
 from .parser import Chapter
 
 PROFILE_PLACEHOLDERS = {"待作者进一步补充", "待作者进一步补充。", "", "暂无", "无"}
@@ -65,8 +65,8 @@ class AICharacterProfiler:
         prompt = self._build_prompt(chapters, base_profiles)
         content = self.llm_client.complete_json(prompt)
         try:
-            payload = json.loads(content)
-        except json.JSONDecodeError as exc:
+            payload = loads_json_object(content)
+        except ValueError as exc:
             raise ValueError("AI 人物小传失败：模型返回的内容不是合法 JSON。") from exc
 
         raw_profiles = payload.get("profiles") if isinstance(payload, dict) else payload

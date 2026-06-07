@@ -1,6 +1,45 @@
-from story2script.converter import DemoConverter
+from story2script.converter import DemoConverter, _dialogue_from_text, _first_action_sentence
+from story2script.examples import load_example_novel
 from story2script.parser import parse_chapters
 from story2script.screenplay import Dialogue, Screenplay
+
+
+def test_dialogue_from_text_detects_post_quote_speaker() -> None:
+    text = "“出发吧。”方超握紧手枪，站在窗边。"
+    assert _dialogue_from_text(text, {"方超"}) == ("方超", "出发吧。")
+
+
+def test_dialogue_from_text_ignores_unknown_post_quote_token() -> None:
+    # 引号后跟的不是已知人物时，不应被当成说话人。
+    assert _dialogue_from_text("“旧钟楼”三个字仍清晰可见。", {"林夏"}) is None
+
+
+def test_first_action_sentence_skips_leading_dialogue() -> None:
+    text = "“你有没有感觉，到处都是骗局？”方超手持一把枪，站在窗边。"
+    assert _first_action_sentence(text).startswith("方超手持一把枪")
+
+
+def test_demo_converter_post_quote_dialogue_and_clean_location() -> None:
+    screenplay = DemoConverter().convert(
+        parse_chapters(load_example_novel()["novel_text"]), title="低智商犯罪"
+    )
+    character_names = {character.name for character in screenplay.global_state.characters}
+    id_to_name = {character.id: character.name for character in screenplay.global_state.characters}
+
+    # 地点不应再是人物名（修复 heading 出现“刘直”的问题）。
+    for scene in screenplay.scenes:
+        assert scene.location not in character_names
+
+    # 开场方超后置归属的台词应被识别为对白，而不是动作行。
+    scene_one = screenplay.scenes[0]
+    dialogues = [element for element in scene_one.elements if element.type == "dialogue"]
+    assert dialogues
+    assert id_to_name[dialogues[0].character] == "方超"
+    assert all(
+        not element.text.lstrip().startswith(("“", '"'))
+        for element in scene_one.elements
+        if element.type == "action"
+    )
 
 
 def test_demo_converter_returns_valid_screenplay() -> None:

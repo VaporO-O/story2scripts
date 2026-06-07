@@ -5,7 +5,7 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
-from .llm_client import LLMClient
+from .llm_client import LLMClient, loads_json_object
 from .parser import Chapter
 from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import Action
@@ -250,12 +250,29 @@ def _dialogue_from_text(text: str, known_names: set[str]) -> tuple[str, str] | N
         speaker_match = re.search(
             r"([\u4e00-\u9fff]{2,5})(?:说|问|喊|答道|低声道)[，,:：]?$", prefix
         )
-        if not speaker_match:
-            continue
-        speaker = _resolve_known_name(speaker_match.group(1), known_names)
-        if speaker:
-            return speaker, quote.group(1)
+        if speaker_match:
+            speaker = _resolve_known_name(speaker_match.group(1), known_names)
+            if speaker:
+                return speaker, quote.group(1)
+        # 说话人后置：原文常写成 “……”方超手持枪 / “……”，方超说。引号后紧跟的已知
+        # 人物名同样视为说话人，避免这类对白被当成动作行。
+        suffix = text[quote.end() : quote.end() + 8]
+        post_match = re.match(r"^[，,、：:\s]*([一-鿿]{2,5})", suffix)
+        if post_match:
+            speaker = _resolve_known_name(post_match.group(1), known_names)
+            if speaker:
+                return speaker, quote.group(1)
     return None
+
+
+def _first_action_sentence(text: str, limit: int = 100) -> str:
+    """返回首个非对白叙述句，避免把开场对白（含引号内的句末标点）塞进动作行。"""
+    narration = re.sub(r"[“\"][^”\"]*[”\"]", "", text)
+    for sentence in re.split(r"(?<=[。！？!?])", narration):
+        cleaned = sentence.strip(" 　，,、—-…")
+        if len(cleaned) >= 2:
+            return cleaned[:limit]
+    return ""
 
 
 def _inner_state_from_text(
@@ -283,12 +300,12 @@ def _inner_state_from_text(
 
 
 def _scene_goal(
-    text: str,
+    narration: str,
     dialogue: tuple[str, str] | None,
     inner_state: tuple[str, list[str], str, str, list[str]] | None,
 ) -> str:
     actor = dialogue[0] if dialogue else inner_state[0] if inner_state else "角色"
-    return f"{actor}试图完成当前场景中的可见行动：{_first_sentence(text, 50)}"
+    return f"{actor}试图完成当前场景中的可见行动：{_first_sentence(narration, 50)}"
 
 
 def _scene_conflict(
@@ -390,7 +407,8 @@ def _dramatization_decisions(
     inner_state: tuple[str, list[str], str, str, list[str]] | None,
     scene_subtext: str,
 ) -> list[DramatizationDecision]:
-    source = _snippet(text)
+    # 用非对白叙述句作为场景描述/动作类决策的原文来源，避免把对白引号当成叙述。
+    source = action_text or _snippet(text)
     decisions: list[DramatizationDecision] = []
 
     if ENVIRONMENT_NARRATION_PATTERN.search(text):
@@ -826,8 +844,8 @@ def _format_validation_error(exc: ValidationError) -> str:
 
 def _load_ai_screenplay_data(content: str) -> dict:
     try:
-        data = json.loads(content)
-    except json.JSONDecodeError as exc:
+        data = loads_json_object(content)
+    except ValueError as exc:
         raise ValueError("AI 全文转换失败：模型返回内容不是有效 JSON。") from exc
 
     if not isinstance(data, dict):
@@ -903,11 +921,11 @@ class DemoConverter:
             for scene_slice in scene_slices:
                 dialogue = _dialogue_from_text(scene_slice.text, known_names)
                 inner_state = _inner_state_from_text(scene_slice.text, known_names)
+                action_text = _first_action_sentence(scene_slice.text) or _first_sentence(
+                    scene_slice.text
+                )
                 elements: list[Action | Dialogue] = [
-                    Action(
-                        type="action",
-                        text=_first_sentence(scene_slice.text),
-                    )
+                    Action(type="action", text=action_text)
                 ]
                 scene_characters: list[str] = []
                 camera_hints: list[str] = list(style.production_hints)
@@ -938,7 +956,6 @@ class DemoConverter:
                 location = _scene_location(scene_slice.text, chapter.title, global_state)
                 int_ext = _scene_int_ext(scene_slice.text, location)
                 time_of_day = _scene_time_of_day(scene_slice.text)
-                action_text = elements[0].text
                 scene_subtext = _scene_subtext(dialogue, inner_state)
                 scenes.append(
                     Scene(
@@ -949,7 +966,7 @@ class DemoConverter:
                         location=location,
                         source_chapter=chapter.title,
                         summary=_first_sentence(scene_slice.text, 60),
-                        goal=_scene_goal(scene_slice.text, dialogue, inner_state),
+                        goal=_scene_goal(action_text, dialogue, inner_state),
                         conflict=_scene_conflict(
                             scene_slice.break_reasons,
                             dialogue,

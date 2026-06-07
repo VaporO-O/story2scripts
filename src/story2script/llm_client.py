@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -60,6 +61,42 @@ def _load_env_file(path: Path) -> dict[str, str]:
         key, value = parsed
         values[key] = value
     return values
+
+
+_CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+
+
+def loads_json_object(content: str) -> object:
+    """Parse a JSON value from an LLM response, tolerating common wrappers.
+
+    Models frequently wrap the JSON in Markdown ``` fences or add a sentence
+    before/after it, which makes a bare ``json.loads`` fail even though the
+    payload is valid. This tries the raw text, then a fenced block, then the
+    outermost ``{...}`` / ``[...]`` span before giving up.
+    """
+    text = content.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    fenced = _CODE_FENCE_PATTERN.search(text)
+    if fenced:
+        try:
+            return json.loads(fenced.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    for open_char, close_char in (("{", "}"), ("[", "]")):
+        start = text.find(open_char)
+        end = text.rfind(close_char)
+        if start != -1 and end > start:
+            try:
+                return json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                continue
+
+    raise ValueError("无法从模型响应中解析出 JSON。")
 
 
 class LLMClient:
