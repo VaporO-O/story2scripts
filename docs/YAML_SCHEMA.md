@@ -1,24 +1,25 @@
-# Story2Script YAML Schema v1.0 设计说明
+# Story2Script YAML Schema v1.0
+
+本文档说明 Story2Script 当前 YAML 输出格式。示例统一使用项目内置小说《低智商犯罪》（悬疑 / 犯罪）。
+
+Story2Script 的 YAML 不是最终拍摄台本，而是适合 AI 生成、作者编辑、程序校验和后续导出的结构化中间格式。
 
 ## 1. 设计目标
 
-Story2Script 的 YAML Schema 用于描述“由小说改编而来的剧本初稿”。它不是最终拍摄剧本格式，
-而是一个适合 AI 生成、作者编辑、程序校验和后续导出的中间结构。
+1. 支持三章以上小说转换为结构化剧本 YAML。
+2. 支持本地规则转换和 AI 转换共用同一套数据结构。
+3. 通过 `Screenplay.model_validate` 保证前端拿到的永远是合法结构。
+4. 显式表达小说到剧本的改编判断，而不是机械搬运叙述。
+5. 对齐工业级剧本格式，保留内外景、时间、地点、人物、道具等可制作性字段。
+6. 用 `global_state` 保证长文本分块转换时的人物、地点和时间线一致。
 
-该 Schema 主要解决四个问题：
-
-1. **满足赛题要求**：能将三章以上小说转换为结构化 YAML 剧本。
-2. **便于作者编辑**：YAML 比 JSON 更适合人工阅读和手动修改。
-3. **便于程序校验**：字段、类型、章节数量、角色引用都可以被检查。
-4. **保留改编追溯**：每个场景都记录来源章节，方便作者回看原文。
-
-机器可读 Schema 位于：
+机器可读 JSON Schema 位于：
 
 ```text
 schema/screenplay.schema.json
 ```
 
-应用中的 Pydantic 模型位于：
+Pydantic 模型位于：
 
 ```text
 src/story2script/screenplay.py
@@ -26,34 +27,43 @@ src/story2script/screenplay.py
 
 ## 2. 顶层结构
 
-完整 YAML 剧本包含以下顶层字段：
-
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `schema_version` | string | 是 | 当前固定为 `1.0`，用于未来兼容升级 |
-| `title` | string | 是 | 剧本标题 |
-| `genre` | string | 是，可空 | 剧本类型，例如悬疑、剧情、科幻；未填写时可为空字符串 |
-| `adaptation_type` | enum | 是 | 改编类型，例如短剧、影视剧、舞台剧、广播剧、分镜脚本 |
-| `logline` | string | 是 | 一句话故事梗概 |
-| `source` | object | 是 | 原小说来源章节信息 |
-| `global_state` | object | 是 | 跨章节一致性状态表，包含人物表、地点表和时间线 |
-| `characters` | array | 是 | 全局角色表 |
-| `scenes` | array | 是 | 剧本场景列表 |
+| `schema_version` | string | 是 | 当前固定为 `1.0` |
+| `title` | string | 是 | 剧本标题，不能为空 |
+| `genre` | string | 是 | 类型，可为空字符串 |
+| `adaptation_type` | enum | 是 | 改编类型 |
+| `logline` | string | 是 | 一句话故事梗概，不能为空 |
+| `source` | object | 是 | 原小说章节信息 |
+| `global_state` | object | 是 | 跨章节一致性状态表 |
+| `characters` | array | 是 | 顶层角色表 |
+| `scenes` | array | 是 | 剧本场景列表，至少 1 项 |
 
-设计原因：
+示例：
 
-- `schema_version` 让未来升级 Schema 时可以做版本迁移。
-- `adaptation_type` 记录同一段小说面向哪种媒介和节奏进行改编，方便作者比较不同输出版本。
-- `source` 让剧本内容能追溯到原小说章节。
-- `global_state` 先于分块改编生成，作为固定上下文喂给转换器或 LLM，减少长文本分块后的前后矛盾。
-- `characters` 放在顶层，方便对白和场景通过稳定 ID 引用角色。
-- `scenes` 是剧本主体，按叙事顺序排列。
+```yaml
+schema_version: '1.0'
+title: 低智商犯罪
+genre: 悬疑 / 犯罪
+adaptation_type: 短剧
+logline: 围绕《低智商犯罪》中一场失控抢劫与警方追查展开的剧本初稿。
+source:
+  chapter_count: 4
+  chapter_titles:
+    - 第一章
+    - 第二章
+    - 第三章
+    - 第四章
+global_state: {}
+characters: []
+scenes: []
+```
 
-### 改编类型
+## 3. 改编类型
 
-同一段小说可以按不同媒介和节奏输出不同剧本初稿：
+`adaptation_type` 用于描述同一段小说要按哪种媒介和节奏改写。
 
-| 改编类型 | 输出特点 |
+| 值 | 输出特点 |
 | --- | --- |
 | `短剧` | 节奏快，冲突密集，强反转 |
 | `影视剧` | 场景完整，镜头感强 |
@@ -61,470 +71,534 @@ src/story2script/screenplay.py
 | `广播剧` | 音效、旁白、声音表演更多 |
 | `分镜脚本` | 镜头、画面、景别更多 |
 
-## 3. Source：来源章节信息
+服务端会把该字段写入最终 `Screenplay`，并在本地转换和 AI prompt 中影响节奏、冲突密度和制作提示。
 
-示例：
+## 4. Source
+
+`source` 描述原小说章节，用于场景追溯和引用校验。
 
 ```yaml
 source:
-  chapter_count: 3
+  chapter_count: 4
   chapter_titles:
-    - 第一章 雾中的信
-    - 第二章 旧钟楼
-    - 第三章 潮汐之前
+    - 第一章
+    - 第二章
+    - 第三章
+    - 第四章
 ```
-
-字段说明：
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `chapter_count` | integer | 大于等于 3 | 原小说有效章节数量 |
-| `chapter_titles` | array[string] | 至少 3 项 | 原小说章节标题列表 |
+| `chapter_count` | integer | `>= 3` | 有效章节数量 |
+| `chapter_titles` | array[string] | 至少 3 项 | 章节标题列表 |
 
-设计原因：
+应用层会校验：
 
-- 赛题明确要求处理三章以上小说，因此 `chapter_count >= 3` 是硬性约束。
-- `chapter_titles` 用于让场景的 `source_chapter` 可以指回原章节。
-- 应用层额外校验 `chapter_count` 必须等于 `chapter_titles` 的数量，避免来源信息不一致。
+- `chapter_count` 必须等于 `chapter_titles` 数量。
+- `scene.source_chapter` 必须存在于 `chapter_titles`。
+- `global_state` 中人物、地点、事件引用的章节必须存在于 `chapter_titles`。
 
-## 4. Global State：跨章节一致性状态表
+## 5. Global State
 
-示例：
+`global_state` 是跨章节一致性引擎的核心。系统会先扫全文抽取人物表、地点表和时间线，再把这张表作为固定上下文传给全文转换和局部重写。
 
 ```yaml
 global_state:
   characters:
     - id: character-1
-      name: 林夏
+      name: 方超
       aliases: []
-      first_appearance: 第一章 雾中的信
+      first_appearance: 第一章
       appearance_chapters:
-        - 第一章 雾中的信
-        - 第三章 潮汐之前
+        - 第一章
       traits:
-        - 冷静
-      goal: 在潮汐到来前找到答案
-      arc: 从被动接收线索到主动追查真相
-      consistency_note: 后续分块转换必须保持姓名、性格、目标和人物弧光一致。
+        - 冒险
+        - 主导
+      goal: 带着刘直完成黄金店抢劫并脱身。
+      arc: 从自信掌控局面到被不断升级的风险逼出破绽。
+      consistency_note: 后续分块转换必须保持方超的主导性、犯罪计划和说话风格一致。
+    - id: character-2
+      name: 刘直
+      aliases: []
+      first_appearance: 第一章
+      appearance_chapters:
+        - 第一章
+      traits:
+        - 犹疑
+      goal: 跟随方超完成行动并避免出错。
+      arc: 从被动服从到在压力中暴露迟疑。
+      consistency_note: 后续场景中保持刘直理解慢半拍、依赖方超判断的状态。
   locations:
     - id: location-1
-      name: 雾港码头
-      first_appearance: 第一章 雾中的信
+      name: 酒店客房
+      first_appearance: 第一章
       appearance_chapters:
-        - 第一章 雾中的信
-        - 第三章 潮汐之前
-      description: 林夏在码头发现匿名信。
+        - 第一章
+      description: 方超和刘直在行动前检查伪装、武器和背包。
+    - id: location-2
+      name: 黄金店
+      first_appearance: 第一章
+      appearance_chapters:
+        - 第一章
+      description: 方超和刘直计划抢劫的目标地点。
   timeline:
     - id: event-1
       order: 1
-      chapter: 第一章 雾中的信
-      time_marker: 凌晨
-      summary: 林夏发现匿名信。
+      chapter: 第一章
+      time_marker: 下午
+      summary: 方超和刘直在酒店客房完成伪装和行动前准备。
 ```
 
-字段说明：
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `global_state.characters` | array | 跨章节人物状态表，ID 必须能在顶层 `characters` 找到 |
+| `global_state.locations` | array | 地点状态表，记录首次出现和出现章节 |
+| `global_state.timeline` | array | 章节级事件时间线 |
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `global_state.characters` | array | 可为空 | 跨章节人物状态表，使用与顶层 `characters` 一致的角色 ID |
-| `global_state.locations` | array | 可为空 | 跨章节地点状态表，记录地点首次出现和出现章节 |
-| `global_state.timeline` | array | 可为空 | 章节级时间线，记录事件顺序、章节、时间标记和摘要 |
+为什么需要它：
 
-设计原因：
+- 长小说分块转换时，LLM 容易把同一人物写成不同称呼，或让性格、目标漂移。
+- `global_state` 让第 1 章和第 3 章出现的同一人物引用同一个稳定 ID。
+- 局部重生成也会携带这张表，只改当前场景，不改跨章节事实。
 
-- 三章以上文本可能超过单次 LLM 上下文，分块改编时容易出现姓名翻译不一致、性格漂移或时间线前后矛盾。
-- 系统会先扫一遍全文，抽取“人物表 + 地点表 + 时间线”，再把这张表作为固定上下文传给转换器。
-- demo 中可以展示：第 1 章和第 3 章出现的同一人物会共享同一个 `character-id`，
-  并在 `appearance_chapters` 中同时记录两个章节，因此后续场景对白、人物弧光和局部重写都能引用同一份状态。
+## 6. Character
 
-## 5. Character：角色表
-
-示例：
+顶层 `characters` 是剧本实际引用的人物表。
 
 ```yaml
 characters:
   - id: character-1
-    name: 林夏
-    description: 寻找父亲失踪真相的年轻记者
-    motivation: 在潮汐到来前找到答案
-    arc: 从被动接收线索到主动追查真相
+    name: 方超
+    description: 行动主导者，负责制定抢劫计划并指挥刘直。
+    motivation: 用精心设计的爆炸和交通混乱掩护抢劫。
+    arc: 从自信掌控计划到在警方压力下暴露破绽。
+  - id: character-2
+    name: 刘直
+    description: 方超的同伙，负责配合进入黄金店。
+    motivation: 跟随方超完成行动并分得收益。
+    arc: 从服从执行到因紧张和迟疑增加行动风险。
 ```
-
-字段说明：
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `id` | string | 小写字母、数字、下划线、连字符 | 角色稳定标识 |
-| `name` | string | 非空 | 角色名称 |
-| `description` | string | 可为空 | 角色简介 |
-| `motivation` | string | 可为空 | 角色动机 |
-| `arc` | string | 非空 | 角色弧光，描述人物在冲突中的变化 |
+| `id` | string | 小写字母、数字、下划线、连字符 | 稳定人物 ID |
+| `name` | string | 非空 | 人物名 |
+| `description` | string | 可为空 | 人物简介 |
+| `motivation` | string | 可为空 | 人物动机 |
+| `arc` | string | 非空 | 人物弧光 |
 
-设计原因：
+对白、场景人物列表、`global_state.characters` 都通过 `id` 引用人物，避免人物改名或别名导致引用失效。
 
-- 使用 `id` 而不是角色姓名做引用，是为了避免角色改名、别名、昵称导致引用失效。
-- `description`、`motivation` 和 `arc` 是作者打磨剧本时最常用的角色信息，保留在 v1.0 中。
-- 角色表放在顶层，便于后续扩展人物关系图、角色弧光分析和前端角色管理。
+## 7. Scene
 
-## 6. Scene：场景
-
-示例：
+剧本主体由 `scenes` 组成。每个 scene 都必须同时包含戏剧要素和可制作性要素。
 
 ```yaml
 scenes:
   - id: scene-1
-    heading: EXT. 雾港码头 - DAY
-    int_ext: EXT.
+    heading: INT. 酒店客房 - DAY
+    int_ext: INT.
     time_of_day: DAY
-    location: 雾港码头
-    source_chapter: 第一章 雾中的信
-    summary: 林夏在码头发现匿名信。
-    goal: 林夏想确认匿名信来源。
-    conflict: 匿名信缺少署名，阻碍林夏判断真相。
-    beat: 线索出现
-    subtext: 林夏表面冷静，实际已经开始怀疑旧案。
+    location: 酒店客房
+    source_chapter: 第一章
+    summary: 方超和刘直在酒店客房完成抢劫前的伪装和装备检查。
+    goal: 方超要确认计划准备就绪，带刘直进入下一步行动。
+    conflict: 刘直跟不上方超的黑色幽默和计划节奏，行动前的紧张感被不断放大。
+    beat: 方超从社会抱怨转入行动命令，抢劫正式开始倒计时。
+    subtext: 方超表面调侃社会浮躁，实则在为自己的犯罪行为寻找合理化借口。
     characters:
       - character-1
+      - character-2
     characters_present:
       - character-1
+      - character-2
     props:
-      - 匿名信
+      - 手枪
+      - 双肩包
+      - 假发
+      - 胶皮手套
     dramatization_decisions:
-      - source_text: 雾气笼罩码头。
-        target: scene_description
-        rendering: 雾气笼罩码头。
-        reason: 环境叙述用于建立可拍摄的场景氛围。
-      - source_text: 林夏发现匿名信。
+      - source_text: 方超手持一把枪，站在酒店客房的窗户边。
         target: action
-        rendering: 林夏发现匿名信。
-        reason: 可见行为转成动作行。
+        rendering: 方超撩开窗帘，枪藏在手边，观察街对面的店铺。
+        reason: 可见行为改写成动作行，直接建立危险状态。
+      - source_text: “洗脚的又怎么了？”
+        target: dialogue
+        rendering: 洗脚的又怎么了？
+        reason: 原文明确对白保留为台词，用于表现刘直的迟钝和两人关系。
+      - source_text: 方超对社会浮躁的抱怨。
+        target: subtext
+        rendering: 方超把犯罪计划包装成对社会骗局的反击。
+        reason: 价值判断不直接搬成旁白，而是转成潜台词和人物动机。
     elements:
       - type: action
-        text: 雾气盖住码头，海水拍打锈蚀的系船柱。
+        text: 方超站在酒店客房窗边，撩开窗帘，枪口压在掌心下。
       - type: dialogue
         character: character-1
-        parenthetical: 低声
-        text: 这不可能是巧合。
+        parenthetical: 盯着窗外
+        emotion: 讥讽
+        text: 你有没有感觉，现在的人普遍浮躁？
+      - type: dialogue
+        character: character-2
+        parenthetical: 停下整理背包
+        emotion: 困惑
+        text: 洗脚的又怎么了？
+      - type: action
+        text: 方超检查假发和胡子，把手枪锁上保险，藏到腰后。
+    camera_hints:
+      - 近景：方超撩开窗帘观察街对面。
+      - 特写：手枪保险被扣上。
 ```
-
-字段说明：
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `id` | string | `scene-数字` | 场景稳定标识 |
-| `heading` | string | 非空 | 场景标题 |
-| `int_ext` | enum | `INT.` 或 `EXT.` | 内景/外景标记，对应 slug line 的开头 |
-| `time_of_day` | enum | `DAY` 或 `NIGHT` | 拍摄时段标记，对应 slug line 的结尾 |
-| `location` | string | 非空 | 可制作的场景地点 |
+| `id` | string | `scene-数字` | 场景 ID |
+| `heading` | string | 非空，必须匹配生产字段 | 标准场景标题 |
+| `int_ext` | enum | `INT.` / `EXT.` | 内景 / 外景 |
+| `time_of_day` | enum | `DAY` / `NIGHT` | 拍摄时段 |
+| `location` | string | 非空 | 可拍摄地点 |
 | `source_chapter` | string | 必须来自 `source.chapter_titles` | 来源章节 |
 | `summary` | string | 非空 | 场景摘要 |
-| `goal` | string | 非空 | 本场角色可见目标 |
-| `conflict` | string | 非空 | 阻碍角色目标的戏剧冲突 |
-| `beat` | string | 非空 | 场景节拍或转折点 |
-| `subtext` | string | 非空 | 动作和对白之下未明说的压力、意图或潜台词 |
-| `characters` | array[string] | 角色 ID 列表 | 本场出现的角色 |
-| `characters_present` | array[string] | 角色 ID 列表 | 本场画面或舞台中实际在场的角色 |
-| `props` | array[string] | 可为空 | 本场使用或提及的可制作道具 |
-| `dramatization_decisions` | array | 至少 1 项 | 叙述到戏剧表达的分类决策 |
-| `elements` | array | 至少 1 项 | 场景内动作和对白 |
-| `camera_hints` | array[string] | 可为空 | 镜头提示，用于把心理活动外化为可拍摄画面 |
+| `goal` | string | 非空 | 角色可见目标 |
+| `conflict` | string | 非空 | 阻挡目标的冲突 |
+| `beat` | string | 非空 | 节拍或转折点 |
+| `subtext` | string | 非空 | 潜台词 |
+| `characters` | array[string] | 人物 ID | 本场相关人物 |
+| `characters_present` | array[string] | 人物 ID | 画面或舞台上实际在场人物 |
+| `props` | array[string] | 可为空 | 道具 |
+| `dramatization_decisions` | array | 至少 1 项 | 叙述到戏剧化分类 |
+| `elements` | array | 至少 1 项 | 动作和对白 |
+| `camera_hints` | array[string] | 可为空 | 镜头或调度提示 |
 
-设计原因：
+`heading` 必须与生产字段一致：
 
-- `heading` 使用类似专业剧本的格式，例如 `INT. 房间 - NIGHT`，便于未来导出专业剧本格式。
-- `int_ext`、`time_of_day`、`location`、`characters_present` 和 `props` 对齐工业级剧本格式，
-  把 slug line、出场人物和道具这些可制作性信息从自由文本中拆出来，方便后续做拍摄拆解、场景表或预算表。
-- `source_chapter` 解决 AI 改编结果难追溯的问题，作者可以快速回到原文核对。
-- `summary` 便于前端做场景列表、搜索和节拍检查。
-- 剧本和小说的本质区别是：小说可以靠叙述推进，剧本必须靠冲突和动作推进。因此每个场景都必须说明
-  角色目标、冲突、节拍和潜台词，避免剧本只是在复述小说情节。
-- `dramatization_decisions` 显式记录“叙述→戏剧化”的判断过程，说明哪些原文被改写为动作行、对白、潜台词或场景描述。
-- `elements` 保留场景内顺序，动作和对白可以交替出现。
-- `camera_hints` 不直接替代导演分镜，只提供“近景、特写、环境提示”等轻量建议，帮助把小说心理描写转成可视化表达。
+```text
+{int_ext} {location} - {time_of_day}
+```
 
-### 场景拆分依据
+例如：
 
-小说章节通常比剧本场景更大。Story2Script 会尝试根据通用叙事信号，将一个章节拆成多个 scene：
+```text
+INT. 酒店客房 - DAY
+EXT. 黄金店门口 - DAY
+```
 
-- 时间变化：例如清晨、夜里、第二天、与此同时等时间推进。
-- 地点变化：角色进入、离开、抵达或转入新的行动空间。
-- 人物进出：新人物出现、进入现场或离开现场。
-- 情节转折：信息突然变化，角色判断被迫调整。
-- 冲突变化：质问、阻止、拒绝、威胁、争执等阻力升级。
+## 8. Scene Element
 
-这些拆分信号不是为了替代作者判断，而是给 AI 和编辑器一个可解释的初稿结构。后续接入 LLM 后，
-LLM 也应围绕这些通用戏剧信号输出结构化场景，而不是只按自然段机械切分。
-
-## 7. Scene Element：动作与对白
+`elements` 是真正的剧本正文，按场景内顺序排列。
 
 ### Action
 
-示例：
-
 ```yaml
 - type: action
-  text: 林夏推开钟楼木门，墙上的旧钟停在十年前。
+  text: 方超检查假发和胡子，把手枪锁上保险，藏到腰后。
 ```
 
-字段说明：
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| `type` | string | 固定为 `action` |
+| `text` | string | 非空 |
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `type` | string | 固定为 `action` | 元素类型 |
-| `text` | string | 非空 | 可见或可听见的动作描述 |
+动作行必须是可见或可听见的内容，尽量避免“他想起”“他意识到”这类不可拍摄心理句。
 
 ### Dialogue
-
-示例：
 
 ```yaml
 - type: dialogue
   character: character-1
   parenthetical: 低声
-  text: 这不可能是巧合。
+  emotion: 果断
+  text: 动手！
 ```
 
-字段说明：
-
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `type` | string | 固定为 `dialogue` | 元素类型 |
-| `character` | string | 必须引用已有角色 ID | 说话角色 |
-| `parenthetical` | string | 可为空 | 语气、动作或状态提示 |
-| `emotion` | string | 可为空 | 对白情绪，例如紧张、犹豫、愤怒 |
-| `text` | string | 非空 | 对白内容 |
-
-设计原因：
-
-- 使用 `type` 区分动作和对白，前端可以据此渲染不同编辑控件。
-- `dialogue.character` 使用角色 ID，保证对白和角色表之间存在稳定关系。
-- `parenthetical` 保留剧本中常见的语气提示，但不强制填写。
-- `emotion` 用于保留心理活动被外化后的情绪信息，方便前端高亮或后续 AI 继续润色。
-
-## 8. 心理描写外化
-
-小说可以直接书写心理活动，但剧本需要通过动作、对白、场景调度和镜头提示表现人物内心。
-因此 v1.0 Schema 增加了两个轻量字段：
-
-- `dialogue.emotion`：记录对白情绪。
-- `scene.camera_hints`：记录镜头提示。
-
-示例：
-
-```yaml
-elements:
-  - type: action
-    text: 林澈停下脚步，缓缓回头。
-  - type: action
-    text: 周围的空气像是突然安静下来。
-  - type: dialogue
-    character: character-1
-    parenthetical: ''
-    emotion: 紧张
-    text: 不对……这不是意外。
-camera_hints:
-  - 近景：林澈绷紧的表情。
-```
-
-设计原因：
-
-- 心理描写不应该原样出现在剧本动作中，否则会变成“不可拍摄”的描述。
-- 动作负责表现人物身体反应。
-- 对白负责把关键判断外化。
-- 镜头提示负责提醒作者可用画面表达内心变化。
-
-## 9. 叙述→戏剧化分类决策
-
-小说原文中的心理描写、环境叙述、背景信息和人物判断不能被机械搬运到剧本里。Story2Script 会在
-`scene.dramatization_decisions` 中显式记录每段叙述被改写成哪种戏剧表达：
-
-| target | 用途 | 判断原则 |
+| 字段 | 类型 | 约束 |
 | --- | --- | --- |
-| `action` | 动作行 | 角色可见行为、身体反应、场面推进 |
-| `dialogue` | 对白 | 原文存在明确说话内容，或需要通过信息交换推动冲突 |
-| `subtext` | 潜台词 | 心理活动、情绪判断、未说出口的意图，不直接搬成台词 |
-| `scene_description` | 场景描述 | 天气、空间、背景、氛围等纯环境信息 |
+| `type` | string | 固定为 `dialogue` |
+| `character` | string | 必须引用顶层 `characters` 中存在的 ID |
+| `parenthetical` | string | 可为空 |
+| `emotion` | string | 可为空 |
+| `text` | string | 非空 |
 
-示例：
+前端预览会根据 `type` 分别渲染动作和对白；AI 返回后，服务端会把人物名引用归一化为稳定 `character-id`。
+
+## 9. Dramatization Decision
+
+`dramatization_decisions` 记录“小说叙述 -> 剧本表达”的分类判断。
 
 ```yaml
 dramatization_decisions:
-  - source_text: 林澈突然觉得背后一阵发冷。
-    target: subtext
-    rendering: 林澈表面继续行动，内心判断已经发生变化。
-    reason: 心理活动不直接搬成台词，而是通过潜台词和动作反应间接表现。
-  - source_text: 走廊尽头的灯闪了一下。
-    target: scene_description
-    rendering: 走廊尽头的灯闪了一下。
-    reason: 环境叙述用于建立可拍摄的场景压力。
+  - source_text: 方超手持一把枪，站在酒店客房的窗户边。
+    target: action
+    rendering: 方超撩开窗帘，枪藏在手边，观察街对面的店铺。
+    reason: 可见行为改写成动作行，直接建立危险状态。
 ```
 
-这个字段让 AI 的改编过程可解释：评审或作者不仅能看到结果，还能看到系统为什么把某段小说叙述改成
-动作、对白、潜台词或场景描述。
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `source_text` | string | 非空 | 原文片段 |
+| `target` | enum | 见下表 | 改写方向 |
+| `rendering` | string | 非空 | 改写后的表达 |
+| `reason` | string | 非空 | 分类原因 |
 
-## 10. 完整 YAML 示例
+`target` 可选值：
+
+| target | 用途 |
+| --- | --- |
+| `action` | 可见行为、身体反应、场面推进 |
+| `dialogue` | 明确对白或需要通过信息交换推动冲突 |
+| `subtext` | 心理活动、情绪判断、未说出口的意图 |
+| `scene_description` | 天气、空间、背景、氛围 |
+
+这个字段让 AI 改编过程可解释：评委不只看到结果，还能看到系统为什么把某段小说叙述改成动作、对白、潜台词或场景描述。
+
+## 10. 场景拆分规则
+
+系统会根据通用叙事信号拆分章节：
+
+- 时间变化：下午、夜里、第二天、与此同时。
+- 地点变化：进入、离开、抵达、转入新空间。
+- 人物进出：新人物出现、进入现场、离开现场。
+- 情节转折：信息突然变化，角色判断被迫调整。
+- 冲突变化：质问、拒绝、威胁、争执、阻止、危险升级。
+
+AI prompt 也会显式要求模型围绕这些信号输出场景，而不是只按自然段机械切分。
+
+## 11. 叙述到戏剧化
+
+小说里的心理描写、环境叙述和背景解释不能原样搬进剧本。Story2Script 会让系统或 LLM 做分类决策：
+
+- 可见行为 -> `action`
+- 明确说话内容 -> `dialogue`
+- 心理活动和真实意图 -> `subtext`
+- 环境、空间、气氛 -> `scene_description`
+
+例如，《低智商犯罪》中方超对“社会浮躁”和“骗局”的抱怨，不应只作为长段旁白堆在动作里；它更适合被拆成：
+
+- 方超观察街对面的动作。
+- 方超带讥讽情绪的对白。
+- 他为抢劫行为寻找合理化借口的潜台词。
+
+这也是剧本和小说的本质区别：小说靠叙述，剧本靠冲突和动作推进。
+
+## 12. AI 转换校验链路
+
+AI 全文转换使用统一 LLM 客户端读取：
+
+- `AI_API_KEY`
+- `AI_BASE_URL`
+- `AI_MODEL`
+- `AI_TIMEOUT_SECONDS`
+- `AI_MAX_TOKENS`
+
+服务端调用 `/chat/completions`，要求模型返回 JSON。核心链路是：
+
+```text
+llm_json -> json.loads / tolerant parsing -> normalize -> Screenplay.model_validate -> screenplay_to_yaml
+```
+
+其中：
+
+- 全文转换会先抽取 `global_state`，再按章节和章节内片段分块调用 LLM。
+- 每次 AI 只返回 `{"scenes": [...]}`，顶层标题、人物表、类型和状态表由服务端合并。
+- 模型输出被截断时会返回清晰错误，提示调高 `AI_MAX_TOKENS` 或减少单次文本规模。
+- 校验失败时返回 `422`，不会把坏 YAML 给前端。
+
+## 13. 局部重生成
+
+局部重生成只替换目标 scene，不重新生成全文。
+
+支持操作：
+
+| operation | 说明 |
+| --- | --- |
+| `rewrite_dialogue` | 只重写本场对白 |
+| `strengthen_conflict` | 加强戏剧冲突 |
+| `short_drama_pace` | 改成短剧节奏 |
+| `add_camera_hints` | 补充镜头提示 |
+| `reduce_narration` | 减少旁白 |
+| `adjust_character_voice` | 调整某个人物语气 |
+
+AI 局部重写必须保持以下字段不变：
+
+- `scene.id`
+- `source_chapter`
+- `int_ext`
+- `time_of_day`
+- `location`
+
+服务端会把替换后的剧本重新走 `Screenplay.model_validate`，确保局部修改后整体 YAML 仍然可用。
+
+## 14. 完整 YAML 示例
 
 ```yaml
 schema_version: '1.0'
-title: 雾港来信
-genre: 悬疑 / 剧情
-adaptation_type: 影视剧
-logline: 围绕《雾港来信》核心冲突展开的剧本初稿。
+title: 低智商犯罪
+genre: 悬疑 / 犯罪
+adaptation_type: 短剧
+logline: 方超和刘直试图用爆炸制造城市混乱，掩护一场黄金店抢劫。
 source:
-  chapter_count: 3
+  chapter_count: 4
   chapter_titles:
-    - 第一章 雾中的信
-    - 第二章 旧钟楼
-    - 第三章 潮汐之前
+    - 第一章
+    - 第二章
+    - 第三章
+    - 第四章
 global_state:
   characters:
     - id: character-1
-      name: 林夏
+      name: 方超
       aliases: []
-      first_appearance: 第一章 雾中的信
+      first_appearance: 第一章
       appearance_chapters:
-        - 第一章 雾中的信
-        - 第三章 潮汐之前
-      traits: []
-      goal: 待作者进一步补充。
-      arc: 在场景目标与冲突中逐步显露变化。
-      consistency_note: 后续分块转换必须保持姓名、性格、目标和人物弧光一致。
+        - 第一章
+      traits:
+        - 主导
+        - 冒险
+      goal: 完成黄金店抢劫并利用城市混乱脱身。
+      arc: 从自信掌控行动到逐渐暴露计划漏洞。
+      consistency_note: 保持方超主导计划、用调侃掩饰紧张的表达方式。
+    - id: character-2
+      name: 刘直
+      aliases: []
+      first_appearance: 第一章
+      appearance_chapters:
+        - 第一章
+      traits:
+        - 犹疑
+      goal: 配合方超完成行动。
+      arc: 从被动执行到因压力增加行动风险。
+      consistency_note: 保持刘直跟随、迟疑和理解慢半拍的状态。
   locations:
     - id: location-1
-      name: 码头
-      first_appearance: 第一章 雾中的信
+      name: 酒店客房
+      first_appearance: 第一章
       appearance_chapters:
-        - 第一章 雾中的信
-        - 第三章 潮汐之前
-      description: 凌晨五点，林夏在码头捡到一封没有署名的信。
+        - 第一章
+      description: 方超和刘直在行动前检查伪装和装备。
+    - id: location-2
+      name: 黄金店
+      first_appearance: 第一章
+      appearance_chapters:
+        - 第一章
+      description: 抢劫目标地点。
   timeline:
     - id: event-1
       order: 1
-      chapter: 第一章 雾中的信
-      time_marker: 凌晨
-      summary: 凌晨五点，林夏在码头捡到一封没有署名的信。
-    - id: event-2
-      order: 2
-      chapter: 第二章 旧钟楼
-      time_marker: ''
-      summary: 林夏走进旧钟楼。
-    - id: event-3
-      order: 3
-      chapter: 第三章 潮汐之前
-      time_marker: ''
-      summary: 林夏回到码头。
+      chapter: 第一章
+      time_marker: 下午
+      summary: 方超和刘直完成行动前准备，并前往黄金店。
 characters:
   - id: character-1
-    name: 林夏
-    description: 从原文对白中自动识别的角色。
-    motivation: 待作者进一步补充。
-    arc: 在场景目标与冲突中逐步显露变化。
+    name: 方超
+    description: 抢劫计划的主导者。
+    motivation: 用爆炸和交通混乱掩护抢劫。
+    arc: 从自信掌控计划到逐渐暴露破绽。
+  - id: character-2
+    name: 刘直
+    description: 方超的同伙。
+    motivation: 跟随方超完成行动并分得收益。
+    arc: 从被动执行到在压力中显露迟疑。
 scenes:
   - id: scene-1
-    heading: EXT. 码头 - NIGHT
-    int_ext: EXT.
-    time_of_day: NIGHT
-    location: 码头
-    source_chapter: 第一章 雾中的信
-    summary: 凌晨五点，林夏在码头捡到一封没有署名的信。
-    goal: 林夏试图确认匿名信来源。
-    conflict: 匿名信信息残缺，让林夏无法判断真相。
-    beat: 时间变化
-    subtext: 林夏表面追查线索，内心已经怀疑旧案仍未结束。
+    heading: INT. 酒店客房 - DAY
+    int_ext: INT.
+    time_of_day: DAY
+    location: 酒店客房
+    source_chapter: 第一章
+    summary: 方超和刘直在酒店客房里完成抢劫前的伪装和准备。
+    goal: 方超要确认装备和路线，带刘直进入行动。
+    conflict: 刘直跟不上方超的节奏，行动前的紧张和荒诞感被放大。
+    beat: 方超从社会抱怨切入行动命令。
+    subtext: 方超用玩笑和抱怨掩盖犯罪前的兴奋与自我合理化。
     characters:
       - character-1
+      - character-2
     characters_present:
       - character-1
+      - character-2
     props:
-      - 信
+      - 手枪
+      - 双肩包
+      - 假发
+      - 胶皮手套
     dramatization_decisions:
-      - source_text: 凌晨五点，林夏在码头捡到一封没有署名的信。
-        target: scene_description
-        rendering: 凌晨五点，林夏在码头捡到一封没有署名的信。
-        reason: 时间、地点和氛围信息用于建立可拍摄的场景描述。
-      - source_text: 凌晨五点，林夏在码头捡到一封没有署名的信。
+      - source_text: 方超手持一把枪，站在酒店客房的窗户边。
         target: action
-        rendering: 林夏在码头捡到没有署名的信。
-        reason: 可见行为转成动作行，避免复述旁白。
-      - source_text: 这不可能是巧合。
+        rendering: 方超撩开窗帘，枪压在掌心下，观察街对面的店铺。
+        reason: 可见行为直接建立危险状态和行动目标。
+      - source_text: “洗脚的又怎么了？”
         target: dialogue
-        rendering: 这不可能是巧合。
-        reason: 原文存在明确对白，可保留为推动信息交换的台词。
+        rendering: 洗脚的又怎么了？
+        reason: 原文明确对白保留为台词，用于表现人物关系和节奏反差。
+      - source_text: 方超抱怨社会浮躁、到处都是陷阱和骗局。
+        target: subtext
+        rendering: 方超把即将实施的抢劫包装成对混乱社会的反击。
+        reason: 心理判断和价值判断不直接搬运，转为潜台词。
     elements:
       - type: action
-        text: 凌晨五点，林夏在码头捡到一封没有署名的信。
+        text: 方超站在窗边，撩开窗帘，枪口被他压在掌心下。
       - type: dialogue
         character: character-1
-        parenthetical: ''
-        emotion: 紧张
-        text: 这不可能是巧合。
+        parenthetical: 盯着窗外
+        emotion: 讥讽
+        text: 你有没有感觉，现在的人普遍浮躁？
+      - type: dialogue
+        character: character-2
+        parenthetical: 停下整理背包
+        emotion: 困惑
+        text: 洗脚的又怎么了？
+      - type: action
+        text: 方超检查假发和胡子，把手枪锁上保险，藏到腰后。
     camera_hints:
-      - 近景：林夏握紧信纸的手。
+      - 近景：方超撩开窗帘观察街对面。
+      - 特写：手枪保险被扣上。
 ```
 
-## 11. 校验规则
+## 15. 校验规则
 
-当前系统同时使用 JSON Schema 文件和 Pydantic 模型进行校验。
+基础结构：
 
-基础结构校验：
+- `schema_version` 必须是 `1.0`。
+- `title`、`logline` 不能为空。
+- `genre` 必填，但允许为空字符串。
+- `adaptation_type` 必须是五种改编类型之一。
+- `source.chapter_count >= 3`。
+- `source.chapter_titles` 至少 3 项。
+- `scenes` 至少 1 项。
 
-- `schema_version` 必须为 `1.0`
-- `adaptation_type` 必须是 `短剧`、`影视剧`、`舞台剧`、`广播剧`、`分镜脚本` 之一
-- `title`、`logline`、`heading`、`summary` 等核心文本不能为空
-- `scenes[].int_ext` 必须是 `INT.` 或 `EXT.`
-- `scenes[].time_of_day` 必须是 `DAY` 或 `NIGHT`
-- `scenes[].location` 不能为空
-- `scenes[].heading` 必须与 `int_ext`、`location`、`time_of_day` 保持一致
-- `scenes[].characters_present` 必须是字符串列表
-- `scenes[].props` 必须是字符串列表
-- `scenes[].dramatization_decisions` 至少包含 1 项
-- `dramatization_decisions[].target` 必须是 `action`、`dialogue`、`subtext`、`scene_description` 之一
-- `global_state` 必须包含 `characters`、`locations`、`timeline`
-- `global_state.characters[].id` 必须符合 `character-数字` 格式
-- `global_state.locations[].id` 必须符合 `location-数字` 格式
-- `global_state.timeline[].id` 必须符合 `event-数字` 格式
-- `characters[].arc` 不能为空
-- `scenes[].goal`、`scenes[].conflict`、`scenes[].beat`、`scenes[].subtext` 不能为空
-- `source.chapter_count >= 3`
-- `source.chapter_titles` 至少包含 3 项
-- `scenes` 至少包含 1 个场景
-- 每个场景的 `elements` 至少包含 1 项
-- 角色 ID 只能包含小写字母、数字、下划线和连字符
-- 场景 ID 必须符合 `scene-数字` 格式
-- `camera_hints` 必须是字符串列表
-- `dialogue.emotion` 必须是字符串
+引用关系：
 
-应用层引用校验：
+- 顶层 `characters[].id` 不能重复。
+- `global_state.characters[].id` 必须存在于顶层 `characters`。
+- `scene.characters`、`scene.characters_present`、`dialogue.character` 必须引用已存在角色。
+- `scene.source_chapter` 必须存在于 `source.chapter_titles`。
+- `global_state` 中人物、地点和时间线引用的章节必须存在。
 
-- `source.chapter_count` 必须等于 `source.chapter_titles` 数量
-- 角色 ID 不能重复
-- 场景 ID 不能重复
-- `global_state.characters[].id` 必须存在于顶层 `characters`
-- `global_state` 中的角色、地点和时间线章节引用必须存在于 `source.chapter_titles`
-- `scene.source_chapter` 必须存在于 `source.chapter_titles`
-- 场景角色列表中的 ID 必须存在于 `characters`
-- `characters_present` 中的 ID 必须存在于 `characters`
-- 对白中的 `character` 必须存在于 `characters`
+场景结构：
 
-## 12. 为什么选择 YAML
+- `scene.id` 必须符合 `scene-数字`。
+- `heading` 必须以 `int_ext` 开头、包含 `location`、以 `time_of_day` 结尾。
+- `int_ext` 必须是 `INT.` 或 `EXT.`。
+- `time_of_day` 必须是 `DAY` 或 `NIGHT`。
+- `goal`、`conflict`、`beat`、`subtext` 不能为空。
+- `dramatization_decisions` 至少 1 项。
+- `elements` 至少 1 项。
+- `props`、`camera_hints` 必须是字符串列表。
 
-选择 YAML 而不是 Markdown 或纯文本，是因为：
+元素结构：
 
-- YAML 适合人工阅读和编辑。
-- YAML 可以被程序解析为结构化对象。
-- YAML 能保留列表、对象、字段名和层级关系。
-- YAML 比纯剧本文本更适合后续做校验、编辑器、导出和 AI 迭代。
+- `action.text` 不能为空。
+- `dialogue.character` 必须引用已存在角色。
+- `dialogue.text` 不能为空。
+- `dialogue.parenthetical` 和 `dialogue.emotion` 可以为空字符串。
 
-Markdown 更适合展示，不适合作为稳定数据交换格式；纯文本剧本则难以可靠区分场景、动作、对白和角色。
+## 16. 为什么选择 YAML
 
-## 13. 扩展方向
+YAML 适合作为 Story2Script 的中间格式：
 
-v1.0 暂时聚焦“剧本初稿”，没有加入过多拍摄层信息。后续可以在不破坏主体结构的前提下扩展：
+- 比 JSON 更适合人工阅读和编辑。
+- 比 Markdown 更稳定，能保留字段、列表和引用关系。
+- 可以被程序解析回 `Screenplay` 对象。
+- 适合前端编辑、后端校验、局部重生成和后续导出。
 
-- `relationships`：更细的人物关系图
-- `estimated_duration`：场景预计时长
-- `shots`：镜头拆分
-- `revision_notes`：作者修改意见
-
-这些内容适合在基础剧本生成稳定后逐步加入，避免第一版 Schema 过重，增加 AI 输出难度。
-
+纯文本剧本难以可靠区分场景、动作、对白和人物引用；YAML 则能把这些信息结构化保留下来。

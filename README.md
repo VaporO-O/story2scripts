@@ -1,182 +1,183 @@
 # Story2Script
 
-Story2Script 是一款 AI 辅助小说转剧本工具，目标是将三章以上的小说文本转换为结构化、
-可编辑的 YAML 剧本初稿。
+Story2Script 是一个“小说章节 -> 结构化剧本 YAML”的改编工作台。它面向三章以上的长文本小说，先识别章节、人物、地点和时间线，再把小说叙述改写成可预览、可编辑、可校验的剧本初稿。
 
-当前 `main` 分支是项目的最小可运行基础版本。后续功能将通过单一职责的 Pull Request
-逐步加入，确保每次合并后项目均可运行。
+项目当前内置示例为《低智商犯罪》（悬疑 / 犯罪）。文档和演示都以这个示例为准。
 
-## 本地运行
+## 快速运行
 
 要求 Python 3.11 或更高版本。
 
 ```bash
 pip install -e ".[dev]"
-uvicorn story2script.main:app --reload
+python -m uvicorn story2script.main:app --reload
 ```
 
 打开：
 
-- 项目首页：<http://127.0.0.1:8000>
+- 工作台：<http://127.0.0.1:8000>
 - API 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/api/health>
 
-## 已支持功能
+如果 Windows 上 `8000` 端口被占用或被系统权限拦截，可以换端口：
 
-### 章节识别
-
-接口：`POST /api/chapters/preview`
-
-支持识别中文章节标题和英文章节标题：
-
-- `第一章 雾中的信`
-- `第1章 雾中的信`
-- `Chapter 1 The Letter`
-
-请求示例：
-
-```json
-{
-  "novel_text": "第一章 开始\n内容一\n第二章 转折\n内容二\n第三章 结局\n内容三"
-}
+```bash
+python -m uvicorn story2script.main:app --reload --port 8001
 ```
 
-当识别出的有效章节少于 3 个时，接口会返回校验错误。
+## 工作台能力
 
-### 剧本 Schema
+Web 工作台支持完整演示链路：
 
-接口：`GET /api/screenplay/schema`
+- 粘贴小说文本，或填入内置示例《低智商犯罪》。
+- 导入 `.txt`、`.text`、`.md`、`.markdown`、`.csv`、`.log`、`.epub` 文件。
+- 对 `.mobi`、`.azw`、`.azw3` 给出明确提示，建议先转换成 EPUB 或 TXT。
+- 选择改编类型：短剧、影视剧、舞台剧、广播剧、分镜脚本。
+- 在生成按钮附近切换本地 / AI 模式。
+- 显示转换进度条、当前阶段和错误信息。
+- 右侧提供分场预览和 YAML 源码视图。
+- 支持 YAML 校验、下载 `screenplay.yaml`。
+- 支持人物小传提取。
+- 支持局部重生成：重新生成本场对白、加强戏剧冲突、改成短剧节奏、增加镜头提示、减少旁白、调整人物语气。
 
-该接口返回 Story2Script 剧本结构的 JSON Schema，用于约束后续 AI 生成结果和前端编辑数据。
-当前 Schema 覆盖：
+## 核心设计
 
-- 原小说来源信息
-- 跨章节一致性状态表
-- 角色表
-- 场景列表
-- 内外景、拍摄时段、地点、出场人物和道具等可制作性字段
-- 叙述到动作、对白、潜台词和场景描述的戏剧化分类决策
-- 动作与对白元素
-- 场景、角色、来源章节之间的引用关系
+### 剧本不是小说搬运
 
-### 跨章节一致性状态表
+Story2Script 的核心原则是“叙述 -> 戏剧化”。小说可以依靠心理描写和叙述推进，剧本必须依靠可见动作、冲突、对白、场面调度和潜台词推进。
 
-接口：`POST /api/consistency/global-state`
+因此每个场景都会显式建模：
 
-该接口会先扫描三章以上小说，生成一张固定的全局状态表：
+- `goal`：角色在本场的可见目标。
+- `conflict`：阻挡目标的戏剧冲突。
+- `beat`：节拍或转折点。
+- `subtext`：动作和对白之下未说出口的压力。
+- `dramatization_decisions`：系统如何判断原文叙述应改写成动作、对白、潜台词或场景描述。
 
-- `characters`：人物表，记录稳定角色 ID、首次出场、出现章节、性格、目标和人物弧光
-- `locations`：地点表，记录地点首次出现和跨章节出现情况
-- `timeline`：时间线，按章节顺序记录时间标记和事件摘要
+### 对齐工业级剧本格式
 
-长文本接入 LLM 时，系统会先抽取这张表，再把它作为固定上下文传给分块转换和局部重写，避免同一人物在
-第 1 章和第 3 章出现时姓名、性格、目标或弧光发生漂移。
+场景包含可制作性字段：
 
-请求示例：
+- `heading`：类似 `INT. 酒店客房 - DAY` 的 slug line。
+- `int_ext`：`INT.` 或 `EXT.`。
+- `time_of_day`：`DAY` 或 `NIGHT`。
+- `location`：可拍摄地点。
+- `characters_present`：本场实际在场人物。
+- `props`：可制作道具，如手枪、双肩包、塑料面具、停业装修贴纸。
 
-```json
-{
-  "novel_text": "第一章 雾起\n清晨，林夏在码头等待。林夏说：“我会查下去。”\n第二章 旧楼\n林夏来到旧钟楼。\n第三章 潮汐\n夜里，林夏回到码头。"
-}
+这些字段让 YAML 不只是文本结果，而是能继续服务于场景表、道具表、分镜和预算拆解的中间结构。
+
+### 跨章节一致性
+
+长篇小说无法一次完整塞给 LLM，分块转换又容易出现人物名字不一致、性格漂移、时间线前后矛盾。Story2Script 会先扫描全文，生成 `global_state`：
+
+- `characters`：人物表，包含稳定角色 ID、出场章节、性格、目标和人物弧光。
+- `locations`：地点表，记录地点首次出现和跨章节出现情况。
+- `timeline`：章节级事件时间线。
+
+全文转换和局部重生成都会携带这张状态表，确保例如第 1 章出现的方超和第 3 章继续出现的方超引用同一个 `character-1`，人物目标和语气不会随分块漂移。
+
+## 转换模式
+
+### 本地模式
+
+默认 `mode: "demo"`，无需 API Key，适合比赛现场演示和离线验收。本地转换器会：
+
+- 解析三章以上小说。
+- 抽取全局人物、地点、时间线。
+- 按时间变化、地点变化、人物进出、情节转折、冲突变化拆分 scene。
+- 识别前置和后置说话人，例如“方超说：……”和“……”方超转身。
+- 生成符合 `Screenplay` Schema 的结构化剧本。
+
+### AI 模式
+
+`mode: "ai"` 使用 OpenAI-compatible Chat Completions API。配置写在项目根目录正式 `.env` 中，系统会自动读取：
+
+```bash
+AI_API_KEY=your-api-key
+AI_BASE_URL=https://your-provider.example/v1
+AI_MODEL=your-model-name
+AI_TIMEOUT_SECONDS=120
+AI_MAX_TOKENS=8192
 ```
 
-### 离线演示转换器
+说明：
 
-当前代码中提供 `DemoConverter`，可在不配置 AI API Key 的情况下，将已识别章节转换为符合
-Schema 的剧本对象。
+- `.env` 已被 git 忽略，不要提交真实 API Key。
+- 系统环境变量优先级高于 `.env`。
+- `AI_MAX_TOKENS` 可选；当模型输出被截断时可以调高，例如 `16384`。
+- 没有 API Key 时继续使用本地模式即可演示。
 
-转换器会：
+AI 全文转换流程：
 
-- 先生成 `global_state`，把人物表、地点表和时间线作为跨章节固定上下文
-- 根据时间变化、地点变化、人物进出、情节转折和冲突变化拆分场景
-- 为每个场景生成 `int_ext`、`time_of_day`、`location`、`characters_present` 和 `props`，
-  对齐工业级剧本格式中的 slug line、出场人物和道具拆解
-- 为每个场景生成 `dramatization_decisions`，显式判断小说叙述应改写成动作行、对白、潜台词还是场景描述
-- 从章节中的引号内容抽取一条对白
-- 根据“某某说/问/喊”格式识别说话人
-- 按改编类型生成不同的动作、冲突、节拍和生产提示
-- 生成符合 `Screenplay` 模型的结构化结果
-
-### 小说转剧本接口
-
-接口：`POST /api/convert`
-
-该接口会解析三章以上小说文本，并使用离线演示转换器返回结构化剧本 JSON。
-
-请求示例：
-
-```json
-{
-  "title": "雾港来信",
-  "genre": "悬疑",
-  "adaptation_type": "影视剧",
-  "novel_text": "第一章 开始\n林夏说：“出发吧。”\n第二章 转折\n雨落下来。\n第三章 结局\n太阳升起。"
-}
+```text
+novel_text
+-> parse_chapters
+-> extract_global_story_state
+-> chapter/chunk LLM calls
+-> json.loads / tolerant JSON parsing
+-> normalize scenes
+-> Screenplay.model_validate
+-> screenplay_to_yaml
 ```
 
-响应中同时包含：
+LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校验失败时返回清晰 `422` 错误，不会把坏 YAML 给前端。
 
-- `screenplay`：结构化剧本 JSON
-- `screenplay.global_state`：跨章节人物表、地点表和时间线
-- `screenplay.scenes[].int_ext/time_of_day/location/characters_present/props`：可制作性场景字段
-- `screenplay.scenes[].dramatization_decisions`：叙述到戏剧表达的分类决策
-- `yaml_text`：可编辑、可保存的 YAML 剧本初稿
-- `mode`：当前转换模式
-- `adaptation_type`：当前改编类型
+## API 概览
 
-### 改编类型选择
-
-`POST /api/convert` 支持 `adaptation_type` 字段，用于选择同一段小说的改编方向。默认值为 `影视剧`。
-
-| 改编类型 | 输出特点 |
+| 接口 | 作用 |
 | --- | --- |
-| `短剧` | 节奏快，冲突密集，强反转 |
-| `影视剧` | 场景完整，镜头感强 |
-| `舞台剧` | 舞台提示、人物走位更多 |
-| `广播剧` | 音效、旁白、声音表演更多 |
-| `分镜脚本` | 镜头、画面、景别更多 |
+| `GET /api/health` | 健康检查 |
+| `GET /api/examples/novel` | 获取内置示例《低智商犯罪》 |
+| `POST /api/novels/import` | 导入文本或 EPUB 内容 |
+| `POST /api/chapters/preview` | 预览章节识别结果 |
+| `POST /api/characters/profiles` | 提取人物小传，支持本地 / AI 模式 |
+| `POST /api/consistency/global-state` | 生成跨章节一致性状态表 |
+| `GET /api/screenplay/schema` | 获取 Screenplay JSON Schema |
+| `POST /api/convert` | 同步全文转换 |
+| `POST /api/convert/jobs` | 启动带进度的异步转换 |
+| `GET /api/convert/jobs/{job_id}` | 查询转换进度和结果 |
+| `POST /api/yaml/validate` | 校验编辑后的 YAML |
+| `POST /api/scenes/rewrite` | 局部重生成指定场景 |
 
-### YAML 输出
+## 请求示例
 
-项目使用 `PyYAML` 将 `Screenplay` 模型序列化为 YAML。导出的 YAML 会保留中文内容和字段顺序，
-便于作者直接阅读、编辑和保存。
-
-### YAML 校验
-
-接口：`POST /api/yaml/validate`
-
-该接口用于校验编辑后的 YAML 是否仍符合 Story2Script 剧本 Schema。
-
-请求示例：
+### 全文转换
 
 ```json
 {
-  "yaml_text": "schema_version: '1.0'\ntitle: 示例剧本\n..."
+  "title": "低智商犯罪",
+  "genre": "悬疑 / 犯罪",
+  "adaptation_type": "短剧",
+  "mode": "demo",
+  "novel_text": "第一章\n“你有没有感觉，现在的人普遍浮躁？”方超手持一把枪，站在酒店客房的窗户边。\n第二章\n刘直背上双肩包。\n第三章\n警车赶到现场。\n第四章\n张一昂开始复盘案件。"
 }
 ```
 
-校验通过时返回 `valid: true`；YAML 格式错误或字段不符合 Schema 时返回 `422`。
+响应包含：
+
+- `screenplay`：结构化剧本 JSON。
+- `yaml_text`：可编辑 YAML。
+- `mode`：实际转换模式。
+- `adaptation_type`：改编类型。
+
+### 异步转换进度
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/convert/jobs \
+  -H "Content-Type: application/json" \
+  -d "{\"title\":\"低智商犯罪\",\"genre\":\"悬疑 / 犯罪\",\"adaptation_type\":\"短剧\",\"mode\":\"demo\",\"novel_text\":\"第一章...\"}"
+```
+
+返回 `job_id` 后轮询：
+
+```bash
+curl http://127.0.0.1:8000/api/convert/jobs/{job_id}
+```
+
+进度阶段包括章节解析、全局状态抽取、剧本生成、YAML 导出和完成状态。
 
 ### 局部重生成
-
-接口：`POST /api/scenes/rewrite`
-
-该接口用于在已有 YAML 剧本上只重写某一个场景，避免每次修改都重新生成全文。请求需要传入当前
-`yaml_text`、目标 `scene_id` 和局部操作 `operation`，接口会返回更新后的结构化剧本和 YAML。
-默认使用本地规则模式；配置外部 LLM 后，可以传入 `mode: "ai"` 使用 AI 局部重写。
-
-当前支持的操作：
-
-| 操作 | 说明 |
-| --- | --- |
-| `rewrite_dialogue` | 重新生成本场对白 |
-| `strengthen_conflict` | 加强戏剧冲突 |
-| `short_drama_pace` | 改成短剧节奏 |
-| `add_camera_hints` | 增加镜头提示 |
-| `reduce_narration` | 减少旁白 |
-| `adjust_character_voice` | 调整某个人物的语气 |
-
-请求示例：
 
 ```json
 {
@@ -187,241 +188,47 @@ Schema 的剧本对象。
 }
 ```
 
-调整人物语气时可以额外传入：
+支持的 `operation`：
 
-```json
-{
-  "yaml_text": "schema_version: '1.0'\n...",
-  "scene_id": "scene-1",
-  "operation": "adjust_character_voice",
-  "mode": "ai",
-  "character_id": "character-1",
-  "tone": "更锋利"
-}
+| operation | 说明 |
+| --- | --- |
+| `rewrite_dialogue` | 重新生成本场对白 |
+| `strengthen_conflict` | 加强戏剧冲突 |
+| `short_drama_pace` | 改成短剧节奏 |
+| `add_camera_hints` | 增加镜头提示 |
+| `reduce_narration` | 减少旁白 |
+| `adjust_character_voice` | 调整某个人物的语气 |
+
+AI 局部重写只要求模型返回目标 `Scene` JSON。服务端会强制保持 `scene.id`、`source_chapter`、`int_ext`、`time_of_day`、`location` 等关键字段不变，并重新通过 `Screenplay.model_validate`。
+
+## YAML Schema
+
+完整设计说明见：
+
+```text
+docs/YAML_SCHEMA.md
 ```
 
-AI 局部重写复用项目根目录 `.env` 中的 OpenAI-compatible 配置：
+当前顶层结构：
 
-```bash
-AI_API_KEY=your-api-key
-AI_BASE_URL=https://your-provider.example/v1
-AI_MODEL=your-model-name
-AI_TIMEOUT_SECONDS=120
+```yaml
+schema_version: '1.0'
+title: 低智商犯罪
+genre: 悬疑 / 犯罪
+adaptation_type: 短剧
+logline: 围绕《低智商犯罪》核心冲突展开的剧本初稿。
+source: {}
+global_state: {}
+characters: []
+scenes: []
 ```
-
-AI 模式只要求模型返回目标 `scene` 的 JSON，不返回完整剧本。服务端会校验 `scene.id` 和
-`source_chapter` 不变，再把该 scene 替换回原剧本，并重新通过 `Screenplay` 模型校验，保证 YAML
-结构仍然有效。局部重写的 AI prompt 也会携带 `global_state`，因此只改某一场时仍会遵守跨章节人物、
-地点和时间线约束。
-
-### 示例小说
-
-接口：`GET /api/examples/novel`
-
-该接口返回内置示例小说（节选自《低智商犯罪》，含四章）、标题和类型。后续 Web 页面可用它实现
-“填入示例”，也可以用于快速测试 `/api/convert`。
 
 ## 测试
+
+后续 PR 的测试方式统一写成：
 
 ```bash
 python -m pytest
 python -m ruff check .
 python -m compileall -q src tests
-```
-
-## Web 工作台
-
-项目首页 `http://127.0.0.1:8000` 提供左右对照工作台：
-
-- 左侧输入或填入示例小说
-- 支持导入 `.epub`、`.txt`、`.md`、`.markdown`、`.csv`、`.log` 等小说文件
-- 对 `.mobi`、`.azw`、`.azw3` 给出明确提示，建议先转换为 EPUB 或 TXT
-- 支持选择改编类型
-- 支持在生成按钮旁切换本地 / AI 全文转换模式
-- 支持显示全文转换任务进度和当前阶段
-- 右侧展示生成后的 YAML 剧本
-- 支持 YAML 校验
-- 支持下载 `screenplay.yaml`
-- 支持展示人物小传表
-- 生成的 YAML 内包含 `global_state`，可展示人物、地点和时间线如何保持跨章节一致
-- 支持对指定场景进行局部重生成，包括对白、冲突、短剧节奏、镜头提示、旁白和人物语气
-
-## 人物小传提取
-
-接口：`POST /api/characters/profiles`
-
-该接口会从三章以上小说中自动提取人物小传信息，返回字段包括：
-
-- `name`：人物姓名
-- `role`：角色定位
-- `personality`：性格
-- `goal`：目标
-- `relationships`：与他人的关系
-- `appearance_chapters`：出场章节
-- `key_change`：关键变化
-
-接口支持 `mode` 字段，用于在本地规则与 AI 增强之间切换：
-
-| mode | 说明 |
-| --- | --- |
-| `demo` | 默认。纯本地规则提取，无需 API Key，稳定可复现 |
-| `ai` | 调用外部 LLM，理解原文并补全性格、目标、人物关系和关键变化 |
-
-请求示例：
-
-```json
-{
-  "mode": "ai",
-  "novel_text": "第一章 ...\n第二章 ...\n第三章 ..."
-}
-```
-
-### 为什么需要 AI 增强
-
-本地规则只能做精确的模板匹配，无法“理解”原文：`personality` 仅命中固定的性格关键词、
-`goal` 只截取含触发词的句子、`key_change` 需要字面的“从 X 到 Y”、`relationships` 需要字面的
-“X 是 Y 的弟弟”。自然行文很少正好用这些模板，因此这些字段经常落回“待作者进一步补充”。
-性格、动机、人物弧光与人物关系本质上需要阅读理解，正是 LLM 擅长、硬规则做不到的部分。
-
-`ai` 模式采用“本地定名单、LLM 补语义”的混合策略，复用与 `/api/convert` 相同的
-OpenAI-compatible 配置（`AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` / `AI_TIMEOUT_SECONDS`）：
-
-- 人物名单与 `appearance_chapters` 仍由本地规则确定，**LLM 不能新增、漏掉或改写人物**，
-  从而继承上面稳定的人名识别结果
-- LLM 只负责补全 `role`、`personality`、`goal`、`relationships`、`key_change`
-- 服务端逐条按 `CharacterProfile` Schema 校验并以本地结果兜底：LLM 留空或给占位文字的
-  字段会自动回退到本地值；模型返回非法 JSON、缺少 `profiles` 列表等硬错误才返回 `422`
-
-没有配置 API Key 时继续使用默认 `demo` 模式即可。
-
-### 本地人名识别
-
-人名识别采用“姓氏闸门 + 多重证据”策略，确保稳定可复现：
-
-- 候选词必须以常见姓氏开头，并排除虚词、介词、地点/机构词尾与动词词尾，从根本上
-  避免把“直接 / 点头 / 马上 / 皱眉 / 幽幽地 / 继续”等动词、副词误判成人名
-- 通过长度消歧与片段抑制，区分“张一昂”与“张一”、剔除“查周荣”这类“动词 + 人名”组合
-- 结合“说话人引号、人物称谓（吴主任 / 陈法医）、主语谓语、被指向动词”等证据与词频，
-  把真实人物与“时间 / 任务 / 能力 / 关系”等常见词区分开
-- 同一套已识别人物名单会复用到离线转换器的台词归属上，避免转换阶段再次把垃圾词
-  注册成新人物，导致台词与人物关系混乱
-
-规则识别覆盖绝大多数常见情形；对于姓名与常见词同形等长尾歧义，可进一步交由可选的 AI
-增强路径处理。
-
-## 心理描写外化
-
-转换器会尝试识别心理描写，并将其外化为：
-
-- 可拍摄的动作
-- 潜台词和人物反应
-- `camera_hints` 镜头提示
-
-例如“林澈突然觉得背后一阵发冷，他隐约意识到，姐姐的失踪可能不是意外。”会被转换为停步回头、
-潜台词压力和近景提示，而不是把心理判断机械搬成一句台词。
-
-## 叙述到戏剧化改写
-
-每个场景会生成 `dramatization_decisions`，记录系统如何判断小说叙述的改写方向：
-
-| target | 改写方向 |
-| --- | --- |
-| `action` | 角色可见行为、身体反应、场面推进 |
-| `dialogue` | 原文明确对白，或需要通过信息交换推动冲突 |
-| `subtext` | 心理活动、情绪判断、未说出口的意图 |
-| `scene_description` | 天气、空间、背景和氛围 |
-
-AI 转换 prompt 会显式要求模型做这个分类决策，避免把小说里的心理描写、环境叙述和背景说明直接搬进剧本。
-
-`dramatization_decisions` 作为“原文 → 改写方向”的分类记录保留在结构化数据中；可读剧本预览
-只展示这层分类分析，不再展示方法论式的说明文字（reason），避免说明性内容混进剧本阅读视图。
-台词说话人识别同时支持前置与后置写法（“方超说：…” 与 “…”方超握紧手枪），开场对白不会被
-误当成动作行；场景 `location` 会排除人物名等非地点候选，避免出现“EXT. 刘直 - DAY”这类错误。
-
-## 转换器模式
-
-`POST /api/convert` 支持 `mode` 字段，用于选择转换器实现。
-
-当前支持：
-
-- `demo`：本地规则转换器，不需要外部 API Key
-- `ai`：调用外部 LLM，智能识别心理描写、场景改编和人物信息
-
-### 外部 LLM 配置
-
-项目已预留 OpenAI-compatible Chat Completions 接口。你确定服务商后，在项目根目录创建正式 `.env`
-配置文件：
-
-```bash
-AI_API_KEY=your-api-key
-AI_BASE_URL=https://your-provider.example/v1
-AI_MODEL=your-model-name
-AI_TIMEOUT_SECONDS=120
-# 可选：长剧本 JSON 可能超出服务商默认输出上限被截断，按需调高
-AI_MAX_TOKENS=8192
-```
-
-`AI_MAX_TOKENS` 为可选项：默认不发送该参数、沿用服务商默认上限；当整篇剧本 JSON 较大、
-出现“模型返回内容不是有效 JSON”时，多半是输出被截断，可显式调高它。容错解析失败时，错误
-信息会附带模型原始响应的前 500 字，便于判断是被截断、返回了说明文字，还是根本没返回 JSON。
-
-随后调用 `/api/convert` 时传入：
-
-```json
-{
-  "mode": "ai",
-  "title": "作品标题",
-  "genre": "悬疑",
-  "novel_text": "第一章 ...\n第二章 ...\n第三章 ..."
-}
-```
-
-Web 工作台默认使用本地模式，因此没有 API Key 也能演示；配置上述环境变量后，在生成按钮旁选择 `AI`
-即可展示 LLM 改编质量。API 调用中如果暂时没有配置 API Key，继续使用默认 `demo` 模式即可。
-AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务端会用这份固定状态表回填并校验最终
-`Screenplay`，确保分块改编不会丢失跨章节一致性。
-
-启动服务时，统一 LLM 客户端会自动读取项目根目录 `.env`。如果同名配置同时存在于系统环境变量和
-`.env` 中，系统环境变量优先。`.env` 已被 git 忽略，避免真实 API Key 被提交到仓库。
-
-AI 全文转换采用**逐章分块**：本地先抽取 `global_state` 与稳定的人物表作为固定上下文，再**逐章**
-请求 LLM，每次只让模型返回**单章的场景列表**（`{"scenes": [...]}`），最后在服务端合并各章场景、
-统一重排 `scene-数字` 编号并按章节回填 `source_chapter`。这样每次响应都足够小，不会因为整篇剧本
-JSON 超出模型单次输出上限而被截断（截断会导致 JSON 不完整、无法解析）。人物表与 `adaptation_type`、
-`title` 等顶层信息由本地状态表与请求决定，LLM 只负责生成各章场景，避免模型新增/漏掉人物。
-
-每章转换遵循固定校验链路：
-
-```text
-llm_json -> 容错解析 -> normalize -> 合并各章 -> Screenplay.model_validate -> screenplay_to_yaml
-```
-
-LLM 只负责生成 JSON；服务端会先做一层归一化修复，再用 `Screenplay` Schema 做最终校验，校验通过后
-才会导出 YAML。容错解析会先尝试直接解析，再剥离 `<think>` 推理块与 Markdown 代码块围栏、容忍尾随
-逗号、忽略 JSON 前后的说明文字，最后回退到提取最外层 `{...}`，避免模型把合法 JSON 包在围栏或解释里
-时被误判为“非法 JSON”。若仍无法解析，错误信息会回显模型原始响应的前 500 字，便于判断是被截断、返回
-了说明文字还是根本没返回 JSON。（全文转换、局部重写、人物小传 AI 增强共用
-`src/story2script/llm_client.py` 的 `loads_json_object`；当响应 `finish_reason=length` 时会直接报“输出
-被截断”，提示调高 `AI_MAX_TOKENS`。）归一化会自动修复 LLM 常见的小偏差，避免动辄整篇失败：
-
-- 回填或修正缺失 / 格式不对的 `scene.id`（统一为 `scene-数字`）
-- 把中文或不规范的 `int_ext`、`time_of_day` 归一为 `INT./EXT.` 与 `DAY/NIGHT`，并据此重建 `heading`
-- 丢弃 `scene`、`element`、`dramatization_decisions` 上 Schema 不允许的多余字段
-- 把用人物名引用的对白映射回稳定的角色 `id`，无法解析的对白降级为动作行
-- 缺失的 `goal`、`conflict`、`beat`、`subtext`、`elements`、`dramatization_decisions` 等会补成
-  可编辑的占位内容（`adaptation_type` 由请求决定并在合并时统一回填）
-
-只有真正无法恢复的情况才会返回清晰的 `422` 错误，不会把坏 YAML 返回给前端，包括：某一章返回非法
-JSON、输出被截断（`finish_reason=length`），或所有章节都没有任何有效场景。
-
-全文转换和局部重写共用 `src/story2script/llm_client.py` 中的统一 LLM 客户端。该客户端自动读取
-`AI_API_KEY`、`AI_BASE_URL`、`AI_MODEL` 和 `AI_TIMEOUT_SECONDS`，调用 `/chat/completions`，
-并统一处理超时、网络错误、HTTP 错误和模型空响应。
-
-## Schema 文档
-
-YAML Schema 设计说明见：
-
-```text
-docs/YAML_SCHEMA.md
 ```
