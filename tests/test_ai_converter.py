@@ -242,6 +242,62 @@ def test_ai_converter_normalizes_imperfect_scene_structure(monkeypatch: pytest.M
     assert result_scene.elements[0].character == "character-1"
 
 
+def test_ai_converter_normalizes_dialogue_alias_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    scene = scene_dict(
+        elements=[
+            {
+                "type": "台词",
+                "speaker": "林澈",
+                "line": "出发吧。",
+                "emotion": "坚定",
+            }
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return chapter_response([scene])
+
+    configure_ai(monkeypatch)
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    screenplay = converter.convert(NOVEL_CHAPTERS, adaptation_type="短剧")
+    dialogue = screenplay.scenes[0].elements[0]
+
+    assert dialogue.type == "dialogue"
+    assert dialogue.character == "character-1"
+    assert dialogue.text == "出发吧。"
+    assert dialogue.emotion == "坚定"
+
+
+def test_ai_converter_splits_speaker_lines_from_action_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scene = scene_dict(
+        elements=[
+            {
+                "type": "action",
+                "text": "林澈停在门口。\n林澈：出发吧。\n林澈（压低声音）：别回头。",
+            }
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return chapter_response([scene])
+
+    configure_ai(monkeypatch)
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    screenplay = converter.convert(NOVEL_CHAPTERS, adaptation_type="短剧")
+    elements = screenplay.scenes[0].elements
+    dialogues = [element for element in elements if element.type == "dialogue"]
+
+    assert elements[0].type == "action"
+    assert len(dialogues) == 2
+    assert [dialogue.text for dialogue in dialogues] == ["出发吧。", "别回头。"]
+    assert all(dialogue.character == "character-1" for dialogue in dialogues)
+    assert dialogues[1].parenthetical == "压低声音"
+
+
 def test_ai_converter_does_not_leak_placeholder_text(monkeypatch: pytest.MonkeyPatch) -> None:
     scene = scene_dict()
     del scene["summary"]
