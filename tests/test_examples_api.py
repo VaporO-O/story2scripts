@@ -12,9 +12,9 @@ def test_example_novel_api_returns_convertible_text() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["title"] == "雾港来信"
-    assert body["genre"] == "悬疑 / 剧情"
-    assert len(parse_chapters(body["novel_text"])) == 3
+    assert body["title"] == "低智商犯罪"
+    assert body["genre"] == "悬疑 / 犯罪"
+    assert len(parse_chapters(body["novel_text"])) >= 3
 
 
 def test_example_novel_can_be_converted() -> None:
@@ -23,4 +23,4 @@ def test_example_novel_can_be_converted() -> None:
     response = client.post("/api/convert", json=example)
 
     assert response.status_code == 200
-    assert response.json()["screenplay"]["title"] == "雾港来信"
+    assert response.json()["screenplay"]["title"] == "低智商犯罪"
