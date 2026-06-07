@@ -229,18 +229,38 @@ def _split_scene_slices(text: str) -> list[SceneSlice]:
     return slices
 
 
-def _dialogue_from_text(text: str) -> tuple[str, str] | None:
+def _resolve_known_name(raw: str, known_names: set[str]) -> str | None:
+    """把对白/心理描写正则抓到的原始说话人解析为已识别的人物姓名。
+
+    说话人正则会连带抓到修饰语（如“吴主任寻思 / 幽幽地 / 继续”）。这里只把能映射到
+    全局状态表中真实人物的片段当作说话人；映射不到的（多为副词、动作短语）一律丢弃，
+    避免把垃圾词注册成新人物、扰乱台词归属。
+    """
+    if raw in known_names:
+        return raw
+    matches = [name for name in known_names if name in raw]
+    if matches:
+        return max(matches, key=len)
+    return None
+
+
+def _dialogue_from_text(text: str, known_names: set[str]) -> tuple[str, str] | None:
     for quote in re.finditer(r"[“\"]([^”\"]{2,100})[”\"]", text):
         prefix = text[max(0, quote.start() - 12) : quote.start()]
         speaker_match = re.search(
             r"([\u4e00-\u9fff]{2,5})(?:说|问|喊|答道|低声道)[，,:：]?$", prefix
         )
-        if speaker_match:
-            return speaker_match.group(1), quote.group(1)
+        if not speaker_match:
+            continue
+        speaker = _resolve_known_name(speaker_match.group(1), known_names)
+        if speaker:
+            return speaker, quote.group(1)
     return None
 
 
-def _inner_state_from_text(text: str) -> tuple[str, list[str], str, str, list[str]] | None:
+def _inner_state_from_text(
+    text: str, known_names: set[str]
+) -> tuple[str, list[str], str, str, list[str]] | None:
     sentence_match = re.search(
         r"([\u4e00-\u9fff]{2,4})([^。！？!?]*(?:觉得|意识到|隐约意识到|发冷|不是意外)[^。！？!?]*)[。！？!?]",
         text,
@@ -248,10 +268,9 @@ def _inner_state_from_text(text: str) -> tuple[str, list[str], str, str, list[st
     if not sentence_match:
         return None
 
-    character = sentence_match.group(1)
-    for adverb in ["突然", "猛地", "一下"]:
-        if character.endswith(adverb):
-            character = character[: -len(adverb)]
+    character = _resolve_known_name(sentence_match.group(1), known_names)
+    if not character:
+        return None
     sentence = sentence_match.group(2)
     emotion = "紧张" if any(word in sentence for word in ["发冷", "不对", "不是意外"]) else "不安"
     line = "不对……这不是意外。" if "不是意外" in sentence else "等等，这里面不对。"
@@ -838,14 +857,17 @@ class DemoConverter:
     ) -> Screenplay:
         style = _adaptation_style_profile(adaptation_type)
         global_state = extract_global_story_state(chapters)
+        # 仅以全局状态表中已识别的真实人物作为说话人解析依据，杜绝转换阶段再次把
+        # 副词、动作短语注册成新人物。
+        known_names = {state.name for state in global_state.characters}
         chapter_slices: list[tuple[Chapter, list[SceneSlice]]] = []
 
         for chapter in chapters:
             scene_slices = _split_scene_slices(chapter.content)
             chapter_slices.append((chapter, scene_slices))
             for scene_slice in scene_slices:
-                dialogue = _dialogue_from_text(scene_slice.text)
-                inner_state = _inner_state_from_text(scene_slice.text)
+                dialogue = _dialogue_from_text(scene_slice.text, known_names)
+                inner_state = _inner_state_from_text(scene_slice.text, known_names)
                 if dialogue:
                     _ensure_global_character(
                         global_state=global_state,
@@ -879,8 +901,8 @@ class DemoConverter:
         scene_index = 1
         for chapter, scene_slices in chapter_slices:
             for scene_slice in scene_slices:
-                dialogue = _dialogue_from_text(scene_slice.text)
-                inner_state = _inner_state_from_text(scene_slice.text)
+                dialogue = _dialogue_from_text(scene_slice.text, known_names)
+                inner_state = _inner_state_from_text(scene_slice.text, known_names)
                 elements: list[Action | Dialogue] = [
                     Action(
                         type="action",
