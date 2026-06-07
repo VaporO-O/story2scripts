@@ -383,27 +383,35 @@ AI 转换会先在本地抽取 `global_state`，并将其写入 prompt；服务�
 启动服务时，统一 LLM 客户端会自动读取项目根目录 `.env`。如果同名配置同时存在于系统环境变量和
 `.env` 中，系统环境变量优先。`.env` 已被 git 忽略，避免真实 API Key 被提交到仓库。
 
-AI 全文转换遵循固定校验链路：
+AI 全文转换采用**逐章分块**：本地先抽取 `global_state` 与稳定的人物表作为固定上下文，再**逐章**
+请求 LLM，每次只让模型返回**单章的场景列表**（`{"scenes": [...]}`），最后在服务端合并各章场景、
+统一重排 `scene-数字` 编号并按章节回填 `source_chapter`。这样每次响应都足够小，不会因为整篇剧本
+JSON 超出模型单次输出上限而被截断（截断会导致 JSON 不完整、无法解析）。人物表与 `adaptation_type`、
+`title` 等顶层信息由本地状态表与请求决定，LLM 只负责生成各章场景，避免模型新增/漏掉人物。
+
+每章转换遵循固定校验链路：
 
 ```text
-llm_json -> 容错解析 -> normalize -> Screenplay.model_validate -> screenplay_to_yaml
+llm_json -> 容错解析 -> normalize -> 合并各章 -> Screenplay.model_validate -> screenplay_to_yaml
 ```
 
 LLM 只负责生成 JSON；服务端会先做一层归一化修复，再用 `Screenplay` Schema 做最终校验，校验通过后
-才会导出 YAML。容错解析会先尝试直接解析，再自动剥离 Markdown ``` 代码块围栏、忽略 JSON 前后的
-说明文字，最后回退到提取最外层 `{...}`，避免模型把合法 JSON 包在围栏或解释里时被误判为“非法 JSON”。
-（全文转换、局部重写、人物小传 AI 增强共用 `src/story2script/llm_client.py` 的 `loads_json_object`。）
-归一化会自动修复 LLM 常见的小偏差，避免动辄整篇失败：
+才会导出 YAML。容错解析会先尝试直接解析，再剥离 `<think>` 推理块与 Markdown 代码块围栏、容忍尾随
+逗号、忽略 JSON 前后的说明文字，最后回退到提取最外层 `{...}`，避免模型把合法 JSON 包在围栏或解释里
+时被误判为“非法 JSON”。若仍无法解析，错误信息会回显模型原始响应的前 500 字，便于判断是被截断、返回
+了说明文字还是根本没返回 JSON。（全文转换、局部重写、人物小传 AI 增强共用
+`src/story2script/llm_client.py` 的 `loads_json_object`；当响应 `finish_reason=length` 时会直接报“输出
+被截断”，提示调高 `AI_MAX_TOKENS`。）归一化会自动修复 LLM 常见的小偏差，避免动辄整篇失败：
 
 - 回填或修正缺失 / 格式不对的 `scene.id`（统一为 `scene-数字`）
 - 把中文或不规范的 `int_ext`、`time_of_day` 归一为 `INT./EXT.` 与 `DAY/NIGHT`，并据此重建 `heading`
 - 丢弃 `scene`、`element`、`dramatization_decisions` 上 Schema 不允许的多余字段
 - 把用人物名引用的对白映射回稳定的角色 `id`，无法解析的对白降级为动作行
 - 缺失的 `goal`、`conflict`、`beat`、`subtext`、`elements`、`dramatization_decisions` 等会补成
-  可编辑的占位内容，并按请求回填缺失的 `adaptation_type`
+  可编辑的占位内容（`adaptation_type` 由请求决定并在合并时统一回填）
 
-只有真正无法恢复的情况才会返回清晰的 `422` 错误，不会把坏 YAML 返回给前端，包括：模型返回非法
-JSON、没有任何有效场景、或显式给出与请求矛盾的 `adaptation_type`。
+只有真正无法恢复的情况才会返回清晰的 `422` 错误，不会把坏 YAML 返回给前端，包括：某一章返回非法
+JSON、输出被截断（`finish_reason=length`），或所有章节都没有任何有效场景。
 
 全文转换和局部重写共用 `src/story2script/llm_client.py` 中的统一 LLM 客户端。该客户端自动读取
 `AI_API_KEY`、`AI_BASE_URL`、`AI_MODEL` 和 `AI_TIMEOUT_SECONDS`，调用 `/chat/completions`，

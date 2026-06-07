@@ -201,9 +201,17 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} returned invalid JSON response.") from exc
 
         try:
-            content = payload["choices"][0]["message"]["content"]
+            choice = payload["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ValueError(f"{self.usage_label} returned malformed response.") from exc
+
+        finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+        if finish_reason == "length":
+            raise ValueError(
+                f"{self.usage_label} 输出被截断（finish_reason=length）：本次返回超出模型单次输出"
+                "长度上限。请在 .env 调高 AI_MAX_TOKENS（如 16384），或减少单次转换的章节数量。"
+            )
 
         if not isinstance(content, str) or not content.strip():
             raise ValueError(f"{self.usage_label} returned empty response.")

@@ -1009,6 +1009,12 @@ class AIConverter:
 
     The provider is intentionally configured by environment variables so the
     project is not tied to one vendor.
+
+    Conversion runs chapter by chapter (the "分块转换" the project documents):
+    the local ``global_state`` and a stable character roster are fixed context,
+    and each LLM call only has to return the scenes of a single chapter. This
+    keeps every response small enough to fit the model's output limit, so a
+    multi-chapter novel no longer fails with a truncated, unparseable JSON.
     """
 
     mode = "ai"
@@ -1025,110 +1031,98 @@ class AIConverter:
     ) -> Screenplay:
         style = _adaptation_style_profile(adaptation_type)
         global_state = extract_global_story_state(chapters)
-        source_text = "\n\n".join(f"{chapter.title}\n{chapter.content}" for chapter in chapters)
-        prompt = (
-            "你是专业影视编剧。请将小说改编成完整的 Story2Script Screenplay JSON 对象。"
-            "重点：小说心理描写不能原样照搬，要外化为动作、对白 emotion 和 camera_hints。"
-            "剧本要按时间变化、地点变化、人物进出、情节转折和冲突变化拆成多个场景。"
-            "只返回可被 json.loads 解析的 JSON 对象，不要 YAML、Markdown 或解释文字。"
-            "后端会执行 llm_json -> json.loads -> Screenplay.model_validate -> screenplay_to_yaml；"
-            "任何缺字段或类型错误都会被拒绝。\n\n"
-            f"标题：{title or '请根据内容拟定'}\n"
-            f"类型：{genre or '请根据内容判断'}\n"
-            f"改编类型：{adaptation_type}\n"
-            f"改编要求：{style.prompt_instruction}\n"
-            "全局状态表是固定上下文，分块转换时必须保持人物姓名、性格、地点和时间线一致："
-            f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
-            'Schema 要点：顶层 schema_version 必须固定为字符串 "1.0"，不要写成数字、v1.0 或其它值; '
-            "title, genre, logline, characters, scenes 必须存在; "
-            "source 会由后端根据章节解析结果回填为对象，不要输出字符串或数组; "
-            f"顶层必须包含 adaptation_type，且 adaptation_type 必须等于 {adaptation_type}; "
-            "顶层必须包含 global_state; 每个 character 必须包含 arc; "
-            "顶层 characters 的每个对象只能包含 id, name, description, motivation, arc; "
-            "aliases、first_appearance、appearance_chapters、traits、goal 和 consistency_note "
-            "只能出现在 global_state.characters，不要放入顶层 characters; "
-            "scene 必须包含 int_ext, time_of_day, location, characters_present, props, "
-            "dramatization_decisions, summary, goal, conflict, beat, subtext, elements 和 camera_hints; "
-            "summary 必须是本场剧情的一句话概括，不能为空或写占位文字; "
-            "heading 必须与 int_ext/location/time_of_day 对齐，使用类似 INT. LIBRARY - DAY 的 slug line; "
-            "elements 是本场正文，必须包含本场的动作行（type=action）和对白（type=dialogue）; "
-            "原文里出现的台词必须原句保留为一个 type=dialogue 元素，character 用对应角色 id，不能丢失对白，"
-            "也不能只把对白写进 dramatization_decisions 而不放进 elements; "
-            "camera_hints 只放简短镜头/调度提示，不要把动作行或对白塞进 camera_hints; "
-            "每个 scene 的 dramatization_decisions 必须显式记录叙述到戏剧表达的分类决策，"
-            "每条决策都要给出真实的 source_text（取自原文）和 rendering（改写后的剧本文本），不能为空; "
-            "target 只能是 action、dialogue、subtext、scene_description。"
-            "分类规则：可见行为转 action；明确说话内容或需要外化的信息交换转 dialogue；"
-            "心理活动、情绪判断和未说出口的意图转 subtext，不能直接搬成台词；"
-            "天气、空间、背景和氛围转 scene_description。"
-            "dialogue 可包含 emotion。\n\n"
-            f"小说原文：\n{source_text}"
-        )
-        content = self.llm_client.complete_json(prompt)
-        screenplay_data = _load_ai_screenplay_data(content)
-        screenplay_data["source"] = _source_info_from_chapters(chapters).model_dump(mode="json")
-        screenplay_data["global_state"] = global_state.model_dump(mode="json")
-        raw_characters = screenplay_data.get("characters")
-        if not isinstance(raw_characters, list):
-            raw_characters = []
-        screenplay_data["characters"] = raw_characters
-        existing_characters = {
-            character.get("id"): character
-            for character in raw_characters
-            if isinstance(character, dict)
-        }
-        for state in global_state.characters:
-            state_data = _state_character_data(state)
-            if state.id in existing_characters:
-                existing_characters[state.id].update(
-                    {
-                        "name": state.name,
-                        "description": existing_characters[state.id].get("description")
-                        or state_data["description"],
-                        "motivation": existing_characters[state.id].get("motivation")
-                        or state_data["motivation"],
-                        "arc": existing_characters[state.id].get("arc") or state_data["arc"],
-                    }
-                )
-            else:
-                screenplay_data["characters"].append(state_data)
-        screenplay_data["characters"] = _normalize_screenplay_character_data(
-            screenplay_data["characters"]
-        )
 
-        resolved_title = _as_text(screenplay_data.get("title")) or title.strip() or "未命名改编"
-        screenplay_data["schema_version"] = "1.0"
-        screenplay_data["title"] = resolved_title
-        screenplay_data["genre"] = _as_text(screenplay_data.get("genre")) or genre.strip()
-        screenplay_data["logline"] = (
-            _as_text(screenplay_data.get("logline"))
-            or f"以{adaptation_type}方式围绕《{resolved_title}》核心冲突展开的剧本初稿。"
+        characters = _normalize_screenplay_character_data(
+            [_state_character_data(state) for state in global_state.characters]
         )
-        if not _as_text(screenplay_data.get("adaptation_type")):
-            screenplay_data["adaptation_type"] = adaptation_type
-
-        known_ids = {character["id"] for character in screenplay_data["characters"]}
+        known_ids = {character["id"] for character in characters}
         name_to_id = {
             character["name"]: character["id"]
-            for character in screenplay_data["characters"]
+            for character in characters
             if character.get("name")
         }
-        screenplay_data["scenes"] = _normalize_screenplay_scene_data(
-            screenplay_data.get("scenes"),
-            known_ids,
-            name_to_id,
-            [chapter.title for chapter in chapters],
-        )
-        if not screenplay_data["scenes"]:
-            raise ValueError("AI 全文转换失败：模型没有返回任何有效场景。")
 
-        screenplay = _validate_ai_screenplay_data(screenplay_data)
-        if screenplay.adaptation_type != adaptation_type:
-            raise ValueError(
-                "AI 全文转换失败：模型返回的 adaptation_type 必须与请求一致"
-                f"（expected={adaptation_type}, actual={screenplay.adaptation_type}）。"
+        scenes: list[dict] = []
+        for chapter in chapters:
+            raw_scenes = self._convert_chapter(chapter, global_state, characters, adaptation_type, style)
+            scenes.extend(
+                _normalize_screenplay_scene_data(
+                    raw_scenes, known_ids, name_to_id, [chapter.title]
+                )
             )
-        return screenplay
+        if not scenes:
+            raise ValueError("AI 全文转换失败：模型没有返回任何有效场景。")
+        # 合并各章场景后统一重排 scene id，避免分块产生的编号冲突。
+        for index, scene in enumerate(scenes, start=1):
+            scene["id"] = f"scene-{index}"
+
+        resolved_title = title.strip() or "未命名改编"
+        screenplay_data = {
+            "schema_version": "1.0",
+            "title": resolved_title,
+            "genre": genre.strip(),
+            "logline": f"以{adaptation_type}方式围绕《{resolved_title}》核心冲突展开的剧本初稿。",
+            "adaptation_type": adaptation_type,
+            "source": _source_info_from_chapters(chapters).model_dump(mode="json"),
+            "global_state": global_state.model_dump(mode="json"),
+            "characters": characters,
+            "scenes": scenes,
+        }
+        return _validate_ai_screenplay_data(screenplay_data)
+
+    def _convert_chapter(
+        self,
+        chapter: Chapter,
+        global_state: GlobalStoryState,
+        characters: list[dict],
+        adaptation_type: AdaptationType,
+        style: AdaptationStyleProfile,
+    ) -> list[dict]:
+        roster = [{"id": item["id"], "name": item["name"]} for item in characters]
+        prompt = (
+            "你是专业影视编剧。请只把【本章】小说改编成 Story2Script 的场景列表。"
+            "只返回可被 json.loads 解析的 JSON 对象，形如 {\"scenes\": [...]}，"
+            "不要 YAML、Markdown 或解释文字。\n"
+            "重点：心理描写不能照搬，要外化为动作、对白 emotion 和 camera_hints；"
+            "按时间、地点、人物进出、情节转折和冲突变化把本章拆成多个场景。\n"
+            f"改编类型：{adaptation_type}\n"
+            f"改编要求：{style.prompt_instruction}\n"
+            "稳定人物表（characters 和 dialogue.character 只能引用这里的 id，不要新造人物）："
+            f"{json.dumps(roster, ensure_ascii=False)}\n"
+            "全局状态表是固定上下文，必须保持人物、地点和时间线跨章一致："
+            f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
+            "每个 scene 必须包含 id, heading, int_ext, time_of_day, location, source_chapter, "
+            "summary, goal, conflict, beat, subtext, characters, characters_present, props, "
+            "dramatization_decisions, elements, camera_hints; "
+            f"source_chapter 必须固定为 \"{chapter.title}\"; "
+            "heading 使用类似 INT. LIBRARY - DAY 的 slug line，并与 int_ext/location/time_of_day 对齐; "
+            "elements 是本场正文，必须包含动作行（type=action）和原文对白（type=dialogue，character 用人物 id），"
+            "不能把对白只写进 dramatization_decisions 而不放进 elements; "
+            "camera_hints 只放简短镜头/调度提示; "
+            "dramatization_decisions 每条要给出真实的 source_text（取自原文）和 rendering（改写后文本），"
+            "target 只能是 action、dialogue、subtext、scene_description; "
+            "dialogue 可包含 emotion。\n\n"
+            f"本章标题：{chapter.title}\n本章原文：\n{chapter.content}"
+        )
+        content = self.llm_client.complete_json(prompt)
+        try:
+            data = loads_json_object(content)
+        except ValueError as exc:
+            raise ValueError(
+                f"AI 全文转换失败：章节《{chapter.title}》返回内容不是有效 JSON。{exc}"
+            ) from exc
+
+        if isinstance(data, dict):
+            scenes = data.get("scenes")
+        elif isinstance(data, list):
+            scenes = data
+        else:
+            scenes = None
+        if not isinstance(scenes, list):
+            raise ValueError(
+                f"AI 全文转换失败：章节《{chapter.title}》未返回有效的 scenes 列表。"
+            )
+        return scenes
 
 
 def get_converter(mode: str = "demo") -> Converter:
