@@ -3,6 +3,9 @@ const genreInput = document.querySelector("#genreInput");
 const adaptationTypeInput = document.querySelector("#adaptationTypeInput");
 const convertModeInput = document.querySelector("#convertModeInput");
 const novelInput = document.querySelector("#novelInput");
+const chapterView = document.querySelector("#chapterView");
+const novelEditViewButton = document.querySelector("#novelEditViewButton");
+const novelChapterViewButton = document.querySelector("#novelChapterViewButton");
 const yamlOutput = document.querySelector("#yamlOutput");
 const scriptPreview = document.querySelector("#scriptPreview");
 const previewViewButton = document.querySelector("#previewViewButton");
@@ -11,6 +14,7 @@ const emptyState = document.querySelector("#emptyState");
 const message = document.querySelector("#message");
 
 let currentScriptView = "preview";
+let currentNovelView = "edit";
 let latestScreenplay = null;
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
@@ -31,9 +35,64 @@ function setMessage(text, isError = false) {
   message.style.color = isError ? "#c33b26" : "";
 }
 
+// 与后端 parser.py 一致：只把“标题后到下一个标题之间有正文”的才算章节，
+// 这样目录里的“第一章/第二章……”这类空标题不会被误计成章节。
+const CHAPTER_HEADING_RE =
+  /^[ \t]*(第[零一二两三四五六七八九十百千万\d]+章[^\r\n]*|chapter\s+\d+[^\r\n]*)[ \t]*$/gim;
+
+function detectChapters(text) {
+  const matches = [...text.matchAll(CHAPTER_HEADING_RE)];
+  const chapters = [];
+  for (let index = 0; index < matches.length; index += 1) {
+    const start = matches[index].index + matches[index][0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+    const content = text.slice(start, end).trim();
+    if (content) {
+      chapters.push({ title: matches[index][1].trim(), content });
+    }
+  }
+  return chapters;
+}
+
 function updateChapterCount() {
-  const chapters = novelInput.value.match(/^\s*(第.+章.*|chapter\s+\d+.*)$/gim) || [];
+  const chapters = detectChapters(novelInput.value);
   document.querySelector("#chapterCount").textContent = `已识别 ${chapters.length} 个章节`;
+  if (currentNovelView === "chapter") {
+    renderChapterView();
+  }
+}
+
+function renderChapterView() {
+  chapterView.innerHTML = "";
+  const chapters = detectChapters(novelInput.value);
+  if (chapters.length === 0) {
+    chapterView.appendChild(
+      createElement("p", "chapter-empty", "未识别到章节，请使用“第一章 标题”格式标记。"),
+    );
+    return;
+  }
+  chapters.forEach((chapter, index) => {
+    const item = createElement("details", "chapter-item");
+    if (index === 0) {
+      item.open = true;
+    }
+    item.appendChild(
+      createElement("summary", "chapter-title", `${chapter.title}（${chapter.content.length} 字）`),
+    );
+    item.appendChild(createElement("div", "chapter-text", chapter.content));
+    chapterView.appendChild(item);
+  });
+}
+
+function setNovelView(view) {
+  currentNovelView = view;
+  novelEditViewButton.classList.toggle("is-active", view === "edit");
+  novelChapterViewButton.classList.toggle("is-active", view === "chapter");
+  novelInput.classList.toggle("hidden", view !== "edit");
+  chapterView.classList.toggle("hidden", view !== "chapter");
+  if (view === "chapter") {
+    renderChapterView();
+  }
 }
 
 function errorMessage(data, fallback) {
@@ -300,10 +359,25 @@ function setScriptView(view) {
   yamlOutput.classList.toggle("hidden", view !== "source");
 }
 
+function populateCharacterOptions(screenplay) {
+  // 重写工具按角色“名字”选择，内部仍提交稳定的 character id，用户无需知道 id。
+  const previous = rewriteCharacterInput.value;
+  rewriteCharacterInput.innerHTML = "";
+  rewriteCharacterInput.appendChild(createElement("option", null, "（自动选择）"));
+  (screenplay.characters || []).forEach((character) => {
+    const option = createElement("option", null, character.name || character.id);
+    option.value = character.id;
+    rewriteCharacterInput.appendChild(option);
+  });
+  const stillExists = (screenplay.characters || []).some((character) => character.id === previous);
+  rewriteCharacterInput.value = stillExists ? previous : "";
+}
+
 function showScreenplay(screenplay, yamlText) {
   latestScreenplay = screenplay;
   yamlOutput.value = yamlText;
   renderScreenplay(screenplay);
+  populateCharacterOptions(screenplay);
   setScriptView(currentScriptView);
 }
 
@@ -560,6 +634,8 @@ document.querySelector("#validateButton").addEventListener("click", validateYaml
 document.querySelector("#downloadButton").addEventListener("click", downloadYaml);
 previewViewButton.addEventListener("click", () => setScriptView("preview"));
 sourceViewButton.addEventListener("click", () => setScriptView("source"));
+novelEditViewButton.addEventListener("click", () => setNovelView("edit"));
+novelChapterViewButton.addEventListener("click", () => setNovelView("chapter"));
 rewriteButtons.forEach((button) => {
   button.addEventListener("click", () => rewriteScene(button.dataset.rewriteOperation));
 });
