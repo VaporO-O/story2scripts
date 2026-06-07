@@ -153,11 +153,15 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
 @app.post("/api/yaml/validate", response_model=ValidateYamlResponse)
 async def validate_yaml(request: ValidateYamlRequest) -> ValidateYamlResponse:
     try:
-        screenplay_from_yaml(request.yaml_text)
+        screenplay = screenplay_from_yaml(request.yaml_text)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"YAML 校验失败：{exc}") from exc
 
-    return ValidateYamlResponse(valid=True, message="YAML 符合 Story2Script 剧本 Schema。")
+    return ValidateYamlResponse(
+        valid=True,
+        message="YAML 符合 Story2Script 剧本 Schema。",
+        screenplay=screenplay,
+    )
 
 
 @app.post("/api/scenes/rewrite", response_model=SceneRewriteResponse)

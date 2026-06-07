@@ -374,6 +374,299 @@ textarea {
   background: #faf7f0;
 }
 
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.view-button {
+  border: 0;
+  padding: 6px 16px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.view-button.is-active {
+  background: var(--green);
+  color: #fff;
+}
+
+.script-preview {
+  height: 354px;
+  overflow-y: auto;
+  padding: 22px;
+  background:
+    repeating-linear-gradient(
+      transparent,
+      transparent 31px,
+      rgba(38, 63, 51, 0.05) 31px,
+      rgba(38, 63, 51, 0.05) 32px
+    ),
+    var(--panel);
+}
+
+.script-meta {
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+  border-bottom: 2px solid var(--green);
+}
+
+.script-title {
+  margin: 0;
+  font: 700 24px Georgia, "Songti SC", serif;
+  letter-spacing: -0.5px;
+}
+
+.script-logline {
+  margin: 6px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.script-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tag-accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scene {
+  padding: 18px 0 22px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.scene:last-child {
+  border-bottom: 0;
+}
+
+.scene-slug {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.scene-no {
+  border: 0;
+  padding: 3px 9px;
+  border-radius: 3px;
+  background: var(--green);
+  color: #fff;
+  font: 700 11px/1.2 Consolas, monospace;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.scene-no:hover {
+  background: var(--accent);
+}
+
+.slug-line {
+  flex: 1;
+  min-width: 160px;
+  font: 700 15px/1.3 Consolas, "Courier New", monospace;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.scene-source {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.scene-summary {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.scene-beats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--green);
+  background: #faf7f0;
+}
+
+.scene-beat {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.beat-label {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.beat-text {
+  color: var(--ink);
+}
+
+.scene-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.chips-label {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.chip {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #eef1ec;
+  color: var(--green);
+  font-size: 11px;
+}
+
+.scene-body {
+  margin: 14px 0 6px;
+}
+
+.line-action {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.line-dialogue {
+  margin: 0 0 12px;
+  padding-left: 18%;
+}
+
+.line-dialogue .cue {
+  display: block;
+  font: 700 13px/1.4 Consolas, "Courier New", monospace;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.line-dialogue .dlg {
+  margin: 2px 0 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--accent);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.scene-camera {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: #18231d;
+  color: #c9d6cd;
+}
+
+.camera-label {
+  font: 700 10px/1 Consolas, monospace;
+  letter-spacing: 2px;
+  color: #7fa090;
+}
+
+.camera-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.scene-decisions {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.scene-decisions summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.decision-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.decision-target {
+  flex-shrink: 0;
+  height: fit-content;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: #eef1ec;
+  color: var(--green);
+  font: 700 10px/1.6 Consolas, monospace;
+}
+
+.target-dialogue {
+  background: #fde7df;
+  color: var(--accent);
+}
+
+.target-subtext {
+  background: #e7ecfb;
+  color: #3a4f9c;
+}
+
+.target-scene_description {
+  background: #eaf3ec;
+  color: #2f6b4a;
+}
+
+.decision-detail {
+  flex: 1;
+}
+
+.decision-source {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.55;
+}
+
+.decision-rendering {
+  margin: 2px 0 0;
+  color: var(--green);
+  line-height: 1.55;
+}
+
+.decision-reason {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 @media (max-width: 900px) {
   .workspace {
     grid-template-columns: 1fr;
