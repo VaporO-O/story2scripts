@@ -18,9 +18,15 @@ LOCATION_CUE_PATTERN = re.compile(
     r"(?:在|到|来到|进入|走进|回到|抵达|离开|穿过|转入|通往)"
     r"(?P<name>[\u4e00-\u9fffA-Za-z0-9·]{2,12})"
 )
-LOCATION_SUFFIX_PATTERN = re.compile(
-    r"^(.{0,10}?(?:楼|室|房|厅|馆|店|院|街|路|桥|港|站|城|村|镇|门口|"
-    r"走廊|码头|广场|仓库|学校|医院|公寓|办公室|屋|山|湖|海边))"
+# 场所语素：地点名应当落在这些字/词上。
+_LOCATION_MORPHEMES = (
+    r"门口|走廊|码头|广场|仓库|学校|医院|公寓|办公室|会议室|绿地|现场|公园|机场|车站|酒店|"
+    r"楼|室|房|厅|馆|店|院|街|路|桥|港|站|城|村|镇|屋|山|湖|江|河|海|巷|区|园|场|局|郊|滩"
+)
+# 把候选词截断到“场所核心”：最短前缀 + 一段连续的场所语素/方位后缀，丢掉后面的
+# 活动、事件或时间描述。例如“河边偷偷钓鱼”→“河边”，“市区主要道路”→“市区”。
+LOCATION_CORE_PATTERN = re.compile(
+    rf"^.*?(?:{_LOCATION_MORPHEMES})(?:{_LOCATION_MORPHEMES}|边|口|头|旁|子|儿|间)*"
 )
 # 真实地点通常带有表示场所的语素；缺少这些语素的候选词（如“刘直 / 一千万 / 我们 /
 # 推销”）一律剔除，避免人物名、数量词、动词短语被误当成地点。
@@ -33,12 +39,15 @@ LOCATION_ACTION_BOUNDARY_PATTERN = re.compile(
     r"走来|出现|说|问|喊|答道|低声道)"
 )
 NON_LOCATION_PATTERN = re.compile(
-    r"(?:年前|年后|之前|之后|时刻|时候|当年|那天|今天|昨天|明天|"
-    r"失踪|死亡|意外|事故|真相|秘密|回忆|记忆|事情|样子|声音|心里|内心)"
+    r"(?:年前|年后|之前|之后|时刻|时候|当年|那天|今天|昨天|明天|赴任|"
+    r"失踪|死亡|意外|事故|真相|秘密|回忆|记忆|事情|样子|声音|心里|内心|"
+    # 含场所语素但实为抽象概念的词，单独剔除。
+    r"全局|大局|局面|全场|角度)"
 )
 # 地点名前的数量词、方位泛指词，截掉后才能得到干净的场所名（“一条巷子”→“巷子”）。
+# 数量词必须带量词才剥离，避免把“三江口 / 十字路口”里的数字误删。
 LOCATION_LEADING_FILLER_PATTERN = re.compile(
-    r"^(?:[一二两三四五六七八九十几数]+[条个座间所处块片家张道堵]?|这|那|某|"
+    r"^(?:[一二两三四五六七八九十几数]+[条个座间所处块片家张道堵]|这|那|某|"
     r"到处|市面上?|外面|旁边|周围|附近|前面|后面|里面|上面|下面)"
 )
 # 含有这些句子虚词/代词的候选词不是干净的地点名（多为正则过度抓取的句子片段）。
@@ -67,14 +76,16 @@ def _clean_location_name(raw_name: str) -> str:
     if "的" in name:
         name = name.split("的", 1)[0]
     name = LOCATION_LEADING_FILLER_PATTERN.sub("", name)
-    suffix_match = LOCATION_SUFFIX_PATTERN.match(name)
-    if suffix_match:
-        name = suffix_match.group(1)
+    # 先截断到“场所核心”，再判时间/事件/抽象词：这样“三江口赴任前”能保留“三江口”，
+    # 而“全局的角度”截成“全局”后会被剔除。
+    core_match = LOCATION_CORE_PATTERN.match(name)
+    if core_match:
+        name = core_match.group(0)
     boundary_match = LOCATION_ACTION_BOUNDARY_PATTERN.search(name)
     if boundary_match and boundary_match.start() >= 2:
         name = name[: boundary_match.start()]
     name = name[:12]
-    # 时间、事件或抽象描述被地点提示词误捕获时（如“在十年前父亲失踪的时刻”），予以剔除。
+    # 时间、事件或抽象描述被地点提示词误捕获时（如“全局 / 十年前父亲失踪”），予以剔除。
     if NON_LOCATION_PATTERN.search(name):
         return ""
     # 没有任何场所语素的候选词不是地点。
