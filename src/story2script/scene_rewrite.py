@@ -228,12 +228,13 @@ class AISceneRewriter:
         operation: SceneRewriteOperation,
         character_id: str = "",
         tone: str = "更克制",
+        feedback: str = "",
     ) -> Screenplay:
         target_scene = _find_scene(screenplay, scene_id)
         if character_id:
             _resolve_character_id(screenplay, scene_id, character_id)
 
-        prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone)
+        prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone, feedback)
         content = self.llm_client.complete_json(prompt)
         try:
             raw_scene = loads_json_object(content)
@@ -285,6 +286,7 @@ class AISceneRewriter:
         operation: SceneRewriteOperation,
         character_id: str,
         tone: str,
+        feedback: str = "",
     ) -> str:
         context = {
             "screenplay": {
@@ -313,7 +315,8 @@ class AISceneRewriter:
             "elements, camera_hints。\n"
             "本次局部操作："
             f"{OPERATION_PROMPTS[operation]}\n"
-            f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"
+            + (f"审校意见（请重点修正以下问题）：{feedback}\n" if feedback else "")
+            + f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"
         )
 
 
@@ -324,6 +327,7 @@ def _rewrite_scene_with_ai(
     character_id: str = "",
     tone: str = "更克制",
     client=None,
+    feedback: str = "",
 ) -> Screenplay:
     return AISceneRewriter(client=client).rewrite(
         screenplay=screenplay,
@@ -331,6 +335,7 @@ def _rewrite_scene_with_ai(
         operation=operation,
         character_id=character_id,
         tone=tone,
+        feedback=feedback,
     )
 
 
@@ -342,6 +347,7 @@ def rewrite_scene(
     tone: str = "更克制",
     mode: SceneRewriteMode = "demo",
     client=None,
+    feedback: str = "",
 ) -> tuple[Screenplay, str]:
     if mode == "ai":
         updated = _rewrite_scene_with_ai(
@@ -351,6 +357,7 @@ def rewrite_scene(
             character_id=character_id,
             tone=tone,
             client=client,
+            feedback=feedback,
         )
         return updated, f"AI {OPERATION_MESSAGES[operation]}"
     if mode != "demo":

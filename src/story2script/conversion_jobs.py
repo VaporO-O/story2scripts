@@ -9,6 +9,7 @@ from .api_models import ConvertRequest
 from .api_models import ConvertResponse
 from .converter import get_converter
 from .parser import parse_chapters
+from .scene_review import review_and_improve
 from .yaml_export import screenplay_to_yaml
 
 
@@ -88,6 +89,22 @@ class ConversionJobStore:
                 adaptation_type=request.adaptation_type,
             )
 
+            review_report = None
+            if request.enable_review:
+                self._update(
+                    job_id,
+                    progress=70,
+                    stage="质量审校",
+                    message="正在按四项标准审校场景，并自动修正不达标场景。",
+                )
+                screenplay, review_report = review_and_improve(
+                    screenplay,
+                    mode=converter.mode,
+                    progress_cb=lambda note: self._update(
+                        job_id, progress=70, stage="质量审校", message=note
+                    ),
+                )
+
             self._update(
                 job_id,
                 progress=90,
@@ -99,6 +116,7 @@ class ConversionJobStore:
                 yaml_text=screenplay_to_yaml(screenplay),
                 mode=converter.mode,
                 adaptation_type=request.adaptation_type,
+                review_report=review_report,
             )
             self._complete(job_id, result)
         except ValueError as exc:

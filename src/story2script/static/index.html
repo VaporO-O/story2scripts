@@ -72,6 +72,10 @@
                   <option value="ai">AI</option>
                 </select>
               </label>
+              <label class="review-toggle">
+                <input id="enableReviewInput" type="checkbox" />
+                转换后自动机审
+              </label>
               <div class="button-row">
                 <button id="analyzeCharactersButton" class="ghost-button">分析人物</button>
                 <button id="convertButton" class="primary-button">生成剧本</button>
@@ -133,6 +137,27 @@
               <button class="ghost-button" data-rewrite-operation="adjust_character_voice">
                 调整人物语气
               </button>
+            </div>
+          </div>
+
+          <div class="review-tools">
+            <div class="rewrite-fields">
+              <label>
+                审校模式
+                <select id="reviewModeInput">
+                  <option value="demo" selected>本地</option>
+                  <option value="ai">AI</option>
+                </select>
+              </label>
+              <label>达标分数<input id="reviewThresholdInput" type="number" min="0" max="10" step="0.5" value="7" /></label>
+              <label class="review-toggle">
+                <input id="reviewAutoFixInput" type="checkbox" checked />
+                不达标自动修正
+              </label>
+            </div>
+            <div class="rewrite-actions">
+              <button id="runReviewButton" class="ghost-button">机审全部场景</button>
+              <button id="downloadReviewReportButton" class="ghost-button">下载审校报告</button>
             </div>
           </div>
 

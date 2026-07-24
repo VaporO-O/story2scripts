@@ -8,6 +8,8 @@ from .screenplay import GlobalStoryState
 from .screenplay import Screenplay
 from .scene_rewrite import SceneRewriteMode
 from .scene_rewrite import SceneRewriteOperation
+from .scene_review import HumanVerdict
+from .scene_review import ReviewReport
 
 
 class ChapterPreviewRequest(BaseModel):
@@ -53,6 +55,7 @@ class ConvertRequest(BaseModel):
     genre: str = ""
     adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE
     mode: str = "demo"
+    enable_review: bool = False
 
 
 class ConvertResponse(BaseModel):
@@ -60,6 +63,7 @@ class ConvertResponse(BaseModel):
     yaml_text: str
     mode: str
     adaptation_type: AdaptationType
+    review_report: ReviewReport | None = None
 
 
 ConvertJobStatus = Literal["queued", "running", "succeeded", "failed"]
@@ -135,4 +139,30 @@ class CharacterProfile(BaseModel):
 class CharacterProfileResponse(BaseModel):
     profiles: list[CharacterProfile]
     mode: str = "demo"
+
+
+class SceneReviewRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+    mode: str = "demo"
+    auto_fix: bool = False
+    threshold: float | None = None
+    max_rounds: int | None = None
+    scene_ids: list[str] = []
+
+
+class SceneReviewResponse(BaseModel):
+    report: ReviewReport
+    screenplay: Screenplay | None = None
+    yaml_text: str | None = None
+    mode: str = "demo"
+    message: str
+
+
+class ReviewReportMergeRequest(BaseModel):
+    report: ReviewReport
+    verdicts: list[HumanVerdict]
+
+
+class ReviewReportMergeResponse(BaseModel):
+    report: ReviewReport
 
