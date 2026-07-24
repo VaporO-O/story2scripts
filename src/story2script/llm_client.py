@@ -166,6 +166,16 @@ class LLMClient:
         except ValueError as exc:
             raise ValueError(f"{self.usage_label} requires integer AI_MAX_TOKENS.") from exc
 
+    @property
+    def max_concurrency(self) -> int:
+        """How many chunk requests may run in parallel (AI_MAX_CONCURRENCY, default 4)."""
+        raw_value = self._config_value("AI_MAX_CONCURRENCY", "4")
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{self.usage_label} requires integer AI_MAX_CONCURRENCY.") from exc
+        return max(1, value)
+
     def complete_json(self, prompt: str, temperature: float = 0.3) -> str:
         """Return the model's JSON text response for a single user prompt."""
         self._ensure_configured()

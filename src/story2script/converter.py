@@ -1,10 +1,12 @@
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
 
 from pydantic import ValidationError
 
+from .character_profiles_ai import PROFILE_PLACEHOLDERS, AICharacterProfiler
 from .llm_client import LLMClient, loads_json_object
 from .parser import Chapter
 from .screenplay import DEFAULT_ADAPTATION_TYPE
@@ -1037,9 +1039,11 @@ def _normalize_screenplay_scene_data(
     known_ids: set[str],
     name_to_id: dict[str, str],
     chapter_titles: list[str],
+    location_names: dict[str, str] | None = None,
 ) -> list[dict]:
     """Repair common AI scene deviations before strict schema validation."""
     allowed_fields = Scene.model_fields.keys()
+    location_names = location_names or {}
     default_chapter = chapter_titles[0] if chapter_titles else ""
     normalized: list[dict] = []
     if not isinstance(scenes, list):
@@ -1056,6 +1060,8 @@ def _normalize_screenplay_scene_data(
 
         heading = _as_text(pruned.get("heading"))
         location = _as_text(pruned.get("location")) or _location_from_heading(heading) or "未指定地点"
+        # 模型有时直接用 global_state 里的地点 id（如 location-5）当地点名；映射回真名。
+        location = location_names.get(location, location)
         int_ext = _normalize_int_ext(pruned.get("int_ext"), heading)
         time_of_day = _normalize_time_of_day(pruned.get("time_of_day"), heading)
         pruned["location"] = location
@@ -1271,6 +1277,57 @@ class DemoConverter:
         )
 
 
+def _compact_global_state(global_state: GlobalStoryState) -> dict:
+    """A slim cross-chapter context for chunk prompts.
+
+    The full ``global_state`` (character goals/arcs/consistency notes and long
+    location/timeline descriptions) is resent on every chunk call and bloats the
+    input. The model only needs names plus the timeline order to stay consistent,
+    so descriptions and placeholder fields are dropped here. Character ids/names
+    are already provided separately as the stable roster.
+    """
+    return {
+        "locations": [location.name for location in global_state.locations],
+        "timeline": [
+            {"chapter": event.chapter, "time_marker": event.time_marker}
+            for event in global_state.timeline
+        ],
+    }
+
+
+def _enrich_global_state_from_profiles(
+    global_state: GlobalStoryState, profiles: list[dict]
+) -> None:
+    """Fill placeholder arc / goal / traits from AI character profiles, by name.
+
+    Names and appearance chapters stay authoritative (local), so cross-chapter
+    consistency is unaffected; only the semantic fields the rule extractor leaves
+    as "待作者进一步补充" get replaced when the model offers something meaningful.
+    """
+    by_name = {
+        _as_text(profile.get("name")): profile
+        for profile in profiles
+        if isinstance(profile, dict) and _as_text(profile.get("name"))
+    }
+    for state in global_state.characters:
+        profile = by_name.get(state.name)
+        if not profile:
+            continue
+        key_change = _as_text(profile.get("key_change"))
+        if key_change and key_change not in PROFILE_PLACEHOLDERS:
+            state.arc = key_change
+        goal = _as_text(profile.get("goal"))
+        if goal and goal not in PROFILE_PLACEHOLDERS:
+            state.goal = goal
+        traits = [
+            trait
+            for trait in _as_text(profile.get("personality")).split("、")
+            if trait and trait not in PROFILE_PLACEHOLDERS
+        ]
+        if traits:
+            state.traits = traits
+
+
 _CHUNK_CONVERSION_ATTEMPTS = 3
 
 
@@ -1311,32 +1368,75 @@ class AIConverter:
             if character.get("name")
         }
 
-        scenes: list[dict] = []
-        failures: list[str] = []
+        # 先把所有章节片段列成有序任务，再并发调用 LLM：每个片段相互独立，
+        # 总耗时从“逐个片段串行相加”降到“最慢的片段”。结果按原始顺序回收，
+        # 因此场景顺序与串行时完全一致。
+        tasks: list[tuple[Chapter, str, int, int]] = []
         for chapter in chapters:
             chapter_chunks = _chapter_text_chunks(chapter)
             for chunk_index, chunk_text in enumerate(chapter_chunks, start=1):
+                tasks.append((chapter, chunk_text, chunk_index, len(chapter_chunks)))
+
+        results: list[list[dict] | None] = [None] * len(tasks)
+        failures: list[str] = []
+        ai_profiles: list[dict] = []
+
+        def run_task(task_index: int) -> None:
+            chapter, chunk_text, chunk_index, chunk_count = tasks[task_index]
+            results[task_index] = self._convert_chapter_chunk(
+                chapter,
+                chunk_text,
+                chunk_index,
+                chunk_count,
+                global_state,
+                characters,
+                adaptation_type,
+                style,
+            )
+
+        def run_profiles() -> None:
+            # 与片段并发跑：人物小传输出短（截断风险低），失败就保留本地占位，不影响出稿。
+            try:
+                ai_profiles.extend(
+                    AICharacterProfiler(llm_client=self.llm_client).extract(chapters)
+                )
+            except ValueError:
+                pass
+
+        max_workers = max(1, min(self.llm_client.max_concurrency, len(tasks) + 1))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(run_task, index): index for index in range(len(tasks))
+            }
+            profile_future = executor.submit(run_profiles)
+            for future in future_to_index:
+                index = future_to_index[future]
                 try:
-                    raw_scenes = self._convert_chapter_chunk(
-                        chapter,
-                        chunk_text,
-                        chunk_index,
-                        len(chapter_chunks),
-                        global_state,
-                        characters,
-                        adaptation_type,
-                        style,
-                    )
+                    future.result()
                 except ValueError as exc:
                     # 单个片段多次重试仍失败时跳过，避免一个片段（空响应 / 截断 /
                     # 内容审查）让整篇转换前功尽弃；只要还有其它片段成功即可出稿。
                     failures.append(str(exc))
-                    continue
-                scenes.extend(
-                    _normalize_screenplay_scene_data(
-                        raw_scenes, known_ids, name_to_id, [chapter.title]
-                    )
+            profile_future.result()
+
+        # 用 AI 人物小传补全 global_state 的 arc/goal/性格，再据此重建顶层 characters。
+        if ai_profiles:
+            _enrich_global_state_from_profiles(global_state, ai_profiles)
+            characters = _normalize_screenplay_character_data(
+                [_state_character_data(state) for state in global_state.characters]
+            )
+
+        location_names = {location.id: location.name for location in global_state.locations}
+        scenes: list[dict] = []
+        for index, raw_scenes in enumerate(results):
+            if raw_scenes is None:
+                continue
+            chapter_title = tasks[index][0].title
+            scenes.extend(
+                _normalize_screenplay_scene_data(
+                    raw_scenes, known_ids, name_to_id, [chapter_title], location_names
                 )
+            )
         if not scenes:
             raise ValueError(
                 failures[-1] if failures else "AI 全文转换失败：模型没有返回任何有效场景。"
@@ -1384,7 +1484,7 @@ class AIConverter:
             "稳定人物表（characters 和 dialogue.character 只能引用这里的 id，不要新造人物）："
             f"{json.dumps(roster, ensure_ascii=False)}\n"
             "全局状态表是固定上下文，必须保持人物、地点和时间线跨章一致："
-            f"{json.dumps(global_state.model_dump(mode='json'), ensure_ascii=False)}\n"
+            f"{json.dumps(_compact_global_state(global_state), ensure_ascii=False)}\n"
             "每个 scene 必须包含 id, heading, int_ext, time_of_day, location, source_chapter, "
             "summary, goal, conflict, beat, subtext, characters, characters_present, props, "
             "dramatization_decisions, elements, camera_hints; "

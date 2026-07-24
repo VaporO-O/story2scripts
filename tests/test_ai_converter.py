@@ -77,9 +77,12 @@ def test_ai_converter_uses_openai_compatible_chat_api(monkeypatch: pytest.Monkey
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["url"] = str(request.url)
-        captured["authorization"] = request.headers["authorization"]
-        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        payload = json.loads(request.content.decode("utf-8"))
+        # 只抓片段转换请求，忽略并发的人物小传请求。
+        if "本章片段原文" in payload["messages"][0]["content"]:
+            captured["url"] = str(request.url)
+            captured["authorization"] = request.headers["authorization"]
+            captured["payload"] = payload
         return chapter_response([scene_dict()])
 
     configure_ai(monkeypatch)
@@ -130,7 +133,10 @@ def test_ai_converter_splits_long_chapters_into_bounded_chunk_calls(
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content.decode("utf-8"))
-        prompts.append(payload["messages"][0]["content"])
+        content = payload["messages"][0]["content"]
+        # 只统计片段转换请求，忽略并发的人物小传请求。
+        if "本章片段原文" in content:
+            prompts.append(content)
         return chapter_response([scene_dict(summary=f"片段 {len(prompts)}")])
 
     long_paragraphs = [
@@ -150,7 +156,8 @@ def test_ai_converter_splits_long_chapters_into_bounded_chunk_calls(
     screenplay = converter.convert(parse_chapters(long_novel), adaptation_type="短剧")
 
     assert len(prompts) > 3
-    assert "本章片段：第 1/" in prompts[0]
+    # 片段现在可能并发调用，调用先后顺序不固定，因此不依赖 prompts[0]。
+    assert any("本章片段：第 1/" in prompt for prompt in prompts)
     assert all("本章片段原文" in prompt for prompt in prompts)
     assert [scene.id for scene in screenplay.scenes] == [
         f"scene-{index}" for index in range(1, len(prompts) + 1)
@@ -367,7 +374,10 @@ def test_ai_converter_prompt_requires_preserving_dialogue(monkeypatch: pytest.Mo
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        payload = json.loads(request.content.decode("utf-8"))
+        # 只抓片段转换请求，忽略并发的人物小传请求。
+        if "本章片段原文" in payload["messages"][0]["content"]:
+            captured["payload"] = payload
         return chapter_response([scene_dict()])
 
     configure_ai(monkeypatch)
