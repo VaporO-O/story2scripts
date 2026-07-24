@@ -795,3 +795,89 @@ textarea {
   }
 }
 
+
+/* 场景质量审校 */
+.review-tools {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.review-tools .rewrite-fields {
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+}
+
+.review-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.review-toggle input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.review-badge {
+  margin-left: auto;
+  padding: 2px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.review-pass {
+  color: #1d6b45;
+  background: rgba(46, 160, 105, 0.14);
+  border: 1px solid rgba(46, 160, 105, 0.4);
+}
+
+.review-fail {
+  color: #a1332a;
+  background: rgba(195, 59, 38, 0.1);
+  border: 1px solid rgba(195, 59, 38, 0.38);
+}
+
+.human-review {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.human-review-label {
+  font-size: 12px;
+  color: var(--ink-soft, #667);
+}
+
+.human-review .ghost-button {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.review-approve.is-active {
+  color: #1d6b45;
+  border-color: rgba(46, 160, 105, 0.6);
+  background: rgba(46, 160, 105, 0.12);
+}
+
+.review-reject.is-active {
+  color: #a1332a;
+  border-color: rgba(195, 59, 38, 0.55);
+  background: rgba(195, 59, 38, 0.1);
+}
+
+.human-review-comment {
+  flex: 1;
+  min-width: 160px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+}
