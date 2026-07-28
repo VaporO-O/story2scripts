@@ -18,6 +18,10 @@ from .api_models import GlobalStateRequest
 from .api_models import GlobalStateResponse
 from .api_models import NovelImportRequest
 from .api_models import NovelImportResponse
+from .api_models import ReviewReportMergeRequest
+from .api_models import ReviewReportMergeResponse
+from .api_models import SceneReviewRequest
+from .api_models import SceneReviewResponse
 from .api_models import SceneRewriteRequest
 from .api_models import SceneRewriteResponse
 from .api_models import ValidateYamlRequest
@@ -28,6 +32,9 @@ from .converter import get_converter
 from .examples import load_example_novel
 from .novel_import import import_novel_content
 from .parser import parse_chapters
+from .scene_review import merge_human_verdicts
+from .scene_review import review_and_improve
+from .scene_review import review_scenes_report
 from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
 from .story_state import extract_global_story_state
@@ -151,11 +158,19 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    review_report = None
+    if request.enable_review:
+        try:
+            screenplay, review_report = review_and_improve(screenplay, mode=converter.mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"质量审校失败：{exc}") from exc
+
     return ConvertResponse(
         screenplay=screenplay,
         yaml_text=screenplay_to_yaml(screenplay),
         mode=converter.mode,
         adaptation_type=request.adaptation_type,
+        review_report=review_report,
     )
 
 
@@ -215,3 +230,56 @@ async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewrite
         mode=request.mode,
         message=message,
     )
+
+
+@app.post("/api/scenes/review", response_model=SceneReviewResponse)
+async def review_screenplay_scenes(request: SceneReviewRequest) -> SceneReviewResponse:
+    try:
+        screenplay = screenplay_from_yaml(request.yaml_text)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"YAML 校验失败：{exc}") from exc
+
+    try:
+        if request.auto_fix:
+            updated, report = review_and_improve(
+                screenplay,
+                mode=request.mode,
+                threshold=request.threshold,
+                max_rounds=request.max_rounds,
+            )
+            return SceneReviewResponse(
+                report=report,
+                screenplay=updated,
+                yaml_text=screenplay_to_yaml(updated),
+                mode=request.mode,
+                message=(
+                    f"机审完成：{report.summary.get('pass_count', 0)} 个场景通过，"
+                    f"{report.summary.get('fail_count', 0)} 个未通过，共执行 {report.rounds_used} 轮审校。"
+                ),
+            )
+        report = review_scenes_report(
+            screenplay,
+            mode=request.mode,
+            threshold=request.threshold,
+            scene_ids=request.scene_ids or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"机审失败：{exc}") from exc
+
+    return SceneReviewResponse(
+        report=report,
+        mode=request.mode,
+        message=(
+            f"机审完成：{report.summary.get('pass_count', 0)} 个场景通过，"
+            f"{report.summary.get('fail_count', 0)} 个未通过。"
+        ),
+    )
+
+
+@app.post("/api/review/report/merge", response_model=ReviewReportMergeResponse)
+async def merge_review_report(request: ReviewReportMergeRequest) -> ReviewReportMergeResponse:
+    try:
+        merged = merge_human_verdicts(request.report, request.verdicts)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ReviewReportMergeResponse(report=merged)

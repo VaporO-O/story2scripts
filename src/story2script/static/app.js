@@ -21,6 +21,7 @@ const conversionProgressMessage = document.querySelector("#conversionProgressMes
 let currentScriptView = "preview";
 let currentNovelView = "edit";
 let latestScreenplay = null;
+let latestReviewReport = null;
 const conversionPollIntervalMs = 1000;
 const conversionMaxPolls = 720;
 const convertButton = document.querySelector("#convertButton");
@@ -32,6 +33,12 @@ const rewriteModeInput = document.querySelector("#rewriteModeInput");
 const rewriteCharacterInput = document.querySelector("#rewriteCharacterInput");
 const rewriteToneInput = document.querySelector("#rewriteToneInput");
 const rewriteButtons = document.querySelectorAll("[data-rewrite-operation]");
+const enableReviewInput = document.querySelector("#enableReviewInput");
+const reviewModeInput = document.querySelector("#reviewModeInput");
+const reviewThresholdInput = document.querySelector("#reviewThresholdInput");
+const reviewAutoFixInput = document.querySelector("#reviewAutoFixInput");
+const runReviewButton = document.querySelector("#runReviewButton");
+const downloadReviewReportButton = document.querySelector("#downloadReviewReportButton");
 const profileGrid = document.querySelector("#profileGrid");
 const profileEmptyState = document.querySelector("#profileEmptyState");
 const supportedTextNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
@@ -296,6 +303,156 @@ function renderDecisions(scene) {
   return details;
 }
 
+const CRITERIA_LABELS = {
+  dramatization: "戏剧化",
+  dialogue_conflict: "对白冲突",
+  residual_narration: "残留旁白",
+  character_voice: "人物语气",
+};
+
+function emptyReviewReport() {
+  return {
+    version: "1",
+    screenplay_title: latestScreenplay ? latestScreenplay.title : "",
+    mode: reviewModeInput.value,
+    threshold: Number(reviewThresholdInput.value) || 7,
+    rounds_used: 0,
+    machine: {},
+    human: {},
+    summary: {},
+  };
+}
+
+function ensureReviewReport() {
+  if (!latestReviewReport) {
+    latestReviewReport = emptyReviewReport();
+  }
+  return latestReviewReport;
+}
+
+function renderReviewBadge(sceneId) {
+  const result = latestReviewReport && latestReviewReport.machine[sceneId];
+  if (!result) {
+    return null;
+  }
+  const passed = result.verdict === "pass";
+  const badge = createElement(
+    "span",
+    `review-badge ${passed ? "review-pass" : "review-fail"}`,
+    `机审 ${result.total} 分 · ${passed ? "通过" : "未通过"}`,
+  );
+  const details = Object.entries(result.scores || {})
+    .map(([key, value]) => `${CRITERIA_LABELS[key] || key}：${value}`)
+    .join("\n");
+  const issues = (result.issues || []).join("\n");
+  badge.title = issues ? `${details}\n问题：\n${issues}` : details;
+  return badge;
+}
+
+function renderHumanReviewControls(sceneId) {
+  const wrap = createElement("div", "human-review");
+  const verdict = (latestReviewReport && latestReviewReport.human[sceneId]) || null;
+
+  const label = createElement("span", "human-review-label", "人审");
+  const approveButton = createElement(
+    "button",
+    `ghost-button review-approve${verdict && verdict.status === "approved" ? " is-active" : ""}`,
+    verdict && verdict.status === "approved" ? "已通过" : "通过",
+  );
+  approveButton.type = "button";
+  const rejectButton = createElement(
+    "button",
+    `ghost-button review-reject${verdict && verdict.status === "rejected" ? " is-active" : ""}`,
+    verdict && verdict.status === "rejected" ? "已驳回" : "驳回",
+  );
+  rejectButton.type = "button";
+  const commentInput = document.createElement("input");
+  commentInput.className = "human-review-comment";
+  commentInput.placeholder = "审阅意见（可选）";
+  commentInput.value = verdict ? verdict.comment : "";
+
+  const record = (status) => {
+    const report = ensureReviewReport();
+    report.human[sceneId] = {
+      scene_id: sceneId,
+      status,
+      comment: commentInput.value.trim(),
+      reviewed_at: new Date().toISOString(),
+    };
+    renderScreenplay(latestScreenplay);
+    setMessage(`已记录 ${sceneId} 的人审结论：${status === "approved" ? "通过" : "驳回"}。`);
+  };
+  approveButton.addEventListener("click", () => record("approved"));
+  rejectButton.addEventListener("click", () => record("rejected"));
+  commentInput.addEventListener("change", () => {
+    if (latestReviewReport && latestReviewReport.human[sceneId]) {
+      latestReviewReport.human[sceneId].comment = commentInput.value.trim();
+    }
+  });
+
+  wrap.append(label, approveButton, rejectButton, commentInput);
+  return wrap;
+}
+
+async function runMachineReview() {
+  if (!yamlOutput.value) {
+    setMessage("请先生成或输入 YAML 剧本。", true);
+    return;
+  }
+
+  runReviewButton.disabled = true;
+  const modeName = reviewModeInput.value === "ai" ? "AI" : "本地";
+  setMessage(`正在使用${modeName}模式机审场景……`);
+
+  try {
+    const response = await fetch("/api/scenes/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        yaml_text: yamlOutput.value,
+        mode: reviewModeInput.value,
+        auto_fix: reviewAutoFixInput.checked,
+        threshold: Number(reviewThresholdInput.value) || null,
+      }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(errorMessage(data, "机审失败"));
+    }
+
+    const previousHuman = latestReviewReport ? latestReviewReport.human : {};
+    latestReviewReport = data.report;
+    latestReviewReport.human = { ...previousHuman, ...latestReviewReport.human };
+    if (data.screenplay && data.yaml_text) {
+      showScreenplay(data.screenplay, data.yaml_text);
+    } else {
+      renderScreenplay(latestScreenplay);
+    }
+    setMessage(data.message);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    runReviewButton.disabled = false;
+  }
+}
+
+function downloadReviewReport() {
+  if (!latestReviewReport) {
+    setMessage("请先执行机审或记录人审结论。", true);
+    return;
+  }
+
+  const blob = new Blob([JSON.stringify(latestReviewReport, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "review-report.json";
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function renderScene(scene, index, names) {
   const article = createElement("article", "scene");
   article.dataset.sceneId = scene.id;
@@ -313,6 +470,10 @@ function renderScene(scene, index, names) {
     createElement("span", "slug-line", scene.heading),
     createElement("span", "scene-source", scene.source_chapter),
   );
+  const reviewBadge = renderReviewBadge(scene.id);
+  if (reviewBadge) {
+    slug.appendChild(reviewBadge);
+  }
   article.appendChild(slug);
 
   if (scene.summary) {
@@ -343,6 +504,7 @@ function renderScene(scene, index, names) {
   if (decisions) {
     article.appendChild(decisions);
   }
+  article.appendChild(renderHumanReviewControls(scene.id));
   return article;
 }
 
@@ -516,6 +678,7 @@ function conversionPayload() {
     adaptation_type: adaptationTypeInput.value,
     mode: convertModeInput.value,
     novel_text: novelInput.value,
+    enable_review: enableReviewInput.checked,
   };
 }
 
@@ -562,6 +725,8 @@ async function convertNovel() {
   const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
   setMessage(`正在使用${modeName}模式生成 YAML 剧本……`);
   resetConversionProgress();
+  // 重新转换会重排 scene id，旧的审校报告随之失效。
+  latestReviewReport = null;
 
   try {
     const jobId = await startConversionJob();
@@ -576,9 +741,17 @@ async function convertNovel() {
     }
 
     const data = snapshot.result;
+    if (data.review_report) {
+      latestReviewReport = data.review_report;
+    }
     showScreenplay(data.screenplay, data.yaml_text);
     setMessage(
-      `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。`,
+      `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。` +
+        (data.review_report
+          ? `机审：${data.review_report.summary.pass_count || 0} 个通过，${
+              data.review_report.summary.fail_count || 0
+            } 个未通过。`
+          : ""),
     );
   } catch (error) {
     setMessage(error.message, true);
@@ -716,5 +889,7 @@ novelChapterViewButton.addEventListener("click", () => setNovelView("chapter"));
 rewriteButtons.forEach((button) => {
   button.addEventListener("click", () => rewriteScene(button.dataset.rewriteOperation));
 });
+runReviewButton.addEventListener("click", runMachineReview);
+downloadReviewReportButton.addEventListener("click", downloadReviewReport);
 novelInput.addEventListener("input", updateChapterCount);
 
