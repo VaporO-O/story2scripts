@@ -102,6 +102,9 @@ AI_BASE_URL=https://your-provider.example/v1
 AI_MODEL=your-model-name
 AI_TIMEOUT_SECONDS=120
 AI_MAX_TOKENS=8192
+AI_MAX_CONCURRENCY=4
+AI_REVIEW_THRESHOLD=7.0
+AI_REVIEW_MAX_ROUNDS=2
 ```
 
 说明：
@@ -109,6 +112,8 @@ AI_MAX_TOKENS=8192
 - `.env` 已被 git 忽略，不要提交真实 API Key。
 - 系统环境变量优先级高于 `.env`。
 - `AI_MAX_TOKENS` 可选；当模型输出被截断时可以调高，例如 `16384`。
+- `AI_MAX_CONCURRENCY` 控制分块转换与审校的并发请求数，默认 `4`。
+- `AI_REVIEW_THRESHOLD` / `AI_REVIEW_MAX_ROUNDS` 控制机审及格线（0-10）与自动修正轮次上限。
 - 没有 API Key 时继续使用本地模式即可演示。
 
 AI 全文转换流程：
@@ -142,6 +147,61 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 | `GET /api/convert/jobs/{job_id}` | 查询转换进度和结果 |
 | `POST /api/yaml/validate` | 校验编辑后的 YAML |
 | `POST /api/scenes/rewrite` | 局部重生成指定场景 |
+| `POST /api/scenes/review` | 机审场景质量，支持自动修正与指定场景子集 |
+| `POST /api/review/report/merge` | 把人审结论合并进审校报告 |
+
+## MCP 服务
+
+项目内置 [MCP](https://modelcontextprotocol.io)（Model Context Protocol）服务，可让 Claude Code、Claude Desktop 等 MCP 客户端直接驱动整个改编流程（stdio 传输）。
+
+```bash
+pip install -e .          # 安装依赖并注册 story2script-mcp 命令
+python -m story2script.mcp_server --env-file /path/to/repo/.env   # 手动启动（可选）
+```
+
+注册到 Claude Code：
+
+```bash
+claude mcp add story2script -- python -m story2script.mcp_server --env-file D:/study/1/xi/.env
+```
+
+注册到 Claude Desktop（`claude_desktop_config.json`）：
+
+```json
+{
+  "mcpServers": {
+    "story2script": {
+      "command": "python",
+      "args": ["-m", "story2script.mcp_server"],
+      "env": {
+        "PYTHONPATH": "D:/study/1/xi/src",
+        "PYTHONUTF8": "1",
+        "AI_API_KEY": "your-api-key",
+        "AI_BASE_URL": "https://your-provider.example/v1",
+        "AI_MODEL": "your-model-name"
+      }
+    }
+  }
+}
+```
+
+设计要点：服务端工作区持有小说与剧本状态，工具之间用短 ID（`novel-1` / `sp-1`）引用，避免客户端模型在每次调用里回显整份小说或 YAML；AI 配置既可用 `--env-file` 指向仓库 `.env`，也可写在客户端配置的 `env` 块中（后者优先）。
+
+| MCP 工具 | 作用 |
+| --- | --- |
+| `get_example_novel` | 载入内置示例《低智商犯罪》，返回 `novel_id` |
+| `import_novel_file` | 从本地路径导入 TXT/Markdown/CSV/LOG/EPUB 小说 |
+| `preview_chapters` | 预览章节切分结果 |
+| `convert_novel` | 转换为结构化剧本（demo/ai，带进度通知，可选转换后自动机审） |
+| `list_scenes` / `get_scene` | 场景索引 / 单场景完整结构 |
+| `rewrite_scene` | 六种局部重写操作，支持注入审校意见 |
+| `review_screenplay` | 机审打分（四项标准），`auto_fix` 自动修正不达标场景 |
+| `get_review_report` / `merge_human_review` | 完整审校报告 / 合并人审结论 |
+| `load_screenplay` / `get_screenplay_yaml` / `save_screenplay` | YAML 载入 / 导出 / 落盘（可旁写审校报告） |
+| `validate_yaml` | 校验剧本 YAML |
+| `extract_character_profiles` | 提取人物小传（demo/ai） |
+
+另有资源 `screenplay://schema` 提供剧本 JSON Schema 全文。示例小说依赖仓库内 `examples/` 目录，请以源码方式（`pip install -e .` 或设置 `PYTHONPATH=src`）运行服务。
 
 ## 请求示例
 
