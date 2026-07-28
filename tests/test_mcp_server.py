@@ -1,5 +1,8 @@
 import json
+import threading
+import time
 
+import anyio
 import pytest
 
 import story2script.conversion_jobs as jobs_module
@@ -24,6 +27,7 @@ from story2script.mcp_server import (
     validate_yaml,
     workspace,
 )
+from story2script.novel_import import MAX_IMPORT_BYTES
 from story2script.parser import parse_chapters
 from story2script.yaml_export import screenplay_to_yaml
 
@@ -113,6 +117,16 @@ def test_import_novel_file_missing_and_unknown_ext(tmp_path):
     bad.write_text("正文", encoding="utf-8")
     with pytest.raises(ValueError, match="暂支持导入"):
         import_novel_file(str(bad))
+
+
+def test_import_novel_file_rejects_oversized_file_before_reading(tmp_path):
+    oversized = tmp_path / "超大小说.txt"
+    with oversized.open("wb") as file:
+        file.seek(MAX_IMPORT_BYTES)
+        file.write(b"\0")
+
+    with pytest.raises(ValueError, match="文件过大"):
+        import_novel_file(str(oversized))
 
 
 def test_preview_chapters_by_id_and_text():
@@ -224,6 +238,43 @@ async def test_rewrite_scene_demo_updates_store():
 
     with pytest.raises(ValueError, match="不支持的重写操作"):
         await rewrite_scene(screenplay_id, "scene-1", "make_it_better")
+
+
+@pytest.mark.anyio
+async def test_concurrent_rewrites_on_same_screenplay_are_serialized(monkeypatch):
+    summary = await convert_demo()
+    screenplay_id = summary["screenplay_id"]
+    original_rewrite = mcp_server.perform_scene_rewrite
+    counter_lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def slow_rewrite(*args, **kwargs):
+        nonlocal active, max_active
+        with counter_lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            time.sleep(0.05)
+            return original_rewrite(*args, **kwargs)
+        finally:
+            with counter_lock:
+                active -= 1
+
+    monkeypatch.setattr(mcp_server, "perform_scene_rewrite", slow_rewrite)
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(
+            rewrite_scene, screenplay_id, "scene-1", "strengthen_conflict"
+        )
+        task_group.start_soon(
+            rewrite_scene, screenplay_id, "scene-2", "add_camera_hints"
+        )
+
+    entry = workspace.get_screenplay(screenplay_id)
+    assert max_active == 1
+    assert entry.screenplay.scenes[0].conflict.startswith("冲突升级")
+    assert entry.screenplay.scenes[1].camera_hints
 
 
 @pytest.mark.anyio
@@ -375,3 +426,8 @@ async def test_mcp_call_tool_e2e():
 def test_workspace_isolated_between_tests():
     assert mcp_server.workspace._novels == {}
     assert mcp_server.workspace._screenplays == {}
+
+
+def test_workspace_update_rejects_unknown_screenplay():
+    with pytest.raises(ValueError, match="剧本不存在"):
+        workspace.update_screenplay("sp-404")

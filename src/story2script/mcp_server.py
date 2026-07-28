@@ -15,6 +15,8 @@ import base64
 import json
 import os
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,7 +28,7 @@ from .character_profiles_ai import get_character_profiler
 from .conversion_jobs import conversion_jobs
 from .examples import load_example_novel
 from .llm_client import _load_env_file
-from .novel_import import import_novel_content
+from .novel_import import MAX_IMPORT_BYTES, import_novel_content
 from .parser import parse_chapters
 from .scene_review import (
     HumanVerdict,
@@ -70,6 +72,7 @@ class Workspace:
         self._lock = threading.Lock()
         self._novels: dict[str, StoredNovel] = {}
         self._screenplays: dict[str, StoredScreenplay] = {}
+        self._screenplay_locks: dict[str, threading.RLock] = {}
         self._novel_seq = 0
         self._screenplay_seq = 0
 
@@ -91,7 +94,21 @@ class Workspace:
             self._screenplay_seq += 1
             screenplay_id = f"sp-{self._screenplay_seq}"
             self._screenplays[screenplay_id] = StoredScreenplay(screenplay, report)
+            self._screenplay_locks[screenplay_id] = threading.RLock()
             return screenplay_id
+
+    def _screenplay_lock(self, screenplay_id: str):
+        with self._lock:
+            if screenplay_id not in self._screenplays:
+                raise ValueError(f"剧本不存在：{screenplay_id}")
+            return self._screenplay_locks[screenplay_id]
+
+    @contextmanager
+    def screenplay_transaction(self, screenplay_id: str) -> Iterator[StoredScreenplay]:
+        """串行化同一剧本的“读→计算→写”操作，避免整份对象更新互相覆盖。"""
+        lock = self._screenplay_lock(screenplay_id)
+        with lock:
+            yield self.get_screenplay(screenplay_id)
 
     def get_screenplay(self, screenplay_id: str) -> StoredScreenplay:
         with self._lock:
@@ -105,17 +122,22 @@ class Workspace:
         screenplay: Screenplay | None = None,
         report: ReviewReport | None = None,
     ) -> None:
-        with self._lock:
-            entry = self._screenplays[screenplay_id]
-            if screenplay is not None:
-                entry.screenplay = screenplay
-            if report is not None:
-                entry.report = report
+        lock = self._screenplay_lock(screenplay_id)
+        with lock:
+            with self._lock:
+                if screenplay_id not in self._screenplays:
+                    raise ValueError(f"剧本不存在：{screenplay_id}")
+                entry = self._screenplays[screenplay_id]
+                if screenplay is not None:
+                    entry.screenplay = screenplay
+                if report is not None:
+                    entry.report = report
 
     def reset(self) -> None:
         with self._lock:
             self._novels.clear()
             self._screenplays.clear()
+            self._screenplay_locks.clear()
             self._novel_seq = 0
             self._screenplay_seq = 0
 
@@ -214,7 +236,13 @@ def import_novel_file(file_path: str) -> dict:
     path = Path(file_path).expanduser()
     if not path.is_file():
         raise ValueError(f"文件不存在：{file_path}")
-    content_base64 = base64.b64encode(path.read_bytes()).decode("ascii")
+    if path.stat().st_size > MAX_IMPORT_BYTES:
+        raise ValueError("文件过大，请导入 25MB 以内的小说文件。")
+    with path.open("rb") as source:
+        data = source.read(MAX_IMPORT_BYTES + 1)
+    if len(data) > MAX_IMPORT_BYTES:
+        raise ValueError("文件过大，请导入 25MB 以内的小说文件。")
+    content_base64 = base64.b64encode(data).decode("ascii")
     imported = import_novel_content(path.name, content_base64)
     novel_id = workspace.add_novel(
         imported.novel_text, title=imported.title, file_type=imported.file_type
@@ -347,21 +375,22 @@ async def rewrite_scene(
     if operation not in OPERATION_MESSAGES:
         supported = "、".join(OPERATION_MESSAGES)
         raise ValueError(f"不支持的重写操作：{operation}。可选：{supported}")
-    entry = workspace.get_screenplay(screenplay_id)
 
     def _work() -> tuple[Screenplay, str]:
-        return perform_scene_rewrite(
-            entry.screenplay,
-            scene_id,
-            operation,  # type: ignore[arg-type]
-            character_id=character_id,
-            tone=tone,
-            mode=mode,  # type: ignore[arg-type]
-            feedback=feedback,
-        )
+        with workspace.screenplay_transaction(screenplay_id) as entry:
+            updated, message = perform_scene_rewrite(
+                entry.screenplay,
+                scene_id,
+                operation,  # type: ignore[arg-type]
+                character_id=character_id,
+                tone=tone,
+                mode=mode,  # type: ignore[arg-type]
+                feedback=feedback,
+            )
+            workspace.update_screenplay(screenplay_id, screenplay=updated)
+            return updated, message
 
     updated, message = await anyio.to_thread.run_sync(_work)
-    workspace.update_screenplay(screenplay_id, screenplay=updated)
     scene = next(scene for scene in updated.scenes if scene.id == scene_id)
     return {
         "screenplay_id": screenplay_id,
@@ -387,33 +416,37 @@ async def review_screenplay(
     auto_fix 时对不达标场景带审校意见自动重写并复评（此时忽略 scene_ids）。
     threshold 默认读 AI_REVIEW_THRESHOLD（7.0），max_rounds 默认读 AI_REVIEW_MAX_ROUNDS（2）。
     """
-    entry = workspace.get_screenplay(screenplay_id)
-
     if auto_fix:
 
-        def _work() -> tuple[Screenplay, ReviewReport]:
-            return review_and_improve(
-                entry.screenplay,
-                mode=mode,
-                threshold=threshold,
-                max_rounds=max_rounds,
-                auto_fix=True,
-            )
+        def _work() -> ReviewReport:
+            with workspace.screenplay_transaction(screenplay_id) as entry:
+                updated, report = review_and_improve(
+                    entry.screenplay,
+                    mode=mode,
+                    threshold=threshold,
+                    max_rounds=max_rounds,
+                    auto_fix=True,
+                )
+                workspace.update_screenplay(
+                    screenplay_id, screenplay=updated, report=report
+                )
+                return report
 
-        updated, report = await anyio.to_thread.run_sync(_work)
-        workspace.update_screenplay(screenplay_id, screenplay=updated, report=report)
+        report = await anyio.to_thread.run_sync(_work)
     else:
 
         def _work() -> ReviewReport:
-            return review_scenes_report(
-                entry.screenplay,
-                mode=mode,
-                threshold=threshold,
-                scene_ids=scene_ids or None,
-            )
+            with workspace.screenplay_transaction(screenplay_id) as entry:
+                report = review_scenes_report(
+                    entry.screenplay,
+                    mode=mode,
+                    threshold=threshold,
+                    scene_ids=scene_ids or None,
+                )
+                workspace.update_screenplay(screenplay_id, report=report)
+                return report
 
         report = await anyio.to_thread.run_sync(_work)
-        workspace.update_screenplay(screenplay_id, report=report)
 
     return {
         "screenplay_id": screenplay_id,
@@ -435,15 +468,15 @@ def get_review_report(screenplay_id: str) -> dict:
 def merge_human_review(screenplay_id: str, verdicts: list[dict]) -> dict:
     """把人审结论合并进审校报告。verdicts 形如
     [{"scene_id": "scene-1", "status": "approved|rejected|pending", "comment": "..."}]。"""
-    entry = workspace.get_screenplay(screenplay_id)
-    if entry.report is None:
-        raise ValueError("该剧本还没有审校报告，请先调用 review_screenplay。")
     try:
         parsed = [HumanVerdict.model_validate(verdict) for verdict in verdicts]
     except Exception as exc:
         raise ValueError(f"人审结论格式不正确：{exc}") from exc
-    merged = merge_human_verdicts(entry.report, parsed)
-    workspace.update_screenplay(screenplay_id, report=merged)
+    with workspace.screenplay_transaction(screenplay_id) as entry:
+        if entry.report is None:
+            raise ValueError("该剧本还没有审校报告，请先调用 review_screenplay。")
+        merged = merge_human_verdicts(entry.report, parsed)
+        workspace.update_screenplay(screenplay_id, report=merged)
     return {"screenplay_id": screenplay_id, "summary": merged.summary}
 
 
