@@ -103,3 +103,16 @@ def test_agent_sessions_listing(tmp_path, monkeypatch: pytest.MonkeyPatch):
     sessions = listing.json()["sessions"]
     assert [item["session_id"] for item in sessions] == [session_id]
     assert sessions[0]["goal"] == "留档"
+
+    detail = client.get(f"/api/agent/sessions/{session_id}")
+    assert detail.status_code == 200
+    data = detail.json()
+    assert data["session_id"] == session_id
+    assert data["goal"] == "留档"
+    assert data["yaml_text"].startswith("schema_version:")
+    assert data["result"]["status"] in {"completed", "budget_exhausted"}
+    assert data["report"] is not None
+
+    missing = client.get("/api/agent/sessions/ag-missing")
+    assert missing.status_code == 404
+    assert "会话不存在" in missing.json()["detail"]

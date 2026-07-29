@@ -205,3 +205,14 @@ class AgentJobStatusResponse(BaseModel):
 class AgentSessionListResponse(BaseModel):
     sessions: list[dict]
 
+
+class AgentSessionDetailResponse(BaseModel):
+    session_id: str
+    saved_at: str = ""
+    goal: str = ""
+    status: str = ""
+    result: AgentRunResult
+    screenplay: Screenplay
+    yaml_text: str
+    report: ReviewReport | None = None
+

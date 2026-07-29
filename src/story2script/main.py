@@ -10,6 +10,7 @@ from .api_models import ChapterPreviewResponse
 from .api_models import AgentJobStartResponse
 from .api_models import AgentJobStatusResponse
 from .api_models import AgentRunRequest
+from .api_models import AgentSessionDetailResponse
 from .api_models import AgentSessionListResponse
 from .api_models import CharacterProfileRequest
 from .api_models import CharacterProfileResponse
@@ -221,6 +222,24 @@ async def get_agent_run(job_id: str) -> AgentJobStatusResponse:
 @app.get("/api/agent/sessions", response_model=AgentSessionListResponse)
 async def list_agent_sessions() -> AgentSessionListResponse:
     return AgentSessionListResponse(sessions=AgentSessionStore().list_sessions())
+
+
+@app.get("/api/agent/sessions/{session_id}", response_model=AgentSessionDetailResponse)
+async def get_agent_session(session_id: str) -> AgentSessionDetailResponse:
+    try:
+        data = AgentSessionStore().load(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AgentSessionDetailResponse(
+        session_id=data["session_id"],
+        saved_at=data["saved_at"],
+        goal=data["goal"],
+        status=data["status"],
+        result=data["result"],
+        screenplay=data["screenplay"],
+        yaml_text=screenplay_to_yaml(data["screenplay"]),
+        report=data["report"],
+    )
 
 
 @app.post("/api/yaml/validate", response_model=ValidateYamlResponse)

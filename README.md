@@ -42,6 +42,8 @@ Web 工作台支持完整演示链路：
 - 支持 YAML 校验、下载 `screenplay.yaml`。
 - 支持人物小传提取。
 - 支持局部重生成：重新生成本场对白、加强戏剧冲突、改成短剧节奏、增加镜头提示、减少旁白、调整人物语气。
+- 支持机审打分与逐场景人审，审校报告可下载。
+- 「改编 Agent」面板：设定目标后一键启动自主改编代理，实时进度、逐步决策轨迹、前后分数对比，可保存 / 载入历史会话。
 
 ## 核心设计
 
@@ -152,6 +154,7 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 | `POST /api/agent/runs` | 启动自主改编 Agent 任务（异步，带进度） |
 | `GET /api/agent/runs/{job_id}` | 查询 Agent 任务进度、决策轨迹与结果 |
 | `GET /api/agent/sessions` | 列出已持久化的 Agent 会话 |
+| `GET /api/agent/sessions/{session_id}` | 读取会话详情（剧本 YAML + 轨迹 + 报告） |
 
 ## 改编 Agent
 
@@ -183,7 +186,7 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 
 环境变量：`AGENT_MAX_STEPS`（单次运行步数上限，默认 12）、`AGENT_SESSION_DIR`（会话存储目录）；质量阈值复用 `AI_REVIEW_THRESHOLD`。
 
-REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session}`，轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。
+REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session}`，轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。Web 工作台的「04 改编 Agent」面板封装了同一流程：目标输入、实时进度条、决策轨迹时间线、前后分数对比与历史会话载入。
 
 ## MCP 服务
 

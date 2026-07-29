@@ -105,3 +105,39 @@ def test_workbench_reads_imported_novel_file() -> None:
     assert "暂不支持直接解析 MOBI/AZW/AZW3" in script
     assert "novelInput.value = content" in script
     assert "updateChapterCount()" in script
+
+
+def test_workbench_exposes_agent_panel() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "改编 Agent" in html
+    assert 'id="agentGoalInput"' in html
+    assert 'id="agentModeInput"' in html
+    assert 'id="agentThresholdInput"' in html
+    assert 'id="agentMaxStepsInput"' in html
+    assert 'id="agentSaveSessionInput"' in html
+    assert 'id="runAgentButton"' in html
+    assert 'id="listAgentSessionsButton"' in html
+    assert 'id="agentProgress"' in html
+    assert 'id="agentTrace"' in html
+    assert 'id="agentSessions"' in html
+
+
+def test_workbench_runs_agent_via_job_api() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/agent/runs"' in script
+    assert "fetch(`/api/agent/runs/${jobId}`)" in script
+    assert "async function waitForAgentRun(" in script
+    assert "function setAgentProgress(" in script
+    assert "function renderAgentTrace(" in script
+    assert "runAgentButton.addEventListener" in script
+
+
+def test_workbench_agent_sessions_flow() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/agent/sessions")' in script
+    assert "fetch(`/api/agent/sessions/${sessionId}`)" in script
+    assert "function applyAgentRunResponse(" in script
+    assert "listAgentSessionsButton.addEventListener" in script
