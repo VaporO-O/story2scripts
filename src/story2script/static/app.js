@@ -41,6 +41,24 @@ const runReviewButton = document.querySelector("#runReviewButton");
 const downloadReviewReportButton = document.querySelector("#downloadReviewReportButton");
 const profileGrid = document.querySelector("#profileGrid");
 const profileEmptyState = document.querySelector("#profileEmptyState");
+const agentGoalInput = document.querySelector("#agentGoalInput");
+const agentModeInput = document.querySelector("#agentModeInput");
+const agentThresholdInput = document.querySelector("#agentThresholdInput");
+const agentMaxStepsInput = document.querySelector("#agentMaxStepsInput");
+const agentSaveSessionInput = document.querySelector("#agentSaveSessionInput");
+const runAgentButton = document.querySelector("#runAgentButton");
+const listAgentSessionsButton = document.querySelector("#listAgentSessionsButton");
+const agentProgress = document.querySelector("#agentProgress");
+const agentProgressStage = document.querySelector("#agentProgressStage");
+const agentProgressPercent = document.querySelector("#agentProgressPercent");
+const agentProgressBar = document.querySelector("#agentProgressBar");
+const agentProgressMessage = document.querySelector("#agentProgressMessage");
+const agentEmptyState = document.querySelector("#agentEmptyState");
+const agentSummary = document.querySelector("#agentSummary");
+const agentTrace = document.querySelector("#agentTrace");
+const agentSessions = document.querySelector("#agentSessions");
+const agentPollIntervalMs = 1000;
+const agentMaxPolls = 720;
 const supportedTextNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
 const unsupportedEbookFileExtensions = [".mobi", ".azw", ".azw3"];
 
@@ -868,6 +886,262 @@ function downloadYaml() {
   URL.revokeObjectURL(link.href);
 }
 
+const AGENT_STATUS_LABELS = {
+  completed: "已完成",
+  budget_exhausted: "步数耗尽",
+  failed: "已失败",
+};
+
+function setAgentProgress(snapshot, isError = false) {
+  const progress = Math.max(0, Math.min(100, snapshot.progress || 0));
+  agentProgress.classList.remove("hidden");
+  agentProgress.classList.toggle("is-error", isError || snapshot.status === "failed");
+  agentProgressStage.textContent = snapshot.stage || "执行中";
+  agentProgressPercent.textContent = `${progress}%`;
+  agentProgressBar.style.width = `${progress}%`;
+  agentProgressMessage.textContent = snapshot.message || snapshot.error || "Agent 任务正在处理。";
+}
+
+function resetAgentProgress() {
+  setAgentProgress({
+    status: "queued",
+    progress: 0,
+    stage: "等待执行",
+    message: "Agent 任务已准备启动。",
+  });
+}
+
+function agentMetric(label, value) {
+  const chip = createElement("span", "agent-metric");
+  chip.append(
+    createElement("span", "agent-metric-label", label),
+    createElement("strong", "agent-metric-value", `${value}`),
+  );
+  return chip;
+}
+
+function renderAgentSummary(result) {
+  agentEmptyState.classList.add("hidden");
+  agentSummary.classList.remove("hidden");
+  agentSummary.innerHTML = "";
+
+  const statusBadge = createElement(
+    "span",
+    `agent-status agent-status-${result.status}`,
+    AGENT_STATUS_LABELS[result.status] || result.status,
+  );
+  const heading = createElement("div", "agent-summary-heading");
+  heading.append(statusBadge, createElement("span", "agent-goal-text", result.goal || "（默认目标：全部场景通过机审）"));
+  agentSummary.appendChild(heading);
+
+  const initial = result.initial_summary || {};
+  const final = result.final_summary || {};
+  const metrics = createElement("div", "agent-metrics");
+  metrics.append(
+    agentMetric("均分", `${initial.avg_score ?? "-"} → ${final.avg_score ?? "-"}`),
+    agentMetric("通过场景", `${initial.pass_count ?? "-"} → ${final.pass_count ?? "-"}`),
+    agentMetric("步数", result.steps_used),
+    agentMetric("LLM 调用", result.llm_calls),
+  );
+  if (result.session_id) {
+    metrics.append(agentMetric("会话", result.session_id));
+  }
+  agentSummary.appendChild(metrics);
+  if (result.message) {
+    agentSummary.appendChild(createElement("p", "agent-summary-message", result.message));
+  }
+}
+
+function renderAgentTrace(trace) {
+  agentTrace.classList.remove("hidden");
+  agentTrace.innerHTML = "";
+  (trace || []).forEach((step) => {
+    const item = createElement("li", `agent-step${step.error ? " agent-step-error" : ""}`);
+    const head = createElement("div", "agent-step-head");
+    head.append(
+      createElement("span", "agent-step-no", `第 ${step.step} 步`),
+      createElement(
+        "span",
+        "agent-step-action",
+        step.action ? step.action.tool : "（无动作）",
+      ),
+      createElement("span", "agent-step-duration", `${step.duration_ms} ms`),
+    );
+    item.appendChild(head);
+    if (step.thought) {
+      item.appendChild(createElement("p", "agent-step-thought", step.thought));
+    }
+    if (step.action && Object.keys(step.action.params || {}).length) {
+      item.appendChild(
+        createElement("code", "agent-step-params", JSON.stringify(step.action.params)),
+      );
+    }
+    if (step.error) {
+      item.appendChild(createElement("p", "agent-step-error-text", step.error));
+    } else if (step.observation && step.observation.message) {
+      item.appendChild(createElement("p", "agent-step-observation", step.observation.message));
+    }
+    agentTrace.appendChild(item);
+  });
+}
+
+function applyAgentRunResponse(data) {
+  const previousHuman = latestReviewReport ? latestReviewReport.human : {};
+  if (data.report) {
+    latestReviewReport = data.report;
+    latestReviewReport.human = { ...previousHuman, ...latestReviewReport.human };
+  }
+  showScreenplay(data.screenplay, data.yaml_text);
+  renderAgentSummary(data.result);
+  renderAgentTrace(data.result.trace);
+}
+
+function agentRunPayload() {
+  return {
+    yaml_text: yamlOutput.value,
+    goal: agentGoalInput.value.trim(),
+    mode: agentModeInput.value,
+    threshold: Number(agentThresholdInput.value) || null,
+    max_steps: Number(agentMaxStepsInput.value) || null,
+    save_session: agentSaveSessionInput.checked,
+  };
+}
+
+async function startAgentRun() {
+  const response = await fetch("/api/agent/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(agentRunPayload()),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "Agent 任务创建失败"));
+  }
+  setAgentProgress(data);
+  return data.job_id;
+}
+
+async function fetchAgentRun(jobId) {
+  const response = await fetch(`/api/agent/runs/${jobId}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "Agent 进度查询失败"));
+  }
+  setAgentProgress(data);
+  return data;
+}
+
+async function waitForAgentRun(jobId) {
+  for (let attempt = 0; attempt < agentMaxPolls; attempt += 1) {
+    await sleep(agentPollIntervalMs);
+    const snapshot = await fetchAgentRun(jobId);
+    if (snapshot.status === "succeeded" || snapshot.status === "failed") {
+      return snapshot;
+    }
+  }
+
+  throw new Error("Agent 任务等待超时，请稍后重试。");
+}
+
+async function runAgent() {
+  if (!yamlOutput.value) {
+    setMessage("请先生成或输入 YAML 剧本，再启动改编 Agent。", true);
+    return;
+  }
+
+  runAgentButton.disabled = true;
+  agentSessions.classList.add("hidden");
+  const modeName = agentModeInput.value === "ai" ? "AI" : "本地";
+  setMessage(`改编 Agent（${modeName}模式）已启动，自主执行审校与重写……`);
+  resetAgentProgress();
+
+  try {
+    const jobId = await startAgentRun();
+    const snapshot = await waitForAgentRun(jobId);
+
+    if (snapshot.status === "failed") {
+      setAgentProgress(snapshot, true);
+      throw new Error(snapshot.error || snapshot.message || "Agent 执行失败");
+    }
+    if (!snapshot.result) {
+      throw new Error("Agent 任务完成但缺少结果。");
+    }
+
+    applyAgentRunResponse(snapshot.result);
+    const result = snapshot.result.result;
+    setMessage(
+      `Agent ${AGENT_STATUS_LABELS[result.status] || result.status}：${result.message} ` +
+        `均分 ${result.initial_summary.avg_score ?? "-"} → ${result.final_summary.avg_score ?? "-"}，` +
+        `共 ${result.steps_used} 步。`,
+    );
+  } catch (error) {
+    setMessage(error.message, true);
+    agentProgress.classList.add("is-error");
+  } finally {
+    runAgentButton.disabled = false;
+  }
+}
+
+async function loadAgentSession(sessionId) {
+  setMessage(`正在载入会话 ${sessionId}……`);
+  const response = await fetch(`/api/agent/sessions/${sessionId}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    setMessage(errorMessage(data, "会话载入失败"), true);
+    return;
+  }
+
+  applyAgentRunResponse(data);
+  setMessage(`已恢复会话 ${sessionId}：${data.goal || "（无目标描述）"}。`);
+}
+
+async function listAgentSessions() {
+  listAgentSessionsButton.disabled = true;
+  try {
+    const response = await fetch("/api/agent/sessions");
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(errorMessage(data, "会话列表查询失败"));
+    }
+
+    agentSessions.classList.remove("hidden");
+    agentSessions.innerHTML = "";
+    if (!data.sessions.length) {
+      agentSessions.appendChild(
+        createElement("p", "agent-sessions-empty", "还没有已保存的会话；勾选“保存会话”后运行 Agent 即可留档。"),
+      );
+      return;
+    }
+    data.sessions.forEach((session) => {
+      const row = createElement("div", "agent-session-row");
+      const info = createElement("div", "agent-session-info");
+      info.append(
+        createElement("strong", "agent-session-id", session.session_id),
+        createElement(
+          "span",
+          "agent-session-meta",
+          `${session.goal || "（无目标）"} · ${AGENT_STATUS_LABELS[session.status] || session.status} · ${session.saved_at}`,
+        ),
+      );
+      const loadButton = createElement("button", "ghost-button", "载入");
+      loadButton.type = "button";
+      loadButton.addEventListener("click", () => {
+        loadAgentSession(session.session_id).catch((error) => setMessage(error.message, true));
+      });
+      row.append(info, loadButton);
+      agentSessions.appendChild(row);
+    });
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    listAgentSessionsButton.disabled = false;
+  }
+}
+
 document.querySelector("#loadExampleButton").addEventListener("click", () => {
   loadExample().catch((error) => setMessage(error.message, true));
 });
@@ -891,5 +1165,7 @@ rewriteButtons.forEach((button) => {
 });
 runReviewButton.addEventListener("click", runMachineReview);
 downloadReviewReportButton.addEventListener("click", downloadReviewReport);
+runAgentButton.addEventListener("click", runAgent);
+listAgentSessionsButton.addEventListener("click", listAgentSessions);
 novelInput.addEventListener("input", updateChapterCount);
 

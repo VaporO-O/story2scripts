@@ -17,12 +17,14 @@ from story2script.mcp_server import (
     get_screenplay_yaml,
     import_novel_file,
     list_scenes,
+    load_agent_session,
     load_screenplay,
     mcp,
     merge_human_review,
     preview_chapters,
     review_screenplay,
     rewrite_scene,
+    run_adaptation_agent,
     save_screenplay,
     validate_yaml,
     workspace,
@@ -49,6 +51,8 @@ EXPECTED_TOOLS = {
     "save_screenplay",
     "validate_yaml",
     "extract_character_profiles",
+    "run_adaptation_agent",
+    "load_agent_session",
 }
 
 
@@ -431,3 +435,58 @@ def test_workspace_isolated_between_tests():
 def test_workspace_update_rejects_unknown_screenplay():
     with pytest.raises(ValueError, match="剧本不存在"):
         workspace.update_screenplay("sp-404")
+
+
+@pytest.mark.anyio
+async def test_run_adaptation_agent_demo_updates_store():
+    summary = await convert_demo()
+    screenplay_id = summary["screenplay_id"]
+    ctx = RecordingContext()
+
+    result = await run_adaptation_agent(
+        screenplay_id,
+        goal="全场景达标",
+        mode="demo",
+        threshold=9.5,
+        max_steps=8,
+        ctx=ctx,
+    )
+
+    assert result["screenplay_id"] == screenplay_id
+    assert result["status"] in {"completed", "budget_exhausted"}
+    assert result["goal"] == "全场景达标"
+    assert result["trace"]
+    assert result["final_summary"]["avg_score"] >= result["initial_summary"]["avg_score"]
+    entry = workspace.get_screenplay(screenplay_id)
+    assert entry.report is not None
+    assert ctx.progress
+    assert any("rewrite_scene" in (note or "") for _, note in ctx.progress)
+
+    with pytest.raises(ValueError, match="剧本不存在"):
+        await run_adaptation_agent("sp-404")
+
+
+@pytest.mark.anyio
+async def test_agent_session_save_and_load(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_SESSION_DIR", str(tmp_path / "sessions"))
+    summary = await convert_demo()
+
+    result = await run_adaptation_agent(
+        summary["screenplay_id"],
+        goal="留档",
+        mode="demo",
+        threshold=9.5,
+        max_steps=3,
+        save_session=True,
+    )
+    session_id = result["session_id"]
+    assert session_id.startswith("ag-")
+
+    restored = load_agent_session(session_id)
+    assert restored["screenplay_id"] == "sp-2"
+    assert restored["goal"] == "留档"
+    assert restored["scene_count"] == summary["scene_count"]
+    assert workspace.get_screenplay("sp-2").report is not None
+
+    with pytest.raises(ValueError, match="会话不存在"):
+        load_agent_session("ag-missing")

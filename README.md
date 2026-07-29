@@ -42,6 +42,8 @@ Web 工作台支持完整演示链路：
 - 支持 YAML 校验、下载 `screenplay.yaml`。
 - 支持人物小传提取。
 - 支持局部重生成：重新生成本场对白、加强戏剧冲突、改成短剧节奏、增加镜头提示、减少旁白、调整人物语气。
+- 支持机审打分与逐场景人审，审校报告可下载。
+- 「改编 Agent」面板：设定目标后一键启动自主改编代理，实时进度、逐步决策轨迹、前后分数对比，可保存 / 载入历史会话。
 
 ## 核心设计
 
@@ -149,6 +151,42 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 | `POST /api/scenes/rewrite` | 局部重生成指定场景 |
 | `POST /api/scenes/review` | 机审场景质量，支持自动修正与指定场景子集 |
 | `POST /api/review/report/merge` | 把人审结论合并进审校报告 |
+| `POST /api/agent/runs` | 启动自主改编 Agent 任务（异步，带进度） |
+| `GET /api/agent/runs/{job_id}` | 查询 Agent 任务进度、决策轨迹与结果 |
+| `GET /api/agent/sessions` | 列出已持久化的 Agent 会话 |
+| `GET /api/agent/sessions/{session_id}` | 读取会话详情（剧本 YAML + 轨迹 + 报告） |
+
+## 改编 Agent
+
+在"固定管线"之上，项目内置一个**自主改编代理**（`story2script.agent`）：给定自然语言目标（如"让全部场景通过机审"），agent 以审校分数为目标函数，自主决定"审校 → 挑场景 → 局部重写 → 复评"的每一步，直到达标、无改进空间或预算耗尽。
+
+```text
+┌────────── AdaptationAgent 循环 ──────────┐
+│ 规划 planner（受控 JSON 决策协议）        │
+│   {"thought": "...",                     │
+│    "action": {"tool": "...", "params"}}  │
+│         ↓ 注册表校验                      │
+│ 工具执行 AgentToolbox（6 个工具）         │
+│   review / list_failing / get_scene      │
+│   rewrite / compare_scores / finish      │
+│         ↓ 紧凑观察值                      │
+│ 记录 AgentStep → Scratchpad（短期记忆）   │
+│         ↺ 直到 finish / 达标 / 步数上限   │
+└──────────────────────────────────────────┘
+```
+
+四个核心模块对应 agent 基础能力：
+
+| 能力 | 实现 |
+| --- | --- |
+| 任务规划 | 受控 JSON 决策协议：ai 模式由 LLM 每步产出决策；demo 模式用确定性规则策略走同一协议，无 API Key 可完整演示 |
+| 工具调用 | `AgentToolbox` 注册表：参数校验、非法动作不抛异常而是作为观察值回喂 planner 自我修正，连续 3 次无效动作熔断 |
+| 短期记忆 | `Scratchpad`：近几步保留全文、更早步骤压缩为一行，发给 planner 的历史总长度有界，上下文不随步数膨胀 |
+| 长期记忆 | `AgentSessionStore`：目标、决策轨迹、指标与剧本成果持久化为 JSON 会话（`AGENT_SESSION_DIR`，默认 `.agent_sessions/`），可跨进程恢复 |
+
+环境变量：`AGENT_MAX_STEPS`（单次运行步数上限，默认 12）、`AGENT_SESSION_DIR`（会话存储目录）；质量阈值复用 `AI_REVIEW_THRESHOLD`。
+
+REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session}`，轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。Web 工作台的「04 改编 Agent」面板封装了同一流程：目标输入、实时进度条、决策轨迹时间线、前后分数对比与历史会话载入。
 
 ## MCP 服务
 
@@ -200,6 +238,8 @@ claude mcp add story2script -- python -m story2script.mcp_server --env-file D:/s
 | `load_screenplay` / `get_screenplay_yaml` / `save_screenplay` | YAML 载入 / 导出 / 落盘（可旁写审校报告） |
 | `validate_yaml` | 校验剧本 YAML |
 | `extract_character_profiles` | 提取人物小传（demo/ai） |
+| `run_adaptation_agent` | 自主改编代理接管剧本：自主规划审校/重写/复评并返回决策轨迹 |
+| `load_agent_session` | 恢复已持久化的 Agent 会话到工作区 |
 
 另有资源 `screenplay://schema` 提供剧本 JSON Schema 全文。示例小说依赖仓库内 `examples/` 目录，请以源码方式（`pip install -e .` 或设置 `PYTHONPATH=src`）运行服务。
 
