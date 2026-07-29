@@ -8,6 +8,7 @@ from .api_models import AgentJobStatusResponse
 from .api_models import AgentRunRequest
 from .api_models import AgentRunResponse
 from .api_models import ConvertJobStatus
+from .metrics import metrics
 from .yaml_export import screenplay_from_yaml, screenplay_to_yaml
 
 
@@ -64,6 +65,7 @@ class AgentJobStore:
 
     def _run(self, job_id: str) -> None:
         request = self._request_for(job_id)
+        reached_run = False
         try:
             self._update(job_id, progress=10, stage="解析剧本")
             try:
@@ -88,6 +90,7 @@ class AgentJobStore:
                 self._update(job_id, progress=progress, stage="Agent 执行中", message=note)
 
             session_store = AgentSessionStore() if request.save_session else None
+            reached_run = True
             outcome = agent.run(
                 screenplay,
                 goal=request.goal,
@@ -105,8 +108,24 @@ class AgentJobStore:
             self._complete(job_id, result)
         except ValueError as exc:
             self._fail(job_id, str(exc))
+            if not reached_run:
+                self._record_pre_run_failure(request.mode, str(exc))
         except Exception as exc:
             self._fail(job_id, f"Agent 任务失败：{exc}")
+            if not reached_run:
+                self._record_pre_run_failure(request.mode, f"Agent 任务失败：{exc}")
+
+    @staticmethod
+    def _record_pre_run_failure(mode: str, error: str) -> None:
+        # Agent 循环内的成败（含异常）由 AdaptationAgent.run 记录；这里只补
+        # 没进入循环就失败的任务（YAML 解析失败、模式非法），避免漏计。
+        metrics.record_task(
+            "agent_run",
+            mode=mode,
+            ok=False,
+            error=error,
+            extra={"status": "not_started"},
+        )
 
     def _request_for(self, job_id: str) -> AgentRunRequest:
         with self._lock:

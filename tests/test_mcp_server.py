@@ -12,6 +12,7 @@ from story2script.mcp_server import (
     convert_novel,
     extract_character_profiles,
     get_example_novel,
+    get_metrics,
     get_review_report,
     get_scene,
     get_screenplay_yaml,
@@ -53,6 +54,7 @@ EXPECTED_TOOLS = {
     "extract_character_profiles",
     "run_adaptation_agent",
     "load_agent_session",
+    "get_metrics",
 }
 
 
@@ -490,3 +492,15 @@ async def test_agent_session_save_and_load(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="会话不存在"):
         load_agent_session("ag-missing")
+
+
+@pytest.mark.anyio
+async def test_get_metrics_tool_reports_task_stats():
+    await convert_demo()
+
+    summary = get_metrics()
+
+    assert summary["tasks"]["convert"]["calls"] == 1
+    assert summary["tasks"]["convert"]["success_rate"] == 1.0
+    assert summary["llm"] == {}
+    assert summary["generated_at"]

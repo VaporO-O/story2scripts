@@ -141,3 +141,19 @@ def test_workbench_agent_sessions_flow() -> None:
     assert "fetch(`/api/agent/sessions/${sessionId}`)" in script
     assert "function applyAgentRunResponse(" in script
     assert "listAgentSessionsButton.addEventListener" in script
+
+
+def test_workbench_exposes_metrics_panel() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "运行指标" in html
+    assert 'id="refreshMetricsButton"' in html
+    assert 'id="metricsContent"' in html
+
+
+def test_workbench_fetches_metrics_api() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/metrics")' in script
+    assert "function renderMetricsSection(" in script
+    assert "refreshMetricsButton.addEventListener" in script

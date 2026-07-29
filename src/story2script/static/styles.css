@@ -1116,3 +1116,44 @@ textarea {
   padding: 4px 14px;
   font-size: 12px;
 }
+
+.metrics-panel {
+  margin-bottom: 42px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.metrics-content {
+  display: grid;
+  gap: 18px;
+  padding-top: 16px;
+}
+
+.metrics-section-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.metrics-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.metrics-row:last-child {
+  border-bottom: none;
+}
+
+.metrics-row-name {
+  min-width: 140px;
+  font-size: 13px;
+}
+
+.metrics-row .agent-metrics {
+  padding-top: 0;
+}

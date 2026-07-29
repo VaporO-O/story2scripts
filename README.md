@@ -44,6 +44,7 @@ Web 工作台支持完整演示链路：
 - 支持局部重生成：重新生成本场对白、加强戏剧冲突、改成短剧节奏、增加镜头提示、减少旁白、调整人物语气。
 - 支持机审打分与逐场景人审，审校报告可下载。
 - 「改编 Agent」面板：设定目标后一键启动自主改编代理，实时进度、逐步决策轨迹、前后分数对比，可保存 / 载入历史会话。
+- 「运行指标」面板：LLM 调用成功率 / 延迟 / Token 消耗与任务成败统计，一键刷新。
 
 ## 核心设计
 
@@ -155,6 +156,8 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 | `GET /api/agent/runs/{job_id}` | 查询 Agent 任务进度、决策轨迹与结果 |
 | `GET /api/agent/sessions` | 列出已持久化的 Agent 会话 |
 | `GET /api/agent/sessions/{session_id}` | 读取会话详情（剧本 YAML + 轨迹 + 报告） |
+| `GET /api/metrics` | 运行指标汇总（LLM 成功率/延迟/Token、任务成败） |
+| `GET /api/metrics/events?limit=50` | 最近的指标事件明细 |
 
 ## 改编 Agent
 
@@ -187,6 +190,16 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 环境变量：`AGENT_MAX_STEPS`（单次运行步数上限，默认 12）、`AGENT_SESSION_DIR`（会话存储目录）；质量阈值复用 `AI_REVIEW_THRESHOLD`。
 
 REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session}`，轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。Web 工作台的「04 改编 Agent」面板封装了同一流程：目标输入、实时进度条、决策轨迹时间线、前后分数对比与历史会话载入。
+
+## 可观测性
+
+全链路进程内指标（`story2script/metrics.py`），为缓存、并发调优、prompt 优化提供数据：
+
+- **调用级**：`LLMClient.complete_json` 是所有大模型请求的唯一出口，每次调用记录成败（8 类错误：timeout / network / http_status / invalid_json / malformed / truncated / empty / unknown）、耗时、`usage` 里的 prompt/completion tokens，按 5 个子系统维度（全文转换 / 改编代理 / 人物小传 / 场景审校 / 场景重写）聚合。
+- **任务级**：`convert`（同步 + 异步任务）、`scene_review`、`scene_rewrite`、`agent_run` 四类任务的成败、耗时与业务字段（场景数、操作、轮次、Agent 步数等）。
+- **口径**：累计聚合永不丢失；p50/p95 基于最近事件环形缓冲（`STORY2SCRIPT_METRICS_MAX_EVENTS`，默认 500）；分块转换的重试每次真实请求都计一次调用，任务只计终态一次。
+- **查看**：工作台「05 运行指标」面板一键刷新；`GET /api/metrics`（汇总）与 `GET /api/metrics/events`（明细）；MCP 工具 `get_metrics`。
+- **落盘（可选）**：设 `STORY2SCRIPT_METRICS_LOG=/path/metrics.jsonl` 后逐事件追加 JSONL，写失败静默停写不影响业务。
 
 ## MCP 服务
 
@@ -240,6 +253,7 @@ claude mcp add story2script -- python -m story2script.mcp_server --env-file D:/s
 | `extract_character_profiles` | 提取人物小传（demo/ai） |
 | `run_adaptation_agent` | 自主改编代理接管剧本：自主规划审校/重写/复评并返回决策轨迹 |
 | `load_agent_session` | 恢复已持久化的 Agent 会话到工作区 |
+| `get_metrics` | 运行指标：LLM 成功率/延迟/Token 消耗与任务统计 |
 
 另有资源 `screenplay://schema` 提供剧本 JSON Schema 全文。示例小说依赖仓库内 `examples/` 目录，请以源码方式（`pip install -e .` 或设置 `PYTHONPATH=src`）运行服务。
 

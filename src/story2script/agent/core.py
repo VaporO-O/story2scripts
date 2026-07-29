@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 
 from ..llm_client import LLMClient, loads_json_object
+from ..metrics import metrics
 from ..scene_review import ReviewReport, _review_threshold, review_scenes_report
 from ..screenplay import Screenplay
 from .memory import AgentSessionStore, Scratchpad
@@ -72,6 +73,28 @@ class AdaptationAgent:
         goal: str = "",
         progress_cb=None,
         session_store: AgentSessionStore | None = None,
+    ) -> AgentRunOutcome:
+        run_started = time.perf_counter()
+        try:
+            return self._run_loop(screenplay, goal, progress_cb, session_store, run_started)
+        except ValueError as exc:
+            metrics.record_task(
+                "agent_run",
+                mode=self.mode,
+                duration_ms=int((time.perf_counter() - run_started) * 1000),
+                ok=False,
+                error=str(exc),
+                extra={"status": "error", "steps": 0, "llm_calls": self._llm_calls},
+            )
+            raise
+
+    def _run_loop(
+        self,
+        screenplay: Screenplay,
+        goal: str,
+        progress_cb,
+        session_store: AgentSessionStore | None,
+        run_started: float,
     ) -> AgentRunOutcome:
         self._llm_calls = 0
         self._demo_attempted = set()
@@ -160,6 +183,18 @@ class AdaptationAgent:
         )
         if session_store is not None:
             result.session_id = session_store.save(result, ctx.screenplay, ctx.report)
+        metrics.record_task(
+            "agent_run",
+            mode=self.mode,
+            duration_ms=int((time.perf_counter() - run_started) * 1000),
+            ok=status != "failed",
+            error=message if status == "failed" else "",
+            extra={
+                "status": status,
+                "steps": len(trace),
+                "llm_calls": self._llm_calls,
+            },
+        )
         return AgentRunOutcome(screenplay=ctx.screenplay, report=ctx.report, result=result)
 
     # ------------------------------------------------------------------ 规划

@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -21,6 +22,8 @@ from .api_models import ConvertJobStatusResponse
 from .api_models import ExampleNovelResponse
 from .api_models import GlobalStateRequest
 from .api_models import GlobalStateResponse
+from .api_models import MetricsEventsResponse
+from .api_models import MetricsSummaryResponse
 from .api_models import NovelImportRequest
 from .api_models import NovelImportResponse
 from .api_models import ReviewReportMergeRequest
@@ -35,6 +38,7 @@ from .character_profiles_ai import get_character_profiler
 from .agent import AgentSessionStore
 from .agent_jobs import agent_jobs
 from .conversion_jobs import conversion_jobs
+from .metrics import metrics
 from .converter import get_converter
 from .examples import load_example_novel
 from .novel_import import import_novel_content
@@ -145,6 +149,30 @@ async def import_novel(request: NovelImportRequest) -> NovelImportResponse:
 
 @app.post("/api/convert", response_model=ConvertResponse)
 async def convert_novel(request: ConvertRequest) -> ConvertResponse:
+    started = perf_counter()
+    try:
+        response = _convert_novel_impl(request)
+    except HTTPException as exc:
+        metrics.record_task(
+            "convert",
+            mode=request.mode,
+            duration_ms=int((perf_counter() - started) * 1000),
+            ok=False,
+            error=str(exc.detail),
+            extra={"source": "sync", "scene_count": 0},
+        )
+        raise
+    metrics.record_task(
+        "convert",
+        mode=request.mode,
+        duration_ms=int((perf_counter() - started) * 1000),
+        ok=True,
+        extra={"source": "sync", "scene_count": len(response.screenplay.scenes)},
+    )
+    return response
+
+
+def _convert_novel_impl(request: ConvertRequest) -> ConvertResponse:
     try:
         chapters = parse_chapters(request.novel_text)
     except ValueError as exc:
@@ -222,6 +250,16 @@ async def get_agent_run(job_id: str) -> AgentJobStatusResponse:
 @app.get("/api/agent/sessions", response_model=AgentSessionListResponse)
 async def list_agent_sessions() -> AgentSessionListResponse:
     return AgentSessionListResponse(sessions=AgentSessionStore().list_sessions())
+
+
+@app.get("/api/metrics", response_model=MetricsSummaryResponse)
+async def get_metrics_summary() -> MetricsSummaryResponse:
+    return MetricsSummaryResponse(**metrics.summary())
+
+
+@app.get("/api/metrics/events", response_model=MetricsEventsResponse)
+async def get_metrics_events(limit: int = 50) -> MetricsEventsResponse:
+    return MetricsEventsResponse(events=metrics.recent_events(limit=limit))
 
 
 @app.get("/api/agent/sessions/{session_id}", response_model=AgentSessionDetailResponse)

@@ -216,3 +216,15 @@ class AgentSessionDetailResponse(BaseModel):
     yaml_text: str
     report: ReviewReport | None = None
 
+
+class MetricsSummaryResponse(BaseModel):
+    generated_at: str
+    since: str
+    llm_overall: dict
+    llm: dict
+    tasks: dict
+
+
+class MetricsEventsResponse(BaseModel):
+    events: list[dict]
+

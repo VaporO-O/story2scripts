@@ -57,6 +57,9 @@ const agentEmptyState = document.querySelector("#agentEmptyState");
 const agentSummary = document.querySelector("#agentSummary");
 const agentTrace = document.querySelector("#agentTrace");
 const agentSessions = document.querySelector("#agentSessions");
+const refreshMetricsButton = document.querySelector("#refreshMetricsButton");
+const metricsEmptyState = document.querySelector("#metricsEmptyState");
+const metricsContent = document.querySelector("#metricsContent");
 const agentPollIntervalMs = 1000;
 const agentMaxPolls = 720;
 const supportedTextNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
@@ -1142,6 +1145,84 @@ async function listAgentSessions() {
   }
 }
 
+const TASK_KIND_LABELS = {
+  convert: "全文转换",
+  scene_review: "机审",
+  scene_rewrite: "局部重写",
+  agent_run: "Agent 运行",
+};
+
+function formatSuccessRate(row) {
+  return `${Math.round((row.success_rate || 0) * 1000) / 10}%`;
+}
+
+function renderMetricsSection(title, rows, isLlm) {
+  const section = createElement("div", "metrics-section");
+  section.appendChild(createElement("h4", "metrics-section-title", title));
+  const entries = Object.entries(rows || {});
+  if (!entries.length) {
+    section.appendChild(
+      createElement(
+        "p",
+        "agent-sessions-empty",
+        isLlm ? "暂无 LLM 调用（本地模式全程不调用大模型）。" : "暂无任务记录。",
+      ),
+    );
+    return section;
+  }
+  entries.forEach(([name, row]) => {
+    const line = createElement("div", "metrics-row");
+    line.appendChild(
+      createElement("strong", "metrics-row-name", isLlm ? name : TASK_KIND_LABELS[name] || name),
+    );
+    const chips = createElement("div", "agent-metrics");
+    chips.append(
+      agentMetric(isLlm ? "调用" : "次数", row.calls),
+      agentMetric("成功率", formatSuccessRate(row)),
+      agentMetric("平均耗时", `${row.avg_ms} ms`),
+      agentMetric("p95", `${row.p95_ms} ms`),
+    );
+    if (isLlm) {
+      chips.append(
+        agentMetric("Tokens", `${row.total_tokens}（入 ${row.prompt_tokens} / 出 ${row.completion_tokens}）`),
+      );
+    }
+    if (row.last_error) {
+      chips.append(agentMetric("最近错误", row.last_error));
+    }
+    line.appendChild(chips);
+    section.appendChild(line);
+  });
+  return section;
+}
+
+async function refreshMetrics() {
+  refreshMetricsButton.disabled = true;
+  try {
+    const response = await fetch("/api/metrics");
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(errorMessage(data, "指标查询失败"));
+    }
+
+    metricsEmptyState.classList.add("hidden");
+    metricsContent.classList.remove("hidden");
+    metricsContent.innerHTML = "";
+    const llmRows =
+      data.llm_overall && data.llm_overall.calls > 0
+        ? { 合计: data.llm_overall, ...data.llm }
+        : data.llm;
+    metricsContent.appendChild(renderMetricsSection("LLM 调用（按子系统）", llmRows, true));
+    metricsContent.appendChild(renderMetricsSection("任务统计", data.tasks, false));
+    setMessage(`运行指标已刷新（统计自 ${data.since}）。`);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    refreshMetricsButton.disabled = false;
+  }
+}
+
 document.querySelector("#loadExampleButton").addEventListener("click", () => {
   loadExample().catch((error) => setMessage(error.message, true));
 });
@@ -1167,5 +1248,6 @@ runReviewButton.addEventListener("click", runMachineReview);
 downloadReviewReportButton.addEventListener("click", downloadReviewReport);
 runAgentButton.addEventListener("click", runAgent);
 listAgentSessionsButton.addEventListener("click", listAgentSessions);
+refreshMetricsButton.addEventListener("click", refreshMetrics);
 novelInput.addEventListener("input", updateChapterCount);
 
