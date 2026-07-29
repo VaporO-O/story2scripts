@@ -7,6 +7,10 @@ from fastapi.staticfiles import StaticFiles
 from .api_models import ChapterPreviewItem
 from .api_models import ChapterPreviewRequest
 from .api_models import ChapterPreviewResponse
+from .api_models import AgentJobStartResponse
+from .api_models import AgentJobStatusResponse
+from .api_models import AgentRunRequest
+from .api_models import AgentSessionListResponse
 from .api_models import CharacterProfileRequest
 from .api_models import CharacterProfileResponse
 from .api_models import ConvertRequest
@@ -27,6 +31,8 @@ from .api_models import SceneRewriteResponse
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
 from .character_profiles_ai import get_character_profiler
+from .agent import AgentSessionStore
+from .agent_jobs import agent_jobs
 from .conversion_jobs import conversion_jobs
 from .converter import get_converter
 from .examples import load_example_novel
@@ -191,6 +197,30 @@ async def get_convert_job(job_id: str) -> ConvertJobStatusResponse:
     if not conversion_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="转换任务不存在。")
     return conversion_jobs.snapshot(job_id)
+
+
+@app.post("/api/agent/runs", response_model=AgentJobStartResponse)
+async def start_agent_run(request: AgentRunRequest) -> AgentJobStartResponse:
+    snapshot = agent_jobs.create(request)
+    return AgentJobStartResponse(
+        job_id=snapshot.job_id,
+        status=snapshot.status,
+        progress=snapshot.progress,
+        stage=snapshot.stage,
+        message=snapshot.message,
+    )
+
+
+@app.get("/api/agent/runs/{job_id}", response_model=AgentJobStatusResponse)
+async def get_agent_run(job_id: str) -> AgentJobStatusResponse:
+    if not agent_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="Agent 任务不存在。")
+    return agent_jobs.snapshot(job_id)
+
+
+@app.get("/api/agent/sessions", response_model=AgentSessionListResponse)
+async def list_agent_sessions() -> AgentSessionListResponse:
+    return AgentSessionListResponse(sessions=AgentSessionStore().list_sessions())
 
 
 @app.post("/api/yaml/validate", response_model=ValidateYamlResponse)

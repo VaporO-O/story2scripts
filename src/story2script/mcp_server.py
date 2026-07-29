@@ -23,6 +23,7 @@ from pathlib import Path
 import anyio
 from mcp.server.fastmcp import Context, FastMCP
 
+from .agent import AdaptationAgent, AgentSessionStore
 from .api_models import ConvertRequest
 from .character_profiles_ai import get_character_profiler
 from .conversion_jobs import conversion_jobs
@@ -151,6 +152,7 @@ mcp = FastMCP(
         "import_novel_file 拿到 novel_id → convert_novel 转换（demo 本地规则 / ai 大模型）"
         "得到 screenplay_id → review_screenplay 机审打分与自动修正 → "
         "rewrite_scene 局部重写 → save_screenplay 导出 YAML 与审校报告。"
+        "run_adaptation_agent 可让自主改编代理接管整个审校-重写循环。"
     ),
 )
 
@@ -547,6 +549,121 @@ async def extract_character_profiles(
 
     profiles = await anyio.to_thread.run_sync(_work)
     return {"mode": profiler.mode, "profiles": profiles}
+
+
+def _agent_result_summary(screenplay_id: str, result) -> dict:
+    return {
+        "screenplay_id": screenplay_id,
+        "status": result.status,
+        "goal": result.goal,
+        "mode": result.mode,
+        "steps_used": result.steps_used,
+        "llm_calls": result.llm_calls,
+        "initial_summary": result.initial_summary,
+        "final_summary": result.final_summary,
+        "message": result.message,
+        "session_id": result.session_id,
+        "trace": [
+            {
+                "step": step.step,
+                "thought": step.thought,
+                "action": step.action.model_dump() if step.action else None,
+                "error": step.error,
+            }
+            for step in result.trace
+        ],
+    }
+
+
+@mcp.tool()
+async def run_adaptation_agent(
+    screenplay_id: str,
+    goal: str = "",
+    mode: str = "demo",
+    threshold: float | None = None,
+    max_steps: int | None = None,
+    save_session: bool = False,
+    ctx: Context | None = None,
+) -> dict:
+    """让自主改编代理接管剧本：自主规划审校/重写/复评，直到达标或预算耗尽。
+
+    goal 用自然语言描述目标（默认"让全部场景通过机审"）；执行期间该剧本被锁定。
+    返回决策轨迹摘要与前后分数对比；save_session 时持久化会话（可用
+    load_agent_session 恢复）。
+    """
+    agent = AdaptationAgent(mode=mode, threshold=threshold, max_steps=max_steps)
+    progress_lock = threading.Lock()
+    progress_notes: list[tuple[int, int, str]] = []
+    finished = threading.Event()
+    box: dict = {}
+
+    def progress_cb(step: int, max_steps_total: int, note: str) -> None:
+        with progress_lock:
+            progress_notes.append((step, max_steps_total, note))
+
+    session_store = AgentSessionStore() if save_session else None
+
+    with workspace.screenplay_transaction(screenplay_id) as entry:
+        screenplay = entry.screenplay
+
+        def _work() -> None:
+            try:
+                box["outcome"] = agent.run(
+                    screenplay,
+                    goal=goal,
+                    progress_cb=progress_cb,
+                    session_store=session_store,
+                )
+            except BaseException as exc:  # noqa: BLE001 - 错误经 box 转回事件循环
+                box["error"] = exc
+            finally:
+                finished.set()
+
+        async def _forward_progress() -> None:
+            sent = 0
+            while True:
+                with progress_lock:
+                    pending = progress_notes[sent:]
+                    sent = len(progress_notes)
+                if ctx is not None:
+                    for step, total, note in pending:
+                        await ctx.report_progress(step, total, note)
+                if finished.is_set() and sent == len(progress_notes):
+                    return
+                await anyio.sleep(_POLL_INTERVAL_SECONDS)
+
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(anyio.to_thread.run_sync, _work)
+            task_group.start_soon(_forward_progress)
+
+        if "error" in box:
+            error = box["error"]
+            if isinstance(error, ValueError):
+                raise error
+            raise ValueError(f"Agent 执行失败：{error}")
+
+        outcome = box["outcome"]
+        entry.screenplay = outcome.screenplay
+        entry.report = outcome.report
+
+    return _agent_result_summary(screenplay_id, outcome.result)
+
+
+@mcp.tool()
+def load_agent_session(session_id: str) -> dict:
+    """恢复一次已持久化的 Agent 会话：剧本与审校报告载入工作区，返回新 screenplay_id。"""
+    data = AgentSessionStore().load(session_id)
+    screenplay_id = workspace.add_screenplay(data["screenplay"], report=data["report"])
+    summary = _screenplay_summary(screenplay_id, workspace.get_screenplay(screenplay_id))
+    summary.update(
+        {
+            "session_id": data["session_id"],
+            "saved_at": data["saved_at"],
+            "goal": data["goal"],
+            "status": data["status"],
+        }
+    )
+    return summary
 
 
 @mcp.resource("screenplay://schema")
