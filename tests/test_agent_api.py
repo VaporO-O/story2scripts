@@ -116,3 +116,34 @@ def test_agent_sessions_listing(tmp_path, monkeypatch: pytest.MonkeyPatch):
     missing = client.get("/api/agent/sessions/ag-missing")
     assert missing.status_code == 404
     assert "会话不存在" in missing.json()["detail"]
+
+
+def test_agent_run_with_novel_text_builds_knowledge():
+    response = client.post(
+        "/api/agent/runs",
+        json={
+            "yaml_text": sample_yaml_text(),
+            "mode": "demo",
+            "threshold": 0.1,
+            "novel_text": NOVEL,
+        },
+    )
+    payload = wait_for_agent_job(response.json()["job_id"])
+
+    assert payload["status"] == "succeeded"
+    assert payload["result"]["result"]["status"] == "completed"
+
+
+def test_agent_run_with_invalid_novel_text_fails():
+    response = client.post(
+        "/api/agent/runs",
+        json={
+            "yaml_text": sample_yaml_text(),
+            "mode": "demo",
+            "novel_text": "第一章 只有一章\n内容。",
+        },
+    )
+    payload = wait_for_agent_job(response.json()["job_id"])
+
+    assert payload["status"] == "failed"
+    assert "知识库构建失败" in payload["error"]

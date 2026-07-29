@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from .character_profiles_ai import PROFILE_PLACEHOLDERS, AICharacterProfiler
 from .llm_client import LLMClient, loads_json_object
 from .parser import Chapter
+from .rag import build_story_knowledge, rag_top_k
 from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import Action
 from .screenplay import AdaptationType
@@ -1282,16 +1283,12 @@ def _compact_global_state(global_state: GlobalStoryState) -> dict:
 
     The full ``global_state`` (character goals/arcs/consistency notes and long
     location/timeline descriptions) is resent on every chunk call and bloats the
-    input. The model only needs names plus the timeline order to stay consistent,
-    so descriptions and placeholder fields are dropped here. Character ids/names
-    are already provided separately as the stable roster.
+    input. Character ids/names are already provided separately as the stable
+    roster, and timeline context is now retrieved on demand per chunk (RAG),
+    so only the location roster remains fixed context here.
     """
     return {
         "locations": [location.name for location in global_state.locations],
-        "timeline": [
-            {"chapter": event.chapter, "time_marker": event.time_marker}
-            for event in global_state.timeline
-        ],
     }
 
 
@@ -1371,18 +1368,32 @@ class AIConverter:
         # 先把所有章节片段列成有序任务，再并发调用 LLM：每个片段相互独立，
         # 总耗时从“逐个片段串行相加”降到“最慢的片段”。结果按原始顺序回收，
         # 因此场景顺序与串行时完全一致。
-        tasks: list[tuple[Chapter, str, int, int]] = []
-        for chapter in chapters:
+        # 每个任务附带按需检索出的前文备忘（只允许引用更早章节，防未来剧情泄漏），
+        # 替代此前随章节数线性膨胀的全量 timeline 注入。
+        knowledge = build_story_knowledge(
+            chapters, global_state, mode="ai", llm_client=self.llm_client
+        )
+        retrieval_top_k = rag_top_k()
+        tasks: list[tuple[Chapter, str, int, int, list[dict]]] = []
+        for chapter_no, chapter in enumerate(chapters, start=1):
             chapter_chunks = _chapter_text_chunks(chapter)
             for chunk_index, chunk_text in enumerate(chapter_chunks, start=1):
-                tasks.append((chapter, chunk_text, chunk_index, len(chapter_chunks)))
+                retrieved = knowledge.search(
+                    chunk_text[:400],
+                    top_k=retrieval_top_k,
+                    before_chapter=chapter_no,
+                    kinds=("chunk", "event"),
+                )
+                tasks.append(
+                    (chapter, chunk_text, chunk_index, len(chapter_chunks), retrieved)
+                )
 
         results: list[list[dict] | None] = [None] * len(tasks)
         failures: list[str] = []
         ai_profiles: list[dict] = []
 
         def run_task(task_index: int) -> None:
-            chapter, chunk_text, chunk_index, chunk_count = tasks[task_index]
+            chapter, chunk_text, chunk_index, chunk_count, retrieved = tasks[task_index]
             results[task_index] = self._convert_chapter_chunk(
                 chapter,
                 chunk_text,
@@ -1392,6 +1403,7 @@ class AIConverter:
                 characters,
                 adaptation_type,
                 style,
+                retrieved,
             )
 
         def run_profiles() -> None:
@@ -1469,8 +1481,13 @@ class AIConverter:
         characters: list[dict],
         adaptation_type: AdaptationType,
         style: AdaptationStyleProfile,
+        retrieved: list[dict] | None = None,
     ) -> list[dict]:
         roster = [{"id": item["id"], "name": item["name"]} for item in characters]
+        memo = [
+            {"chapter": hit.get("chapter", ""), "snippet": hit.get("snippet", "")}
+            for hit in (retrieved or [])
+        ]
         prompt = (
             "你是专业影视编剧。请只把【本章】中的【当前片段】小说改编成 Story2Script 的场景列表。"
             "只返回可被 json.loads 解析的 JSON 对象，形如 {\"scenes\": [...]}，"
@@ -1485,6 +1502,8 @@ class AIConverter:
             f"{json.dumps(roster, ensure_ascii=False)}\n"
             "全局状态表是固定上下文，必须保持人物、地点和时间线跨章一致："
             f"{json.dumps(_compact_global_state(global_state), ensure_ascii=False)}\n"
+            "相关前文备忘（按语义检索出的前文片段，仅用于保持剧情连续性，禁止复写其内容）："
+            f"{json.dumps(memo, ensure_ascii=False)}\n"
             "每个 scene 必须包含 id, heading, int_ext, time_of_day, location, source_chapter, "
             "summary, goal, conflict, beat, subtext, characters, characters_present, props, "
             "dramatization_decisions, elements, camera_hints; "

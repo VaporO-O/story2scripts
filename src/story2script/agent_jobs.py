@@ -9,6 +9,9 @@ from .api_models import AgentRunRequest
 from .api_models import AgentRunResponse
 from .api_models import ConvertJobStatus
 from .metrics import metrics
+from .parser import parse_chapters
+from .rag import build_story_knowledge
+from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml, screenplay_to_yaml
 
 
@@ -90,12 +93,24 @@ class AgentJobStore:
                 self._update(job_id, progress=progress, stage="Agent 执行中", message=note)
 
             session_store = AgentSessionStore() if request.save_session else None
+            knowledge = None
+            if request.novel_text.strip():
+                try:
+                    kb_chapters = parse_chapters(request.novel_text)
+                    knowledge = build_story_knowledge(
+                        kb_chapters,
+                        extract_global_story_state(kb_chapters),
+                        mode=request.mode,
+                    )
+                except ValueError as exc:
+                    raise ValueError(f"小说前文知识库构建失败：{exc}") from exc
             reached_run = True
             outcome = agent.run(
                 screenplay,
                 goal=request.goal,
                 progress_cb=progress_cb,
                 session_store=session_store,
+                knowledge=knowledge,
             )
 
             self._update(job_id, progress=95, stage="导出结果", message="正在导出剧本与轨迹。")

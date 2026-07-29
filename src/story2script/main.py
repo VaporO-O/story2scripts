@@ -28,6 +28,8 @@ from .api_models import NovelImportRequest
 from .api_models import NovelImportResponse
 from .api_models import ReviewReportMergeRequest
 from .api_models import ReviewReportMergeResponse
+from .api_models import RagQueryRequest
+from .api_models import RagQueryResponse
 from .api_models import SceneReviewRequest
 from .api_models import SceneReviewResponse
 from .api_models import SceneRewriteRequest
@@ -43,6 +45,7 @@ from .converter import get_converter
 from .examples import load_example_novel
 from .novel_import import import_novel_content
 from .parser import parse_chapters
+from .rag import build_story_knowledge
 from .scene_review import merge_human_verdicts
 from .scene_review import review_and_improve
 from .scene_review import review_scenes_report
@@ -260,6 +263,24 @@ async def get_metrics_summary() -> MetricsSummaryResponse:
 @app.get("/api/metrics/events", response_model=MetricsEventsResponse)
 async def get_metrics_events(limit: int = 50) -> MetricsEventsResponse:
     return MetricsEventsResponse(events=metrics.recent_events(limit=limit))
+
+
+@app.post("/api/rag/query", response_model=RagQueryResponse)
+async def query_story_knowledge(request: RagQueryRequest) -> RagQueryResponse:
+    try:
+        chapters = parse_chapters(request.novel_text)
+        knowledge = build_story_knowledge(
+            chapters, extract_global_story_state(chapters), mode=request.mode
+        )
+        hits = knowledge.search(
+            request.query, top_k=request.top_k, before_chapter=request.before_chapter
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"RAG 查询失败：{exc}") from exc
+
+    return RagQueryResponse(
+        retriever=knowledge.retriever_kind, stats=knowledge.stats(), hits=hits
+    )
 
 
 @app.get("/api/agent/sessions/{session_id}", response_model=AgentSessionDetailResponse)

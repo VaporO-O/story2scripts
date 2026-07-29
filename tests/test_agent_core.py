@@ -291,3 +291,35 @@ def test_session_store_roundtrip(tmp_path, monkeypatch: pytest.MonkeyPatch):
 
     with pytest.raises(ValueError, match="会话不存在"):
         store.load("ag-missing")
+
+
+def test_toolbox_registers_search_story_context_only_with_knowledge():
+    from story2script.agent import AgentContext, build_toolbox
+    from story2script.rag import build_story_knowledge
+
+    screenplay = sample_screenplay()
+    knowledge = build_story_knowledge(parse_chapters(NOVEL))
+    ctx = AgentContext(screenplay=screenplay, knowledge=knowledge)
+    toolbox = build_toolbox(ctx)
+
+    assert "search_story_context" in toolbox.describe()
+    observation = toolbox.execute(
+        AgentAction(tool="search_story_context", params={"query": "林夏 出发"})
+    )
+    assert observation["retriever"] == "lexical"
+    assert observation["hits"]
+    assert all("snippet" in hit for hit in observation["hits"])
+
+    bare_ctx = AgentContext(screenplay=screenplay)
+    assert "search_story_context" not in build_toolbox(bare_ctx).describe()
+
+
+def test_agent_run_accepts_knowledge():
+    from story2script.rag import build_story_knowledge
+
+    knowledge = build_story_knowledge(parse_chapters(NOVEL))
+    agent = AdaptationAgent(mode="demo", threshold=0.1)
+
+    outcome = agent.run(sample_screenplay(), knowledge=knowledge)
+
+    assert outcome.result.status == "completed"
