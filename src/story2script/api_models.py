@@ -6,6 +6,7 @@ from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import AdaptationType
 from .screenplay import GlobalStoryState
 from .screenplay import Screenplay
+from .agent.models import AgentRunResult
 from .scene_rewrite import SceneRewriteMode
 from .scene_rewrite import SceneRewriteOperation
 from .scene_review import HumanVerdict
@@ -165,4 +166,42 @@ class ReviewReportMergeRequest(BaseModel):
 
 class ReviewReportMergeResponse(BaseModel):
     report: ReviewReport
+
+
+class AgentRunRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+    goal: str = ""
+    mode: str = "demo"
+    threshold: float | None = None
+    max_steps: int | None = None
+    save_session: bool = False
+
+
+class AgentRunResponse(BaseModel):
+    result: AgentRunResult
+    screenplay: Screenplay
+    yaml_text: str
+    report: ReviewReport | None = None
+
+
+class AgentJobStartResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+
+
+class AgentJobStatusResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+    result: AgentRunResponse | None = None
+    error: str = ""
+
+
+class AgentSessionListResponse(BaseModel):
+    sessions: list[dict]
 
