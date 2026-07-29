@@ -48,10 +48,6 @@ body {
 
 .brand span,
 .eyebrow,
-.panel-heading span {
-  color: var(--accent);
-}
-
 nav {
   display: flex;
   gap: 18px;
@@ -406,10 +402,6 @@ textarea {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.section-heading span {
-  color: var(--accent);
 }
 
 .section-heading p,
