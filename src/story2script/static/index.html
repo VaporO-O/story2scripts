@@ -246,6 +246,22 @@
         <ol id="agentTrace" class="agent-trace hidden"></ol>
         <div id="agentSessions" class="agent-sessions hidden"></div>
       </section>
+
+      <section class="metrics-panel">
+        <div class="section-heading">
+          <div>
+            <span>05</span>
+            <h2>运行指标</h2>
+          </div>
+          <div class="button-row">
+            <button id="refreshMetricsButton" class="ghost-button">刷新指标</button>
+          </div>
+        </div>
+        <div id="metricsEmptyState" class="profile-empty">
+          点击“刷新指标”查看本次服务运行以来的 LLM 调用成功率、延迟与 Token 消耗，以及各任务的成败统计。
+        </div>
+        <div id="metricsContent" class="metrics-content hidden"></div>
+      </section>
     </main>
 
     <script src="/static/app.js"></script>

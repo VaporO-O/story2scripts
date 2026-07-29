@@ -1,9 +1,11 @@
 import json
 import re
+import time
 from typing import Literal
 
 from .converter import _normalize_screenplay_scene_data
 from .llm_client import LLMClient, loads_json_object
+from .metrics import metrics
 from .screenplay import Action, Dialogue, Scene, Screenplay
 
 
@@ -340,6 +342,48 @@ def _rewrite_scene_with_ai(
 
 
 def rewrite_scene(
+    screenplay: Screenplay,
+    scene_id: str,
+    operation: SceneRewriteOperation,
+    character_id: str = "",
+    tone: str = "更克制",
+    mode: SceneRewriteMode = "demo",
+    client=None,
+    feedback: str = "",
+) -> tuple[Screenplay, str]:
+    started = time.perf_counter()
+    try:
+        result = _rewrite_scene_dispatch(
+            screenplay=screenplay,
+            scene_id=scene_id,
+            operation=operation,
+            character_id=character_id,
+            tone=tone,
+            mode=mode,
+            client=client,
+            feedback=feedback,
+        )
+    except ValueError as exc:
+        metrics.record_task(
+            "scene_rewrite",
+            mode=mode,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            ok=False,
+            error=str(exc),
+            extra={"operation": operation, "scene_id": scene_id},
+        )
+        raise
+    metrics.record_task(
+        "scene_rewrite",
+        mode=mode,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        ok=True,
+        extra={"operation": operation, "scene_id": scene_id},
+    )
+    return result
+
+
+def _rewrite_scene_dispatch(
     screenplay: Screenplay,
     scene_id: str,
     operation: SceneRewriteOperation,

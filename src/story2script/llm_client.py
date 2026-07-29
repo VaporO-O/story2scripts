@@ -1,9 +1,12 @@
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import httpx
+
+from .metrics import metrics
 
 
 DOTENV_FILENAME = ".env"
@@ -190,42 +193,78 @@ class LLMClient:
         if self.max_tokens is not None:
             body["max_tokens"] = self.max_tokens
 
+        started = time.perf_counter()
+        error_kind = ""
+        usage: dict = {}
         try:
-            response = self.client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json=body,
+            try:
+                response = self.client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=body,
+                )
+                response.raise_for_status()
+            except httpx.TimeoutException as exc:
+                error_kind = "timeout"
+                raise ValueError(f"{self.usage_label} request timed out.") from exc
+            except httpx.RequestError as exc:
+                error_kind = "network"
+                raise ValueError(f"{self.usage_label} network error: {exc}") from exc
+            except httpx.HTTPStatusError as exc:
+                error_kind = "http_status"
+                status_code = exc.response.status_code
+                raise ValueError(
+                    f"{self.usage_label} request failed with HTTP {status_code}."
+                ) from exc
+
+            try:
+                payload = response.json()
+            except json.JSONDecodeError as exc:
+                error_kind = "invalid_json"
+                raise ValueError(f"{self.usage_label} returned invalid JSON response.") from exc
+
+            raw_usage = payload.get("usage") if isinstance(payload, dict) else None
+            usage = raw_usage if isinstance(raw_usage, dict) else {}
+
+            try:
+                choice = payload["choices"][0]
+                content = choice["message"]["content"]
+            except (KeyError, IndexError, TypeError) as exc:
+                error_kind = "malformed"
+                raise ValueError(f"{self.usage_label} returned malformed response.") from exc
+
+            finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+            if finish_reason == "length":
+                error_kind = "truncated"
+                raise ValueError(
+                    f"{self.usage_label} 输出被截断（finish_reason=length）：本次返回超出模型单次输出"
+                    "长度上限。请在 .env 调高 AI_MAX_TOKENS（如 16384），或减少单次转换的章节数量。"
+                )
+
+            if not isinstance(content, str) or not content.strip():
+                error_kind = "empty"
+                raise ValueError(f"{self.usage_label} returned empty response.")
+        except ValueError:
+            metrics.record_llm_call(
+                label=self.usage_label,
+                model=self.model,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                ok=False,
+                error_kind=error_kind or "unknown",
+                prompt_chars=len(prompt),
             )
-            response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise ValueError(f"{self.usage_label} request timed out.") from exc
-        except httpx.RequestError as exc:
-            raise ValueError(f"{self.usage_label} network error: {exc}") from exc
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            raise ValueError(f"{self.usage_label} request failed with HTTP {status_code}.") from exc
+            raise
 
-        try:
-            payload = response.json()
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{self.usage_label} returned invalid JSON response.") from exc
-
-        try:
-            choice = payload["choices"][0]
-            content = choice["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError(f"{self.usage_label} returned malformed response.") from exc
-
-        finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
-        if finish_reason == "length":
-            raise ValueError(
-                f"{self.usage_label} 输出被截断（finish_reason=length）：本次返回超出模型单次输出"
-                "长度上限。请在 .env 调高 AI_MAX_TOKENS（如 16384），或减少单次转换的章节数量。"
-            )
-
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError(f"{self.usage_label} returned empty response.")
-
+        metrics.record_llm_call(
+            label=self.usage_label,
+            model=self.model,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            ok=True,
+            prompt_tokens=usage.get("prompt_tokens") or 0,
+            completion_tokens=usage.get("completion_tokens") or 0,
+            prompt_chars=len(prompt),
+            response_chars=len(content),
+        )
         return content
 
     def _ensure_configured(self) -> None:

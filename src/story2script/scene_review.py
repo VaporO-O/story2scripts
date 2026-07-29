@@ -1,11 +1,13 @@
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
 from .llm_client import LLMClient, _default_env_path, _load_env_file, loads_json_object
+from .metrics import metrics
 from .scene_rewrite import OPERATION_PROMPTS, rewrite_scene
 from .screenplay import Dialogue, Scene, Screenplay
 
@@ -352,9 +354,28 @@ def review_scenes_report(
     scene_ids: list[str] | None = None,
 ) -> ReviewReport:
     """只审不改：对全部或指定场景打分并生成报告。"""
+    started = time.perf_counter()
     resolved_threshold = _review_threshold() if threshold is None else float(threshold)
     reviewer = get_scene_reviewer(mode, client=client)
-    results = review_screenplay(screenplay, reviewer, resolved_threshold, scene_ids=scene_ids)
+    try:
+        results = review_screenplay(screenplay, reviewer, resolved_threshold, scene_ids=scene_ids)
+    except ValueError as exc:
+        metrics.record_task(
+            "scene_review",
+            mode=mode,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            ok=False,
+            error=str(exc),
+            extra={"auto_fix": False},
+        )
+        raise
+    metrics.record_task(
+        "scene_review",
+        mode=mode,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        ok=True,
+        extra={"auto_fix": False, "scene_count": len(results), "rounds": 1},
+    )
     return build_report(screenplay, results, mode, resolved_threshold, rounds_used=1)
 
 
@@ -375,10 +396,22 @@ def review_and_improve(
     resolved_threshold = _review_threshold() if threshold is None else float(threshold)
     resolved_rounds = _review_max_rounds() if max_rounds is None else max(1, int(max_rounds))
     reviewer = get_scene_reviewer(mode, client=client)
+    started = time.perf_counter()
 
-    if progress_cb:
-        progress_cb(f"第 1 轮审校：正在评估 {len(screenplay.scenes)} 个场景。")
-    results = review_screenplay(screenplay, reviewer, resolved_threshold, round_no=1)
+    try:
+        if progress_cb:
+            progress_cb(f"第 1 轮审校：正在评估 {len(screenplay.scenes)} 个场景。")
+        results = review_screenplay(screenplay, reviewer, resolved_threshold, round_no=1)
+    except ValueError as exc:
+        metrics.record_task(
+            "scene_review",
+            mode=mode,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            ok=False,
+            error=str(exc),
+            extra={"auto_fix": auto_fix},
+        )
+        raise
     rounds_used = 1
 
     while auto_fix and rounds_used < resolved_rounds:
@@ -420,6 +453,17 @@ def review_and_improve(
         )
 
     report = build_report(screenplay, results, mode, resolved_threshold, rounds_used)
+    metrics.record_task(
+        "scene_review",
+        mode=mode,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        ok=True,
+        extra={
+            "auto_fix": auto_fix,
+            "scene_count": len(screenplay.scenes),
+            "rounds": rounds_used,
+        },
+    )
     return screenplay, report
 
 

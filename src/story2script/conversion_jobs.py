@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from threading import Lock
+from time import perf_counter
 from uuid import uuid4
 
 from .api_models import ConvertJobStatus
@@ -8,6 +9,7 @@ from .api_models import ConvertJobStatusResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
 from .converter import get_converter
+from .metrics import metrics
 from .parser import parse_chapters
 from .scene_review import review_and_improve
 from .yaml_export import screenplay_to_yaml
@@ -64,6 +66,18 @@ class ConversionJobStore:
 
     def _run(self, job_id: str) -> None:
         request = self._request_for(job_id)
+        started = perf_counter()
+
+        def record(ok: bool, error: str = "", scene_count: int = 0) -> None:
+            metrics.record_task(
+                "convert",
+                mode=request.mode,
+                duration_ms=int((perf_counter() - started) * 1000),
+                ok=ok,
+                error=error,
+                extra={"source": "job", "scene_count": scene_count},
+            )
+
         try:
             self._update(job_id, status="running", progress=10, stage="解析章节")
             chapters = parse_chapters(request.novel_text)
@@ -119,10 +133,13 @@ class ConversionJobStore:
                 review_report=review_report,
             )
             self._complete(job_id, result)
+            record(ok=True, scene_count=len(result.screenplay.scenes))
         except ValueError as exc:
             self._fail(job_id, str(exc))
+            record(ok=False, error=str(exc))
         except Exception as exc:
             self._fail(job_id, f"转换任务失败：{exc}")
+            record(ok=False, error=f"转换任务失败：{exc}")
 
     def _request_for(self, job_id: str) -> ConvertRequest:
         with self._lock:

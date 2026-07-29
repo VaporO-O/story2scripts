@@ -29,6 +29,7 @@ from .character_profiles_ai import get_character_profiler
 from .conversion_jobs import conversion_jobs
 from .examples import load_example_novel
 from .llm_client import _load_env_file
+from .metrics import metrics
 from .novel_import import MAX_IMPORT_BYTES, import_novel_content
 from .parser import parse_chapters
 from .scene_review import (
@@ -464,6 +465,12 @@ def get_review_report(screenplay_id: str) -> dict:
     if entry.report is None:
         raise ValueError("该剧本还没有审校报告，请先调用 review_screenplay。")
     return entry.report.model_dump(mode="json")
+
+
+@mcp.tool()
+def get_metrics() -> dict:
+    """获取本进程运行指标：LLM 调用成功率/延迟/Token 消耗（按子系统），任务成败与耗时。"""
+    return metrics.summary()
 
 
 @mcp.tool()
