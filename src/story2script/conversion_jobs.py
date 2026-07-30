@@ -1,68 +1,27 @@
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from threading import Lock
 from time import perf_counter
-from uuid import uuid4
 
-from .api_models import ConvertJobStatus
 from .api_models import ConvertJobStatusResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
 from .converter import get_converter
+from .job_store import DurableJobStore
 from .metrics import metrics
 from .parser import parse_chapters
 from .scene_review import review_and_improve
 from .yaml_export import screenplay_to_yaml
 
 
-@dataclass
-class ConversionJob:
-    job_id: str
-    status: ConvertJobStatus
-    progress: int
-    stage: str
-    message: str
-    request: ConvertRequest
-    result: ConvertResponse | None = None
-    error: str = ""
+class ConversionJobStore(DurableJobStore):
+    """转换任务队列：持久化、可恢复；业务管线保持不变。"""
 
-
-class ConversionJobStore:
-    def __init__(self) -> None:
-        self._jobs: dict[str, ConversionJob] = {}
-        self._lock = Lock()
-        self._executor = ThreadPoolExecutor(max_workers=2)
-
-    def create(self, request: ConvertRequest) -> ConvertJobStatusResponse:
-        job = ConversionJob(
-            job_id=str(uuid4()),
-            status="queued",
-            progress=0,
-            stage="等待转换",
-            message="转换任务已创建，等待后端开始处理。",
-            request=request,
-        )
-        with self._lock:
-            self._jobs[job.job_id] = job
-        self._executor.submit(self._run, job.job_id)
-        return self.snapshot(job.job_id)
-
-    def snapshot(self, job_id: str) -> ConvertJobStatusResponse:
-        with self._lock:
-            job = self._jobs[job_id]
-            return ConvertJobStatusResponse(
-                job_id=job.job_id,
-                status=job.status,
-                progress=job.progress,
-                stage=job.stage,
-                message=job.message,
-                result=job.result,
-                error=job.error,
-            )
-
-    def has_job(self, job_id: str) -> bool:
-        with self._lock:
-            return job_id in self._jobs
+    kind = "convert"
+    request_model = ConvertRequest
+    result_model = ConvertResponse
+    response_model = ConvertJobStatusResponse
+    queued_stage = "等待转换"
+    queued_message = "转换任务已创建，等待后端开始处理。"
+    complete_stage = "转换完成"
+    fail_stage = "转换失败"
 
     def _run(self, job_id: str) -> None:
         request = self._request_for(job_id)
@@ -141,43 +100,8 @@ class ConversionJobStore:
             self._fail(job_id, f"转换任务失败：{exc}")
             record(ok=False, error=f"转换任务失败：{exc}")
 
-    def _request_for(self, job_id: str) -> ConvertRequest:
-        with self._lock:
-            return self._jobs[job_id].request
-
-    def _update(
-        self,
-        job_id: str,
-        *,
-        status: ConvertJobStatus = "running",
-        progress: int,
-        stage: str,
-        message: str = "",
-    ) -> None:
-        with self._lock:
-            job = self._jobs[job_id]
-            job.status = status
-            job.progress = progress
-            job.stage = stage
-            job.message = message or stage
-
-    def _complete(self, job_id: str, result: ConvertResponse) -> None:
-        with self._lock:
-            job = self._jobs[job_id]
-            job.status = "succeeded"
-            job.progress = 100
-            job.stage = "转换完成"
-            job.message = f"已生成 {len(result.screenplay.scenes)} 个场景。"
-            job.result = result
-            job.error = ""
-
-    def _fail(self, job_id: str, error: str) -> None:
-        with self._lock:
-            job = self._jobs[job_id]
-            job.status = "failed"
-            job.stage = "转换失败"
-            job.message = error
-            job.error = error
+    def _complete_message(self, result: ConvertResponse) -> str:
+        return f"已生成 {len(result.screenplay.scenes)} 个场景。"
 
 
 def _mode_name(mode: str) -> str:

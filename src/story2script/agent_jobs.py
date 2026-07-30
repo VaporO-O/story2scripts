@@ -1,13 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from threading import Lock
-from uuid import uuid4
 
 from .agent import AdaptationAgent, AgentSessionStore
 from .api_models import AgentJobStatusResponse
 from .api_models import AgentRunRequest
 from .api_models import AgentRunResponse
-from .api_models import ConvertJobStatus
+from .job_store import DurableJobStore
 from .metrics import metrics
 from .parser import parse_chapters
 from .rag import build_story_knowledge
@@ -15,56 +11,18 @@ from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml, screenplay_to_yaml
 
 
-@dataclass
-class AgentJob:
-    job_id: str
-    status: ConvertJobStatus
-    progress: int
-    stage: str
-    message: str
-    request: AgentRunRequest
-    result: AgentRunResponse | None = None
-    error: str = ""
+class AgentJobStore(DurableJobStore):
+    """Agent 运行任务队列：持久化、可恢复；与转换任务共用一个 SQLite 库，
+    但保持独立线程池，避免与转换任务互相阻塞。"""
 
-
-class AgentJobStore:
-    """Agent 运行任务存储：独立线程池，避免与转换任务互相阻塞。"""
-
-    def __init__(self) -> None:
-        self._jobs: dict[str, AgentJob] = {}
-        self._lock = Lock()
-        self._executor = ThreadPoolExecutor(max_workers=2)
-
-    def create(self, request: AgentRunRequest) -> AgentJobStatusResponse:
-        job = AgentJob(
-            job_id=str(uuid4()),
-            status="queued",
-            progress=0,
-            stage="等待执行",
-            message="Agent 任务已创建，等待后端开始处理。",
-            request=request,
-        )
-        with self._lock:
-            self._jobs[job.job_id] = job
-        self._executor.submit(self._run, job.job_id)
-        return self.snapshot(job.job_id)
-
-    def snapshot(self, job_id: str) -> AgentJobStatusResponse:
-        with self._lock:
-            job = self._jobs[job_id]
-            return AgentJobStatusResponse(
-                job_id=job.job_id,
-                status=job.status,
-                progress=job.progress,
-                stage=job.stage,
-                message=job.message,
-                result=job.result,
-                error=job.error,
-            )
-
-    def has_job(self, job_id: str) -> bool:
-        with self._lock:
-            return job_id in self._jobs
+    kind = "agent_run"
+    request_model = AgentRunRequest
+    result_model = AgentRunResponse
+    response_model = AgentJobStatusResponse
+    queued_stage = "等待执行"
+    queued_message = "Agent 任务已创建，等待后端开始处理。"
+    complete_stage = "执行完成"
+    fail_stage = "执行失败"
 
     def _run(self, job_id: str) -> None:
         request = self._request_for(job_id)
@@ -130,6 +88,9 @@ class AgentJobStore:
             if not reached_run:
                 self._record_pre_run_failure(request.mode, f"Agent 任务失败：{exc}")
 
+    def _complete_message(self, result: AgentRunResponse) -> str:
+        return result.result.message or "Agent 执行完成。"
+
     @staticmethod
     def _record_pre_run_failure(mode: str, error: str) -> None:
         # Agent 循环内的成败（含异常）由 AdaptationAgent.run 记录；这里只补
@@ -141,44 +102,6 @@ class AgentJobStore:
             error=error,
             extra={"status": "not_started"},
         )
-
-    def _request_for(self, job_id: str) -> AgentRunRequest:
-        with self._lock:
-            return self._jobs[job_id].request
-
-    def _update(
-        self,
-        job_id: str,
-        *,
-        status: ConvertJobStatus = "running",
-        progress: int,
-        stage: str,
-        message: str = "",
-    ) -> None:
-        with self._lock:
-            job = self._jobs[job_id]
-            job.status = status
-            job.progress = progress
-            job.stage = stage
-            job.message = message or stage
-
-    def _complete(self, job_id: str, result: AgentRunResponse) -> None:
-        with self._lock:
-            job = self._jobs[job_id]
-            job.status = "succeeded"
-            job.progress = 100
-            job.stage = "执行完成"
-            job.message = result.result.message or "Agent 执行完成。"
-            job.result = result
-            job.error = ""
-
-    def _fail(self, job_id: str, error: str) -> None:
-        with self._lock:
-            job = self._jobs[job_id]
-            job.status = "failed"
-            job.stage = "执行失败"
-            job.message = error
-            job.error = error
 
 
 agent_jobs = AgentJobStore()

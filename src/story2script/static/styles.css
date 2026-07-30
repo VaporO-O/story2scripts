@@ -47,7 +47,10 @@ body {
 }
 
 .brand span,
-.eyebrow,
+.eyebrow {
+  color: var(--accent);
+}
+
 nav {
   display: flex;
   gap: 18px;

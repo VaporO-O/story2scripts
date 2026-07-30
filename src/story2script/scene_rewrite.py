@@ -237,7 +237,8 @@ class AISceneRewriter:
             _resolve_character_id(screenplay, scene_id, character_id)
 
         prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone, feedback)
-        content = self.llm_client.complete_json(prompt)
+        # "重新生成"语义要求同请求可以产出不同结果，读写都绕过响应缓存。
+        content = self.llm_client.complete_json(prompt, use_cache=False)
         try:
             raw_scene = loads_json_object(content)
         except ValueError as exc:

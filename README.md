@@ -152,12 +152,15 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 | `POST /api/convert` | 同步全文转换 |
 | `POST /api/convert/jobs` | 启动带进度的异步转换 |
 | `GET /api/convert/jobs/{job_id}` | 查询转换进度和结果 |
+| `POST /api/convert/jobs/{job_id}/cancel` | 取消还在排队的转换任务 |
 | `POST /api/yaml/validate` | 校验编辑后的 YAML |
 | `POST /api/scenes/rewrite` | 局部重生成指定场景 |
 | `POST /api/scenes/review` | 机审场景质量，支持自动修正与指定场景子集 |
 | `POST /api/review/report/merge` | 把人审结论合并进审校报告 |
 | `POST /api/agent/runs` | 启动自主改编 Agent 任务（异步，带进度） |
 | `GET /api/agent/runs/{job_id}` | 查询 Agent 任务进度、决策轨迹与结果 |
+| `POST /api/agent/runs/{job_id}/cancel` | 取消还在排队的 Agent 任务 |
+| `GET /api/jobs?limit=50` | 任务历史（转换 + Agent，含上次进程遗留任务） |
 | `GET /api/agent/sessions` | 列出已持久化的 Agent 会话 |
 | `GET /api/agent/sessions/{session_id}` | 读取会话详情（剧本 YAML + 轨迹 + 报告） |
 | `GET /api/metrics` | 运行指标汇总（LLM 成功率/延迟/Token、任务成败） |
@@ -214,9 +217,28 @@ REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, 
 
 - **调用级**：`LLMClient.complete_json` 是所有大模型请求的唯一出口，每次调用记录成败（8 类错误：timeout / network / http_status / invalid_json / malformed / truncated / empty / unknown）、耗时、`usage` 里的 prompt/completion tokens，按 5 个子系统维度（全文转换 / 改编代理 / 人物小传 / 场景审校 / 场景重写）聚合。
 - **任务级**：`convert`（同步 + 异步任务）、`scene_review`、`scene_rewrite`、`agent_run` 四类任务的成败、耗时与业务字段（场景数、操作、轮次、Agent 步数等）。
-- **口径**：累计聚合永不丢失；p50/p95 基于最近事件环形缓冲（`STORY2SCRIPT_METRICS_MAX_EVENTS`，默认 500）；分块转换的重试每次真实请求都计一次调用，任务只计终态一次。
+- **口径**：累计聚合永不丢失；p50/p95 基于最近事件环形缓冲（`STORY2SCRIPT_METRICS_MAX_EVENTS`，默认 500）；分块转换的重试每次真实请求都计一次调用，缓存命中也计一次调用（`cached=true`、耗时 0，并计入各维度的 `cache_hits`）；任务只计终态一次。
 - **查看**：工作台「05 运行指标」面板一键刷新；`GET /api/metrics`（汇总）与 `GET /api/metrics/events`（明细）；MCP 工具 `get_metrics`。
 - **落盘（可选）**：设 `STORY2SCRIPT_METRICS_LOG=/path/metrics.jsonl` 后逐事件追加 JSONL，写失败静默停写不影响业务。
+
+## 响应缓存
+
+进程级 LLM 响应缓存（`story2script/llm_cache.py`）：相同请求（模型 + 温度 + 提示词）确定性重放，复评未改动的场景、重建知识库、重跑演示不再重复计费。
+
+- **两层结构**：线程安全 LRU（`STORY2SCRIPT_LLM_CACHE_MAX_ENTRIES`，默认 256）+ 可选磁盘层（`STORY2SCRIPT_LLM_CACHE_DIR`，跨进程复用，写失败静默降级）；`STORY2SCRIPT_LLM_CACHE_DISABLE=1` 一键关闭。
+- **embedding 逐文本缓存**：重建知识库时只把新增文本发给服务商。
+- **语义边界**（缓存 = 确定性重放，两类调用刻意绕过）：场景重写（"重新生成"就是要不同结果，读写全跳过）；分块转换的重试路径（HTTP 200 但内容无效的响应若被复用，重试会空转）。
+- 失败响应永不入缓存；命中情况在「运行指标」面板与 `/api/metrics` 的 `cache_hits` 可见。
+
+## 任务队列
+
+转换与 Agent 任务从纯内存线程池升级为 **SQLite 持久化队列**（`story2script/job_store.py`，零新依赖）：
+
+- **落盘 + 内存镜像**：任务体（请求/结果 JSON）写入 `STORY2SCRIPT_JOBS_DB`（默认 `.story2script/jobs.db`，WAL 模式）；高频轮询的 `snapshot` 只读内存镜像。
+- **重启恢复**：进程重启后，执行中的任务自动重新排队（累计 3 次中断则判失败），排队中的任务继续执行，历史任务仍可查询——转换到一半 kill 进程，重启后任务自己跑完。
+- **取消与历史**：`POST …/{job_id}/cancel` 取消排队中的任务（落为 `failed` / 已取消，不扩散状态枚举）；`GET /api/jobs` 查看两类任务的合并历史。
+- **迁移路径**：存储接口（create/snapshot/cancel/list + JSON 任务体）与 Redis/RQ 语义对齐——单机工作台场景用 SQLite 换来同样的持久化语义，规模化时替换该层实现即可，业务管线与路由零改动。
+- 环境变量：`STORY2SCRIPT_JOBS_DB`、`STORY2SCRIPT_JOBS_WORKERS`（每类任务的工作线程数，默认 2）。
 
 ## MCP 服务
 
