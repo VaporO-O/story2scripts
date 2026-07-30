@@ -32,6 +32,8 @@ from .llm_client import _load_env_file
 from .metrics import metrics
 from .novel_import import MAX_IMPORT_BYTES, import_novel_content
 from .parser import parse_chapters
+from .rag import StoryKnowledgeBase, build_story_knowledge
+from .story_state import extract_global_story_state
 from .scene_review import (
     HumanVerdict,
     ReviewReport,
@@ -59,6 +61,7 @@ class StoredNovel:
     novel_text: str
     title: str = ""
     file_type: str = ""
+    knowledge: StoryKnowledgeBase | None = None
 
 
 @dataclass
@@ -590,11 +593,13 @@ async def run_adaptation_agent(
     threshold: float | None = None,
     max_steps: int | None = None,
     save_session: bool = False,
+    novel_id: str = "",
     ctx: Context | None = None,
 ) -> dict:
     """让自主改编代理接管剧本：自主规划审校/重写/复评，直到达标或预算耗尽。
 
     goal 用自然语言描述目标（默认"让全部场景通过机审"）；执行期间该剧本被锁定。
+    传 novel_id 时代理可用 search_story_context 工具检索小说前文（RAG）。
     返回决策轨迹摘要与前后分数对比；save_session 时持久化会话（可用
     load_agent_session 恢复）。
     """
@@ -603,6 +608,7 @@ async def run_adaptation_agent(
     progress_notes: list[tuple[int, int, str]] = []
     finished = threading.Event()
     box: dict = {}
+    novel = workspace.get_novel(novel_id) if novel_id else None
 
     def progress_cb(step: int, max_steps_total: int, note: str) -> None:
         with progress_lock:
@@ -615,11 +621,17 @@ async def run_adaptation_agent(
 
         def _work() -> None:
             try:
+                knowledge = None
+                if novel is not None:
+                    if novel.knowledge is None:
+                        novel.knowledge = _build_novel_knowledge(novel, mode)
+                    knowledge = novel.knowledge
                 box["outcome"] = agent.run(
                     screenplay,
                     goal=goal,
                     progress_cb=progress_cb,
                     session_store=session_store,
+                    knowledge=knowledge,
                 )
             except BaseException as exc:  # noqa: BLE001 - 错误经 box 转回事件循环
                 box["error"] = exc
@@ -671,6 +683,52 @@ def load_agent_session(session_id: str) -> dict:
         }
     )
     return summary
+
+
+def _build_novel_knowledge(novel: StoredNovel, mode: str) -> StoryKnowledgeBase:
+    chapters = parse_chapters(novel.novel_text)
+    return build_story_knowledge(
+        chapters, extract_global_story_state(chapters), mode=mode
+    )
+
+
+@mcp.tool()
+async def build_novel_knowledge(novel_id: str, mode: str = "demo") -> dict:
+    """为已导入的小说构建（或重建）RAG 前文知识库，返回文档统计与检索器类型。
+
+    mode=ai 且配置了 AI_EMBED_MODEL 时用语义（embedding）检索，否则用本地词法检索。
+    """
+    novel = workspace.get_novel(novel_id)
+
+    def _work() -> StoryKnowledgeBase:
+        return _build_novel_knowledge(novel, mode)
+
+    knowledge = await anyio.to_thread.run_sync(_work)
+    novel.knowledge = knowledge
+    return {"novel_id": novel_id, **knowledge.stats()}
+
+
+@mcp.tool()
+async def search_novel_knowledge(
+    novel_id: str,
+    query: str,
+    top_k: int | None = None,
+    before_chapter: int | None = None,
+) -> dict:
+    """在小说前文知识库中检索相关片段/人物/地点/时间线（未建库时先自动构建）。
+
+    before_chapter=N 时只返回第 N 章之前的片段与时间线（防未来剧情泄漏）。
+    """
+    novel = workspace.get_novel(novel_id)
+
+    def _work() -> tuple[str, list[dict]]:
+        if novel.knowledge is None:
+            novel.knowledge = _build_novel_knowledge(novel, "demo")
+        hits = novel.knowledge.search(query, top_k=top_k, before_chapter=before_chapter)
+        return novel.knowledge.retriever_kind, hits
+
+    retriever, hits = await anyio.to_thread.run_sync(_work)
+    return {"novel_id": novel_id, "retriever": retriever, "hits": hits}
 
 
 @mcp.resource("screenplay://schema")

@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from ..rag import StoryKnowledgeBase
 from ..scene_review import ReviewReport, review_scenes_report
 from ..scene_rewrite import OPERATION_MESSAGES
 from ..scene_rewrite import rewrite_scene as perform_scene_rewrite
@@ -30,6 +31,7 @@ class AgentContext:
     threshold: float = 7.0
     report: ReviewReport | None = None
     initial_summary: dict = field(default_factory=dict)
+    knowledge: StoryKnowledgeBase | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,13 @@ def _tool_compare(ctx: AgentContext) -> dict:
     return {"initial": ctx.initial_summary, "current": current}
 
 
+def _tool_search_story(ctx: AgentContext, query: str, top_k: int | None = None) -> dict:
+    if ctx.knowledge is None:
+        return {"error": "本次运行没有提供小说前文知识库。"}
+    hits = ctx.knowledge.search(query, top_k=top_k)
+    return {"retriever": ctx.knowledge.retriever_kind, "hits": hits}
+
+
 def build_toolbox(ctx: AgentContext) -> "AgentToolbox":
     tools = [
         AgentTool(
@@ -182,6 +191,19 @@ def build_toolbox(ctx: AgentContext) -> "AgentToolbox":
             handler=lambda ctx, summary="": {"summary": summary},
         ),
     ]
+    if ctx.knowledge is not None:
+        tools.insert(
+            len(tools) - 1,
+            AgentTool(
+                name="search_story_context",
+                description=(
+                    "在小说前文知识库中语义检索相关片段/人物/地点/时间线，"
+                    "用于重写前确认剧情连续性与人物设定。"
+                ),
+                params_schema={"query": "必填，检索问题或关键词", "top_k": "可选，返回条数"},
+                handler=_tool_search_story,
+            ),
+        )
     return AgentToolbox(ctx, tools)
 
 

@@ -8,3 +8,4 @@ __pycache__/
 .venv/
 .env
 show/
+study1xi.pytest-tmp/

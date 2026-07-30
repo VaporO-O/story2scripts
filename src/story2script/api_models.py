@@ -175,6 +175,7 @@ class AgentRunRequest(BaseModel):
     threshold: float | None = None
     max_steps: int | None = None
     save_session: bool = False
+    novel_text: str = ""
 
 
 class AgentRunResponse(BaseModel):
@@ -227,4 +228,18 @@ class MetricsSummaryResponse(BaseModel):
 
 class MetricsEventsResponse(BaseModel):
     events: list[dict]
+
+
+class RagQueryRequest(BaseModel):
+    novel_text: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+    mode: str = "demo"
+    top_k: int | None = None
+    before_chapter: int | None = None
+
+
+class RagQueryResponse(BaseModel):
+    retriever: str
+    stats: dict
+    hits: list[dict]
 

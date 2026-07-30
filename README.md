@@ -108,6 +108,9 @@ AI_MAX_TOKENS=8192
 AI_MAX_CONCURRENCY=4
 AI_REVIEW_THRESHOLD=7.0
 AI_REVIEW_MAX_ROUNDS=2
+AI_EMBED_MODEL=your-embedding-model
+AI_EMBED_BATCH_SIZE=16
+RAG_TOP_K=3
 ```
 
 说明：
@@ -117,6 +120,7 @@ AI_REVIEW_MAX_ROUNDS=2
 - `AI_MAX_TOKENS` 可选；当模型输出被截断时可以调高，例如 `16384`。
 - `AI_MAX_CONCURRENCY` 控制分块转换与审校的并发请求数，默认 `4`。
 - `AI_REVIEW_THRESHOLD` / `AI_REVIEW_MAX_ROUNDS` 控制机审及格线（0-10）与自动修正轮次上限。
+- `AI_EMBED_MODEL` 可选；配置后 RAG 前文检索使用语义 embedding，否则用本地词法检索。
 - 没有 API Key 时继续使用本地模式即可演示。
 
 AI 全文转换流程：
@@ -158,6 +162,7 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 | `GET /api/agent/sessions/{session_id}` | 读取会话详情（剧本 YAML + 轨迹 + 报告） |
 | `GET /api/metrics` | 运行指标汇总（LLM 成功率/延迟/Token、任务成败） |
 | `GET /api/metrics/events?limit=50` | 最近的指标事件明细 |
+| `POST /api/rag/query` | 在小说前文知识库中检索相关片段/人物/地点/时间线 |
 
 ## 改编 Agent
 
@@ -169,9 +174,10 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 │   {"thought": "...",                     │
 │    "action": {"tool": "...", "params"}}  │
 │         ↓ 注册表校验                      │
-│ 工具执行 AgentToolbox（6 个工具）         │
+│ 工具执行 AgentToolbox（6+1 个工具）       │
 │   review / list_failing / get_scene      │
 │   rewrite / compare_scores / finish      │
+│   search_story_context（有知识库时注册） │
 │         ↓ 紧凑观察值                      │
 │ 记录 AgentStep → Scratchpad（短期记忆）   │
 │         ↺ 直到 finish / 达标 / 步数上限   │
@@ -189,7 +195,18 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 
 环境变量：`AGENT_MAX_STEPS`（单次运行步数上限，默认 12）、`AGENT_SESSION_DIR`（会话存储目录）；质量阈值复用 `AI_REVIEW_THRESHOLD`。
 
-REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session}`，轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。Web 工作台的「04 改编 Agent」面板封装了同一流程：目标输入、实时进度条、决策轨迹时间线、前后分数对比与历史会话载入。
+REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session, novel_text}`（带 `novel_text` 时代理获得 `search_story_context` 前文检索工具），轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。Web 工作台的「04 改编 Agent」面板封装了同一流程：目标输入、实时进度条、决策轨迹时间线、前后分数对比与历史会话载入。
+
+## RAG 前文检索
+
+长篇转换的痛点是"每个分块都要携带全量跨章上下文"：此前 timeline 随章节数线性膨胀。现在项目把**章节分块 + 全局事实（人物/地点/时间线）**建成可检索的故事知识库（`story2script/rag.py`）：
+
+- **AI 转换集成**：转换第 N 章片段时，用片段文本检索 top-k（`RAG_TOP_K`，默认 3）相关前文，以「相关前文备忘」注入提示词；固定上下文只保留人物表与地点名单。跨章上下文成本从 O(章节数) 降到 O(top_k)。
+- **防未来泄漏**：检索第 N 章时严格排除第 N 章及之后的片段与时间线事件，人物/地点等全局事实不受影响。
+- **双检索器**：默认本地词法检索（字符 bigram TF-IDF + 余弦，零依赖、确定性、离线可演示）；配置 `AI_EMBED_MODEL` 后自动切换语义检索（OpenAI-compatible `/embeddings`，批量建库，调用计入 "AI embeddings" 指标维度），embedding 不可用时静默降级词法，主链路永不因 RAG 中断。
+- **Agent 集成**：运行改编 Agent 时提供小说原文（REST `novel_text` / MCP `novel_id`），planner 即可用 `search_story_context` 工具在重写前核对剧情连续性与人物设定。
+- **独立查询**：REST `POST /api/rag/query`（`{novel_text, query, mode, top_k, before_chapter}`）与 MCP 工具 `build_novel_knowledge` / `search_novel_knowledge`。
+- 环境变量：`AI_EMBED_MODEL`、`AI_EMBED_BATCH_SIZE`（默认 16）、`RAG_TOP_K`（默认 3）、`RAG_CHUNK_CHARS`（索引分块长度，默认 600）。
 
 ## 可观测性
 
@@ -251,9 +268,10 @@ claude mcp add story2script -- python -m story2script.mcp_server --env-file D:/s
 | `load_screenplay` / `get_screenplay_yaml` / `save_screenplay` | YAML 载入 / 导出 / 落盘（可旁写审校报告） |
 | `validate_yaml` | 校验剧本 YAML |
 | `extract_character_profiles` | 提取人物小传（demo/ai） |
-| `run_adaptation_agent` | 自主改编代理接管剧本：自主规划审校/重写/复评并返回决策轨迹 |
+| `run_adaptation_agent` | 自主改编代理接管剧本：自主规划审校/重写/复评并返回决策轨迹（传 `novel_id` 可启用前文检索工具） |
 | `load_agent_session` | 恢复已持久化的 Agent 会话到工作区 |
 | `get_metrics` | 运行指标：LLM 成功率/延迟/Token 消耗与任务统计 |
+| `build_novel_knowledge` / `search_novel_knowledge` | 构建 / 查询小说 RAG 前文知识库 |
 
 另有资源 `screenplay://schema` 提供剧本 JSON Schema 全文。示例小说依赖仓库内 `examples/` 目录，请以源码方式（`pip install -e .` 或设置 `PYTHONPATH=src`）运行服务。
 

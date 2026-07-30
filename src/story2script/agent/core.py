@@ -73,10 +73,13 @@ class AdaptationAgent:
         goal: str = "",
         progress_cb=None,
         session_store: AgentSessionStore | None = None,
+        knowledge=None,
     ) -> AgentRunOutcome:
         run_started = time.perf_counter()
         try:
-            return self._run_loop(screenplay, goal, progress_cb, session_store, run_started)
+            return self._run_loop(
+                screenplay, goal, progress_cb, session_store, run_started, knowledge
+            )
         except ValueError as exc:
             metrics.record_task(
                 "agent_run",
@@ -95,6 +98,7 @@ class AdaptationAgent:
         progress_cb,
         session_store: AgentSessionStore | None,
         run_started: float,
+        knowledge=None,
     ) -> AgentRunOutcome:
         self._llm_calls = 0
         self._demo_attempted = set()
@@ -105,6 +109,7 @@ class AdaptationAgent:
             mode=self.mode,
             client=self.client,
             threshold=self.threshold,
+            knowledge=knowledge,
         )
         toolbox = build_toolbox(ctx)
         ctx.report = review_scenes_report(

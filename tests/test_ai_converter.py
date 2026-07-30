@@ -399,3 +399,47 @@ def test_ai_converter_rejects_when_no_scenes(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(ValueError, match="没有返回任何有效场景"):
         converter.convert(NOVEL_CHAPTERS, adaptation_type="短剧")
+
+
+def test_compact_global_state_no_longer_carries_full_timeline() -> None:
+    from story2script.converter import _compact_global_state
+    from story2script.story_state import extract_global_story_state
+
+    compact = _compact_global_state(extract_global_story_state(NOVEL_CHAPTERS))
+
+    assert set(compact.keys()) == {"locations"}
+
+
+def test_chunk_prompt_includes_retrieved_memo_without_future_leak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        content = payload["messages"][0]["content"]
+        # 只抓片段转换请求，忽略并发的人物小传请求。
+        if "本章片段原文" in content:
+            prompts.append(content)
+        return chapter_response([scene_dict()])
+
+    configure_ai(monkeypatch)
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    converter.convert(NOVEL_CHAPTERS)
+
+    assert prompts
+    assert all("相关前文备忘" in prompt for prompt in prompts)
+    assert all('"timeline"' not in prompt for prompt in prompts)
+
+    first_prompt = next(prompt for prompt in prompts if "本章标题：第一章 开场" in prompt)
+    memo_line = next(
+        line for line in first_prompt.splitlines() if line.startswith("相关前文备忘")
+    )
+    assert memo_line.endswith("[]")
+
+    second_prompt = next(prompt for prompt in prompts if "本章标题：第二章 线索" in prompt)
+    memo_line = next(
+        line for line in second_prompt.splitlines() if line.startswith("相关前文备忘")
+    )
+    assert "第一章 开场" in memo_line
+    assert "回头看了一眼" not in memo_line  # 第三章内容不得泄漏进第二章的备忘

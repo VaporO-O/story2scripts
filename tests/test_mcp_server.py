@@ -9,6 +9,7 @@ import story2script.conversion_jobs as jobs_module
 import story2script.mcp_server as mcp_server
 from story2script.converter import DemoConverter
 from story2script.mcp_server import (
+    build_novel_knowledge,
     convert_novel,
     extract_character_profiles,
     get_example_novel,
@@ -27,6 +28,7 @@ from story2script.mcp_server import (
     rewrite_scene,
     run_adaptation_agent,
     save_screenplay,
+    search_novel_knowledge,
     validate_yaml,
     workspace,
 )
@@ -55,6 +57,8 @@ EXPECTED_TOOLS = {
     "run_adaptation_agent",
     "load_agent_session",
     "get_metrics",
+    "build_novel_knowledge",
+    "search_novel_knowledge",
 }
 
 
@@ -504,3 +508,33 @@ async def test_get_metrics_tool_reports_task_stats():
     assert summary["tasks"]["convert"]["success_rate"] == 1.0
     assert summary["llm"] == {}
     assert summary["generated_at"]
+
+
+@pytest.mark.anyio
+async def test_novel_knowledge_build_and_search():
+    novel_id = workspace.add_novel(NOVEL)
+
+    stats = await build_novel_knowledge(novel_id)
+    assert stats["novel_id"] == novel_id
+    assert stats["retriever"] == "lexical"
+    assert stats["doc_count"] > 0
+    assert workspace.get_novel(novel_id).knowledge is not None
+
+    result = await search_novel_knowledge(novel_id, "林夏", top_k=2)
+    assert result["retriever"] == "lexical"
+    assert result["hits"]
+    assert all("snippet" in hit for hit in result["hits"])
+
+    with pytest.raises(ValueError, match="小说不存在"):
+        await search_novel_knowledge("novel-404", "任意")
+
+
+@pytest.mark.anyio
+async def test_search_novel_knowledge_auto_builds_index():
+    novel_id = workspace.add_novel(NOVEL)
+    assert workspace.get_novel(novel_id).knowledge is None
+
+    result = await search_novel_knowledge(novel_id, "太阳升起", before_chapter=3)
+
+    assert workspace.get_novel(novel_id).knowledge is not None
+    assert all(hit["chapter"] != "第三章 结局" for hit in result["hits"])

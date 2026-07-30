@@ -12,6 +12,7 @@ from .metrics import metrics
 DOTENV_FILENAME = ".env"
 DOTENV_DISABLE_ENV = "STORY2SCRIPT_DISABLE_DOTENV"
 DOTENV_DISABLED_VALUES = {"1", "true", "yes", "on"}
+EMBEDDINGS_METRICS_LABEL = "AI embeddings"
 
 
 def _default_env_path() -> Path:
@@ -179,6 +180,19 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} requires integer AI_MAX_CONCURRENCY.") from exc
         return max(1, value)
 
+    @property
+    def embed_model(self) -> str:
+        return self._config_value("AI_EMBED_MODEL")
+
+    @property
+    def embed_batch_size(self) -> int:
+        raw_value = self._config_value("AI_EMBED_BATCH_SIZE", "16")
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{self.usage_label} requires integer AI_EMBED_BATCH_SIZE.") from exc
+        return max(1, value)
+
     def complete_json(self, prompt: str, temperature: float = 0.3) -> str:
         """Return the model's JSON text response for a single user prompt."""
         self._ensure_configured()
@@ -274,6 +288,106 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} requires AI_BASE_URL.")
         if not self.model:
             raise ValueError(f"{self.usage_label} requires AI_MODEL.")
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Batch-embed texts via the OpenAI-compatible ``/embeddings`` endpoint.
+
+        Calls are recorded in metrics under the fixed "AI embeddings" label so
+        embedding cost stays a separate dimension from chat completions.
+        """
+        self._ensure_embed_configured()
+        if not texts:
+            return []
+        vectors: list[list[float]] = []
+        batch_size = self.embed_batch_size
+        for start in range(0, len(texts), batch_size):
+            vectors.extend(self._embed_batch(texts[start : start + batch_size]))
+        return vectors
+
+    def _embed_batch(self, batch: list[str]) -> list[list[float]]:
+        started = time.perf_counter()
+        error_kind = ""
+        usage: dict = {}
+        prompt_chars = sum(len(text) for text in batch)
+        try:
+            try:
+                response = self.client.post(
+                    f"{self.base_url}/embeddings",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={"model": self.embed_model, "input": batch},
+                )
+                response.raise_for_status()
+            except httpx.TimeoutException as exc:
+                error_kind = "timeout"
+                raise ValueError(f"{self.usage_label} embeddings request timed out.") from exc
+            except httpx.RequestError as exc:
+                error_kind = "network"
+                raise ValueError(f"{self.usage_label} embeddings network error: {exc}") from exc
+            except httpx.HTTPStatusError as exc:
+                error_kind = "http_status"
+                status_code = exc.response.status_code
+                raise ValueError(
+                    f"{self.usage_label} embeddings request failed with HTTP {status_code}."
+                ) from exc
+
+            try:
+                payload = response.json()
+            except json.JSONDecodeError as exc:
+                error_kind = "invalid_json"
+                raise ValueError(
+                    f"{self.usage_label} embeddings returned invalid JSON response."
+                ) from exc
+
+            raw_usage = payload.get("usage") if isinstance(payload, dict) else None
+            usage = raw_usage if isinstance(raw_usage, dict) else {}
+
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data, list) or len(data) != len(batch):
+                error_kind = "malformed"
+                raise ValueError(f"{self.usage_label} embeddings returned malformed response.")
+            vectors: list[list[float] | None] = [None] * len(batch)
+            for position, item in enumerate(data):
+                embedding = item.get("embedding") if isinstance(item, dict) else None
+                if not isinstance(embedding, list) or not embedding:
+                    error_kind = "malformed"
+                    raise ValueError(
+                        f"{self.usage_label} embeddings returned malformed response."
+                    )
+                index = item.get("index")
+                slot = index if isinstance(index, int) and 0 <= index < len(batch) else position
+                vectors[slot] = [float(value) for value in embedding]
+            if any(vector is None for vector in vectors):
+                error_kind = "malformed"
+                raise ValueError(f"{self.usage_label} embeddings returned malformed response.")
+        except ValueError:
+            metrics.record_llm_call(
+                label=EMBEDDINGS_METRICS_LABEL,
+                model=self.embed_model,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                ok=False,
+                error_kind=error_kind or "unknown",
+                prompt_chars=prompt_chars,
+            )
+            raise
+
+        metrics.record_llm_call(
+            label=EMBEDDINGS_METRICS_LABEL,
+            model=self.embed_model,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            ok=True,
+            prompt_tokens=usage.get("prompt_tokens") or 0,
+            completion_tokens=usage.get("completion_tokens") or 0,
+            prompt_chars=prompt_chars,
+        )
+        return [vector for vector in vectors if vector is not None]
+
+    def _ensure_embed_configured(self) -> None:
+        if not self.api_key:
+            raise ValueError(f"{self.usage_label} requires AI_API_KEY.")
+        if not self.base_url:
+            raise ValueError(f"{self.usage_label} requires AI_BASE_URL.")
+        if not self.embed_model:
+            raise ValueError(f"{self.usage_label} requires AI_EMBED_MODEL.")
 
     def _config_value(self, name: str, default: str = "") -> str:
         env_value = os.getenv(name)
