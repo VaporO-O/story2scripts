@@ -7,6 +7,7 @@ from .job_store import DurableJobStore
 from .metrics import metrics
 from .parser import parse_chapters
 from .rag import build_story_knowledge
+from .security import screen_agent_goal
 from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml, screenplay_to_yaml
 
@@ -28,6 +29,9 @@ class AgentJobStore(DurableJobStore):
         request = self._request_for(job_id)
         reached_run = False
         try:
+            self._update(job_id, progress=5, stage="安全检查")
+            screen_agent_goal(request.goal)
+
             self._update(job_id, progress=10, stage="解析剧本")
             try:
                 screenplay = screenplay_from_yaml(request.yaml_text)

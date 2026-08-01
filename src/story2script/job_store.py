@@ -23,6 +23,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from .security import redact_secrets
+
 JOBS_DB_ENV = "STORY2SCRIPT_JOBS_DB"
 JOBS_WORKERS_ENV = "STORY2SCRIPT_JOBS_WORKERS"
 DEFAULT_DB_DIRNAME = ".story2script"
@@ -283,13 +285,15 @@ class DurableJobStore:
         return "任务完成。"
 
     def _fail(self, job_id: str, error: str) -> None:
+        # 单点脱敏：两类任务的 DB error 列、API error 字段与前端展示都经由这里。
+        safe_error = redact_secrets(error)
         with self._lock:
             row = self._rows[job_id]
             row.update(
                 status="failed",
                 stage=self.fail_stage,
-                message=error,
-                error=error,
+                message=safe_error,
+                error=safe_error,
                 updated_at=_now_iso(),
             )
             self._persist(row)

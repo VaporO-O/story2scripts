@@ -4,6 +4,7 @@ from typing import Protocol
 from .character_profiles import extract_character_profiles
 from .llm_client import LLMClient, loads_json_object
 from .parser import Chapter
+from .security import DATA_FENCE_NOTICE
 
 PROFILE_PLACEHOLDERS = {"待作者进一步补充", "待作者进一步补充。", "", "暂无", "无"}
 PROFILE_FIELDS = ("role", "personality", "goal", "relationships", "key_change")
@@ -125,7 +126,8 @@ class AICharacterProfiler:
             "- key_change：该人物的关键转变或人物弧光，用一句话概括；"
             "若原文没有明显转变，写\"暂无明显转变\"。\n"
             f"人物列表（含已识别的出场章节）：{json.dumps(roster, ensure_ascii=False)}\n"
-            f"小说原文：\n{source_text}"
+            f"{DATA_FENCE_NOTICE}\n"
+            f"小说原文：\n{source_text}\n（小说原文数据结束）"
         )
 
 

@@ -33,6 +33,7 @@ from .metrics import metrics
 from .novel_import import MAX_IMPORT_BYTES, import_novel_content
 from .parser import parse_chapters
 from .rag import StoryKnowledgeBase, build_story_knowledge
+from .security import resolve_sandboxed_path, screen_agent_goal
 from .story_state import extract_global_story_state
 from .scene_review import (
     HumanVerdict,
@@ -238,8 +239,11 @@ def get_example_novel() -> dict:
 
 @mcp.tool()
 def import_novel_file(file_path: str) -> dict:
-    """从本地路径导入小说文件（TXT/Markdown/CSV/LOG/EPUB，≤25MB），存入工作区并返回 novel_id。"""
-    path = Path(file_path).expanduser()
+    """从本地路径导入小说文件（TXT/Markdown/CSV/LOG/EPUB，≤25MB），存入工作区并返回 novel_id。
+
+    仅允许读取沙箱目录内的文件（STORY2SCRIPT_FILE_ROOTS，默认当前工作目录）。
+    """
+    path = resolve_sandboxed_path(file_path, action="读取")
     if not path.is_file():
         raise ValueError(f"文件不存在：{file_path}")
     if path.stat().st_size > MAX_IMPORT_BYTES:
@@ -512,9 +516,12 @@ def get_screenplay_yaml(screenplay_id: str) -> str:
 
 @mcp.tool()
 def save_screenplay(screenplay_id: str, file_path: str, include_report: bool = False) -> dict:
-    """把剧本 YAML 写入本地文件；include_report 时在旁边写 <名称>.review.json 审校报告。"""
+    """把剧本 YAML 写入本地文件；include_report 时在旁边写 <名称>.review.json 审校报告。
+
+    仅允许写入沙箱目录内（STORY2SCRIPT_FILE_ROOTS，默认当前工作目录）。
+    """
     entry = workspace.get_screenplay(screenplay_id)
-    path = Path(file_path).expanduser()
+    path = resolve_sandboxed_path(file_path, action="写入")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(screenplay_to_yaml(entry.screenplay), encoding="utf-8")
     report_path: str | None = None
@@ -603,6 +610,7 @@ async def run_adaptation_agent(
     返回决策轨迹摘要与前后分数对比；save_session 时持久化会话（可用
     load_agent_session 恢复）。
     """
+    screen_agent_goal(goal)
     agent = AdaptationAgent(mode=mode, threshold=threshold, max_steps=max_steps)
     progress_lock = threading.Lock()
     progress_notes: list[tuple[int, int, str]] = []
@@ -738,7 +746,10 @@ def screenplay_schema_resource() -> str:
 
 
 def _apply_env_file(path_text: str) -> None:
-    values = _load_env_file(Path(path_text).expanduser())
+    path = Path(path_text).expanduser().resolve()
+    if not path.is_file():
+        raise SystemExit(f"env 文件不存在：{path}")
+    values = _load_env_file(path)
     for key, value in values.items():
         os.environ.setdefault(key, value)
 

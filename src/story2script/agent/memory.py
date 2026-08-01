@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from ..scene_review import ReviewReport
 from ..screenplay import Screenplay
+from ..security import validate_session_id
 from ..yaml_export import screenplay_from_yaml, screenplay_to_yaml
 from .models import AgentRunResult, AgentStep
 
@@ -113,6 +114,8 @@ class AgentSessionStore:
         return session_id
 
     def load(self, session_id: str) -> dict:
+        # 会话 ID 直接拼进文件路径，先校验格式，防止 ../ 路径穿越读取任意文件。
+        validate_session_id(session_id)
         path = self._path(session_id)
         if not path.is_file():
             raise ValueError(f"会话不存在：{session_id}")
