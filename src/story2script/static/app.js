@@ -57,6 +57,24 @@ const agentEmptyState = document.querySelector("#agentEmptyState");
 const agentSummary = document.querySelector("#agentSummary");
 const agentTrace = document.querySelector("#agentTrace");
 const agentSessions = document.querySelector("#agentSessions");
+const teamGoalInput = document.querySelector("#teamGoalInput");
+const teamModeInput = document.querySelector("#teamModeInput");
+const teamThresholdInput = document.querySelector("#teamThresholdInput");
+const teamMaxRoundsInput = document.querySelector("#teamMaxRoundsInput");
+const teamSaveSessionInput = document.querySelector("#teamSaveSessionInput");
+const runTeamButton = document.querySelector("#runTeamButton");
+const listTeamSessionsButton = document.querySelector("#listTeamSessionsButton");
+const teamProgress = document.querySelector("#teamProgress");
+const teamProgressStage = document.querySelector("#teamProgressStage");
+const teamProgressPercent = document.querySelector("#teamProgressPercent");
+const teamProgressBar = document.querySelector("#teamProgressBar");
+const teamProgressMessage = document.querySelector("#teamProgressMessage");
+const teamEmptyState = document.querySelector("#teamEmptyState");
+const teamSummary = document.querySelector("#teamSummary");
+const teamFindings = document.querySelector("#teamFindings");
+const teamTrace = document.querySelector("#teamTrace");
+const teamMessages = document.querySelector("#teamMessages");
+const teamSessions = document.querySelector("#teamSessions");
 const refreshMetricsButton = document.querySelector("#refreshMetricsButton");
 const metricsEmptyState = document.querySelector("#metricsEmptyState");
 const metricsContent = document.querySelector("#metricsContent");
@@ -899,6 +917,15 @@ const AGENT_STATUS_LABELS = {
   failed: "已失败",
 };
 
+const ROLE_LABELS = {
+  supervisor: "主管",
+  reviewer: "审校",
+  continuity: "一致性",
+  adapter: "改编",
+};
+
+const SEVERITY_LABELS = { high: "严重", medium: "中等", low: "轻微" };
+
 function setAgentProgress(snapshot, isError = false) {
   const progress = Math.max(0, Math.min(100, snapshot.progress || 0));
   agentProgress.classList.remove("hidden");
@@ -959,14 +986,24 @@ function renderAgentSummary(result) {
   }
 }
 
-function renderAgentTrace(trace) {
-  agentTrace.classList.remove("hidden");
-  agentTrace.innerHTML = "";
+// container 参数让多智能体面板复用同一套步骤渲染；step.role 存在时额外标注角色。
+function renderAgentTrace(trace, container = agentTrace) {
+  container.classList.remove("hidden");
+  container.innerHTML = "";
   (trace || []).forEach((step) => {
-    const item = createElement("li", `agent-step${step.error ? " agent-step-error" : ""}`);
+    const roleClass = step.role ? ` agent-step-role-${step.role}` : "";
+    const item = createElement(
+      "li",
+      `agent-step${step.error ? " agent-step-error" : ""}${roleClass}`,
+    );
     const head = createElement("div", "agent-step-head");
+    head.append(createElement("span", "agent-step-no", `第 ${step.step} 步`));
+    if (step.role) {
+      head.appendChild(
+        createElement("span", "agent-step-role", ROLE_LABELS[step.role] || step.role),
+      );
+    }
     head.append(
-      createElement("span", "agent-step-no", `第 ${step.step} 步`),
       createElement(
         "span",
         "agent-step-action",
@@ -1149,11 +1186,273 @@ async function listAgentSessions() {
   }
 }
 
+function setTeamProgress(snapshot, isError = false) {
+  const progress = Math.max(0, Math.min(100, snapshot.progress || 0));
+  teamProgress.classList.remove("hidden");
+  teamProgress.classList.toggle("is-error", isError || snapshot.status === "failed");
+  teamProgressStage.textContent = snapshot.stage || "协作中";
+  teamProgressPercent.textContent = `${progress}%`;
+  teamProgressBar.style.width = `${progress}%`;
+  teamProgressMessage.textContent = snapshot.message || snapshot.error || "协作任务正在处理。";
+}
+
+function resetTeamProgress() {
+  setTeamProgress({
+    status: "queued",
+    progress: 0,
+    stage: "等待执行",
+    message: "协作任务已准备启动。",
+  });
+}
+
+function renderTeamSummary(result) {
+  teamEmptyState.classList.add("hidden");
+  teamSummary.classList.remove("hidden");
+  teamSummary.innerHTML = "";
+
+  const heading = createElement("div", "agent-summary-heading");
+  heading.append(
+    createElement(
+      "span",
+      `agent-status agent-status-${result.status}`,
+      AGENT_STATUS_LABELS[result.status] || result.status,
+    ),
+    createElement("span", "agent-goal-text", result.goal || "（未指定协作目标）"),
+  );
+  teamSummary.appendChild(heading);
+
+  const initial = result.initial_summary || {};
+  const final = result.final_summary || {};
+  const continuity = result.continuity_summary || {};
+  const metrics = createElement("div", "agent-metrics");
+  metrics.append(
+    agentMetric("均分", `${initial.avg_score ?? "-"} → ${final.avg_score ?? "-"}`),
+    agentMetric("通过场景", `${final.pass_count ?? 0} / ${final.scene_count ?? 0}`),
+    agentMetric("一致性问题", `${continuity.total ?? 0}（严重 ${continuity.high ?? 0}）`),
+    agentMetric("协作轮次", result.rounds_used),
+    agentMetric("参与角色", Object.keys(result.role_summaries || {}).length),
+  );
+  if (result.llm_calls) {
+    metrics.appendChild(agentMetric("LLM 调用", result.llm_calls));
+  }
+  if (result.session_id) {
+    metrics.appendChild(agentMetric("会话", result.session_id));
+  }
+  teamSummary.appendChild(metrics);
+
+  if (result.message) {
+    teamSummary.appendChild(createElement("p", "agent-summary-message", result.message));
+  }
+}
+
+function renderTeamFindings(findings) {
+  teamFindings.innerHTML = "";
+  if (!findings || !findings.length) {
+    teamFindings.classList.add("hidden");
+    return;
+  }
+  teamFindings.classList.remove("hidden");
+  teamFindings.appendChild(
+    createElement("h4", "metrics-section-title", `一致性问题（${findings.length}）`),
+  );
+  findings.forEach((finding) => {
+    const row = createElement("div", `team-finding team-finding-${finding.severity}`);
+    row.append(
+      createElement(
+        "span",
+        "team-finding-tag",
+        `${SEVERITY_LABELS[finding.severity] || finding.severity} · ${finding.kind}`,
+      ),
+      createElement(
+        "span",
+        "team-finding-detail",
+        `${finding.scene_id ? `${finding.scene_id}：` : ""}${finding.detail}`,
+      ),
+    );
+    if (finding.suggestion) {
+      row.appendChild(createElement("p", "team-finding-suggestion", finding.suggestion));
+    }
+    teamFindings.appendChild(row);
+  });
+}
+
+function renderTeamMessages(messages) {
+  teamMessages.innerHTML = "";
+  if (!messages || !messages.length) {
+    teamMessages.classList.add("hidden");
+    return;
+  }
+  teamMessages.classList.remove("hidden");
+  teamMessages.appendChild(
+    createElement("h4", "metrics-section-title", `协作消息流（${messages.length}）`),
+  );
+  messages.forEach((message) => {
+    const row = createElement("div", `team-message team-message-${message.kind}`);
+    row.append(
+      createElement(
+        "span",
+        "team-message-route",
+        `${ROLE_LABELS[message.sender] || message.sender} → ${ROLE_LABELS[message.recipient] || message.recipient}`,
+      ),
+      createElement("span", "team-message-content", message.content),
+    );
+    teamMessages.appendChild(row);
+  });
+}
+
+function applyTeamRunResponse(data) {
+  const previousHuman = latestReviewReport ? latestReviewReport.human : {};
+  if (data.report) {
+    latestReviewReport = data.report;
+    latestReviewReport.human = { ...previousHuman, ...latestReviewReport.human };
+  }
+  showScreenplay(data.screenplay, data.yaml_text);
+  renderTeamSummary(data.result);
+  renderTeamFindings(data.continuity_findings);
+  renderAgentTrace(data.result.trace, teamTrace);
+  renderTeamMessages(data.result.messages);
+}
+
+function teamRunPayload() {
+  return {
+    yaml_text: yamlOutput.value,
+    goal: teamGoalInput.value.trim(),
+    mode: teamModeInput.value,
+    threshold: Number(teamThresholdInput.value) || null,
+    max_rounds: Number(teamMaxRoundsInput.value) || null,
+    save_session: teamSaveSessionInput.checked,
+    novel_text: novelInput.value.trim(),
+  };
+}
+
+async function startTeamRun() {
+  const response = await fetch("/api/agent/teams/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(teamRunPayload()),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "协作任务创建失败"));
+  }
+  setTeamProgress(data);
+  return data.job_id;
+}
+
+async function fetchTeamRun(jobId) {
+  const response = await fetch(`/api/agent/teams/runs/${jobId}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "协作进度查询失败"));
+  }
+  setTeamProgress(data);
+  return data;
+}
+
+async function waitForTeamRun(jobId) {
+  for (let attempt = 0; attempt < agentMaxPolls; attempt += 1) {
+    await sleep(agentPollIntervalMs);
+    const snapshot = await fetchTeamRun(jobId);
+    if (snapshot.status === "succeeded" || snapshot.status === "failed") {
+      return snapshot;
+    }
+  }
+
+  throw new Error("协作任务等待超时，请稍后重试。");
+}
+
+async function runTeam() {
+  if (!yamlOutput.value) {
+    setMessage("请先生成或输入 YAML 剧本。", true);
+    return;
+  }
+
+  runTeamButton.disabled = true;
+  teamSessions.classList.add("hidden");
+  resetTeamProgress();
+  setMessage("多智能体协作已启动，主管正在派单……");
+
+  try {
+    const jobId = await startTeamRun();
+    const snapshot = await waitForTeamRun(jobId);
+
+    if (snapshot.status === "failed") {
+      setTeamProgress(snapshot, true);
+      throw new Error(snapshot.error || snapshot.message || "协作失败");
+    }
+    if (!snapshot.result) {
+      throw new Error("协作任务完成但缺少结果。");
+    }
+
+    applyTeamRunResponse(snapshot.result);
+    const result = snapshot.result.result;
+    const continuity = result.continuity_summary || {};
+    setMessage(
+      `协作${AGENT_STATUS_LABELS[result.status] || result.status}：` +
+        `${result.rounds_used} 轮、${Object.keys(result.role_summaries || {}).length} 个角色参与，` +
+        `均分 ${result.initial_summary?.avg_score ?? "-"} → ${result.final_summary?.avg_score ?? "-"}，` +
+        `一致性问题 ${continuity.total ?? 0} 个。`,
+    );
+  } catch (error) {
+    setMessage(error.message, true);
+    teamProgress.classList.add("is-error");
+  } finally {
+    runTeamButton.disabled = false;
+  }
+}
+
+async function listTeamSessions() {
+  listTeamSessionsButton.disabled = true;
+  try {
+    const response = await fetch("/api/agent/teams/sessions");
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(errorMessage(data, "协作会话列表查询失败"));
+    }
+
+    teamSessions.classList.remove("hidden");
+    teamSessions.innerHTML = "";
+    if (!data.sessions.length) {
+      teamSessions.appendChild(
+        createElement(
+          "p",
+          "agent-sessions-empty",
+          "还没有已保存的协作会话；勾选“保存会话”后启动协作即可留档。",
+        ),
+      );
+      return;
+    }
+    data.sessions.forEach((session) => {
+      const row = createElement("div", "agent-session-row");
+      const info = createElement("div", "agent-session-info");
+      info.append(
+        createElement("strong", "agent-session-id", session.session_id),
+        createElement(
+          "span",
+          "agent-session-meta",
+          `${session.goal || "（无目标）"} · ${AGENT_STATUS_LABELS[session.status] || session.status} · ${session.saved_at}`,
+        ),
+      );
+      row.appendChild(info);
+      teamSessions.appendChild(row);
+    });
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    listTeamSessionsButton.disabled = false;
+  }
+}
+
 const TASK_KIND_LABELS = {
   convert: "全文转换",
   scene_review: "机审",
   scene_rewrite: "局部重写",
   agent_run: "Agent 运行",
+  team_run: "多智能体协作",
+  continuity_check: "一致性检查",
 };
 
 function formatSuccessRate(row) {
@@ -1255,6 +1554,8 @@ runReviewButton.addEventListener("click", runMachineReview);
 downloadReviewReportButton.addEventListener("click", downloadReviewReport);
 runAgentButton.addEventListener("click", runAgent);
 listAgentSessionsButton.addEventListener("click", listAgentSessions);
+runTeamButton.addEventListener("click", runTeam);
+listTeamSessionsButton.addEventListener("click", listTeamSessions);
 refreshMetricsButton.addEventListener("click", refreshMetrics);
 novelInput.addEventListener("input", updateChapterCount);
 

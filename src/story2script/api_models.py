@@ -7,6 +7,8 @@ from .screenplay import AdaptationType
 from .screenplay import GlobalStoryState
 from .screenplay import Screenplay
 from .agent.models import AgentRunResult
+from .agent.models import TeamRunResult
+from .continuity import ContinuityFinding
 from .scene_rewrite import SceneRewriteMode
 from .scene_rewrite import SceneRewriteOperation
 from .scene_review import HumanVerdict
@@ -206,6 +208,43 @@ class AgentJobStatusResponse(BaseModel):
 
 class AgentSessionListResponse(BaseModel):
     sessions: list[dict]
+
+
+class TeamRunRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+    goal: str = ""
+    mode: str = "demo"
+    threshold: float | None = None
+    max_rounds: int | None = None
+    max_steps_per_agent: int | None = None
+    save_session: bool = False
+    novel_text: str = ""
+
+
+class TeamRunResponse(BaseModel):
+    result: TeamRunResult
+    screenplay: Screenplay
+    yaml_text: str
+    report: ReviewReport | None = None
+    continuity_findings: list[ContinuityFinding] = []
+
+
+class TeamJobStartResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+
+
+class TeamJobStatusResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+    result: TeamRunResponse | None = None
+    error: str = ""
 
 
 class AgentSessionDetailResponse(BaseModel):

@@ -12,7 +12,7 @@ from ..scene_review import ReviewReport
 from ..screenplay import Screenplay
 from ..security import validate_session_id
 from ..yaml_export import screenplay_from_yaml, screenplay_to_yaml
-from .models import AgentRunResult, AgentStep
+from .models import AgentRunResult, AgentStep, TeamRunResult
 
 SESSION_DIR_ENV = "AGENT_SESSION_DIR"
 DEFAULT_SESSION_DIRNAME = ".agent_sessions"
@@ -131,11 +131,62 @@ class AgentSessionStore:
             "report": ReviewReport.model_validate(report) if report else None,
         }
 
+    # -------------------------------------------------- 多智能体协作会话（mag-*）
+
+    def save_team(
+        self,
+        result: TeamRunResult,
+        screenplay: Screenplay,
+        report: ReviewReport | None = None,
+    ) -> str:
+        """协作会话独立前缀，与单体运行（ag-*）分列存放。"""
+        session_id = f"mag-{uuid4().hex[:8]}"
+        payload = {
+            "session_id": session_id,
+            "saved_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "goal": result.goal,
+            "status": result.status,
+            "mode": result.mode,
+            "final_summary": result.final_summary,
+            "result": result.model_dump(mode="json"),
+            "yaml_text": screenplay_to_yaml(screenplay),
+            "report": report.model_dump(mode="json") if report is not None else None,
+        }
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self._path(session_id).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return session_id
+
+    def load_team(self, session_id: str) -> dict:
+        validate_session_id(session_id)
+        path = self._path(session_id)
+        if not path.is_file():
+            raise ValueError(f"协作会话不存在：{session_id}")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        report = payload.get("report")
+        return {
+            "session_id": payload.get("session_id", session_id),
+            "saved_at": payload.get("saved_at", ""),
+            "goal": payload.get("goal", ""),
+            "status": payload.get("status", ""),
+            "result": TeamRunResult.model_validate(payload["result"]),
+            "screenplay": screenplay_from_yaml(payload["yaml_text"]),
+            "report": ReviewReport.model_validate(report) if report else None,
+        }
+
     def list_sessions(self) -> list[dict]:
+        # 前缀锚定在文件名开头，所以 ag-* 不会误收 mag-*（协作会话）。
+        return self._list_by_prefix("ag-")
+
+    def list_team_sessions(self) -> list[dict]:
+        return self._list_by_prefix("mag-")
+
+    def _list_by_prefix(self, prefix: str) -> list[dict]:
         if not self.base_dir.is_dir():
             return []
         sessions = []
-        for path in self.base_dir.glob("ag-*.json"):
+        for path in self.base_dir.glob(f"{prefix}*.json"):
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
