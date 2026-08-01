@@ -78,6 +78,14 @@ const teamSessions = document.querySelector("#teamSessions");
 const refreshMetricsButton = document.querySelector("#refreshMetricsButton");
 const metricsEmptyState = document.querySelector("#metricsEmptyState");
 const metricsContent = document.querySelector("#metricsContent");
+const viewWorkbench = document.querySelector("#viewWorkbench");
+const viewAgents = document.querySelector("#viewAgents");
+const viewMetrics = document.querySelector("#viewMetrics");
+const viewWorkbenchButton = document.querySelector("#viewWorkbenchButton");
+const viewAgentsButton = document.querySelector("#viewAgentsButton");
+const viewMetricsButton = document.querySelector("#viewMetricsButton");
+const screenplayStatusText = document.querySelector("#screenplayStatusText");
+const backToWorkbenchButton = document.querySelector("#backToWorkbenchButton");
 const agentPollIntervalMs = 1000;
 const agentMaxPolls = 720;
 const supportedTextNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
@@ -342,11 +350,22 @@ function renderDecisions(scene) {
   return details;
 }
 
+// 与后端 scene_review.CRITERIA_LABELS 保持一致：此前这里是三个简称，
+// 和报告里的字段名对不上，用户核对分数时会困惑。
 const CRITERIA_LABELS = {
-  dramatization: "戏剧化",
-  dialogue_conflict: "对白冲突",
+  dramatization: "戏剧化程度",
+  dialogue_conflict: "对白推动冲突",
   residual_narration: "残留旁白",
-  character_voice: "人物语气",
+  character_voice: "人物语气一致性",
+};
+
+const OPERATION_LABELS = {
+  rewrite_dialogue: "重新生成本场对白",
+  strengthen_conflict: "加强戏剧冲突",
+  short_drama_pace: "改成短剧节奏",
+  add_camera_hints: "增加镜头提示",
+  reduce_narration: "减少旁白",
+  adjust_character_voice: "调整人物语气",
 };
 
 function emptyReviewReport() {
@@ -386,6 +405,63 @@ function renderReviewBadge(sceneId) {
   const issues = (result.issues || []).join("\n");
   badge.title = issues ? `${details}\n问题：\n${issues}` : details;
   return badge;
+}
+
+// 原生 title 提示触屏和键盘都不可达，评分明细另给一个可展开区域：四项得分、
+// 判定依据（均分 vs 阈值）、问题清单与建议操作都摊开，用户不必猜分数怎么来的。
+function renderReviewDetail(sceneId) {
+  const result = latestReviewReport && latestReviewReport.machine[sceneId];
+  if (!result) {
+    return null;
+  }
+  const passed = result.verdict === "pass";
+  const threshold = latestReviewReport.threshold ?? 7;
+  const wrap = createElement("details", "review-detail");
+  wrap.appendChild(
+    createElement("summary", "review-detail-summary", `评分明细（均分 ${result.total}）`),
+  );
+
+  const grid = createElement("div", "review-detail-grid");
+  Object.entries(result.scores || {}).forEach(([key, value]) => {
+    const item = createElement("span", "review-detail-item");
+    item.append(
+      createElement("span", "review-detail-label", CRITERIA_LABELS[key] || key),
+      createElement("strong", "review-detail-score", String(value)),
+    );
+    grid.appendChild(item);
+  });
+  wrap.appendChild(grid);
+
+  wrap.appendChild(
+    createElement(
+      "p",
+      "review-detail-rule",
+      `判定：四项等权平均 ${result.total} ${passed ? "≥" : "<"} 达标线 ${threshold} → ${
+        passed ? "通过" : "未通过"
+      }。`,
+    ),
+  );
+
+  if ((result.issues || []).length) {
+    const list = createElement("ul", "review-detail-issues");
+    result.issues.forEach((issue) => {
+      list.appendChild(createElement("li", "", issue));
+    });
+    wrap.appendChild(list);
+  }
+
+  if (result.suggested_operation) {
+    const operation = OPERATION_LABELS[result.suggested_operation] || result.suggested_operation;
+    // 通过的场景也带建议操作，它指向四项里最弱的一环，措辞上区分开避免误解。
+    wrap.appendChild(
+      createElement(
+        "p",
+        "review-detail-operation",
+        `${passed ? "可选优化方向" : "建议修正操作"}：${operation}`,
+      ),
+    );
+  }
+  return wrap;
 }
 
 function renderHumanReviewControls(sceneId) {
@@ -543,6 +619,10 @@ function renderScene(scene, index, names) {
   if (decisions) {
     article.appendChild(decisions);
   }
+  const reviewDetail = renderReviewDetail(scene.id);
+  if (reviewDetail) {
+    article.appendChild(reviewDetail);
+  }
   article.appendChild(renderHumanReviewControls(scene.id));
   return article;
 }
@@ -612,6 +692,48 @@ function showScreenplay(screenplay, yamlText) {
   renderScreenplay(screenplay);
   populateCharacterOptions(screenplay);
   setScriptView(currentScriptView);
+  updateScreenplayStatus();
+}
+
+// 「智能改编」视图里看不到剧本面板，用一行摘要说明当前拿什么在跑，
+// 免得代理跑完了却不知道结果去哪看。
+function updateScreenplayStatus() {
+  if (!screenplayStatusText) {
+    return;
+  }
+  if (!latestScreenplay || !yamlOutput.value) {
+    screenplayStatusText.textContent =
+      "还没有剧本：请先在「工作台」生成，或粘贴 YAML 后校验。";
+    return;
+  }
+  const sceneCount = (latestScreenplay.scenes || []).length;
+  const summary = latestReviewReport && latestReviewReport.summary;
+  const scorePart =
+    summary && summary.avg_score !== undefined
+      ? `，机审均分 ${summary.avg_score}（${summary.pass_count || 0} 通过 / ${
+          summary.fail_count || 0
+        } 未通过）`
+      : "，尚未机审";
+  screenplayStatusText.textContent = `当前剧本《${latestScreenplay.title}》：${sceneCount} 个场景${scorePart}。`;
+}
+
+function setActiveView(view) {
+  const views = {
+    workbench: [viewWorkbenchButton, viewWorkbench],
+    agents: [viewAgentsButton, viewAgents],
+    metrics: [viewMetricsButton, viewMetrics],
+  };
+  Object.entries(views).forEach(([name, [button, panel]]) => {
+    if (button) {
+      button.classList.toggle("is-active", name === view);
+    }
+    if (panel) {
+      panel.classList.toggle("hidden", name !== view);
+    }
+  });
+  if (view === "agents") {
+    updateScreenplayStatus();
+  }
 }
 
 function renderProfiles(profiles) {
@@ -761,6 +883,8 @@ async function waitForConversionJob(jobId) {
 
 async function convertNovel() {
   convertButton.disabled = true;
+  // 进度条和结果都在工作台，转换时切回来，避免在别的分区干等。
+  setActiveView("workbench");
   const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
   setMessage(`正在使用${modeName}模式生成 YAML 剧本……`);
   resetConversionProgress();
@@ -1025,7 +1149,7 @@ function renderAgentTrace(trace, container = agentTrace) {
     } else if (step.observation && step.observation.message) {
       item.appendChild(createElement("p", "agent-step-observation", step.observation.message));
     }
-    agentTrace.appendChild(item);
+    container.appendChild(item);
   });
 }
 
@@ -1557,5 +1681,9 @@ listAgentSessionsButton.addEventListener("click", listAgentSessions);
 runTeamButton.addEventListener("click", runTeam);
 listTeamSessionsButton.addEventListener("click", listTeamSessions);
 refreshMetricsButton.addEventListener("click", refreshMetrics);
+viewWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));
+viewAgentsButton.addEventListener("click", () => setActiveView("agents"));
+viewMetricsButton.addEventListener("click", () => setActiveView("metrics"));
+backToWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));
 novelInput.addEventListener("input", updateChapterCount);
 

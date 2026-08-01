@@ -191,3 +191,55 @@ def test_jobs_api_and_cancel_routes():
 
     agent_missing = client.post("/api/agent/runs/not-exist/cancel")
     assert agent_missing.status_code == 404
+
+
+# ---------------------------------------------------------------- 进度与去重
+
+
+def test_update_skips_persist_when_nothing_changed():
+    store = ConversionJobStore()
+    job_id = store.create(demo_request()).job_id
+    wait_for(store, job_id)
+
+    persists: list[str] = []
+    original_persist = store._persist
+    store._persist = lambda row: (persists.append(row["job_id"]), original_persist(row))[1]
+
+    # 首次写入四个字段都变了，应落盘
+    store._update(job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段")
+    assert len(persists) == 1
+
+    # 完全相同的重复更新不该再写磁盘：细粒度进度会把更新次数拉到几十次，
+    # 而每次 _persist 都要新建连接并重写整行（含整篇小说的 request_json）。
+    store._update(job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段")
+    store._update(job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段")
+    assert len(persists) == 1
+
+    # 任一字段变化仍要落盘
+    store._update(job_id, status="running", progress=51, stage="生成剧本", message="已处理 2/9 个片段")
+    assert len(persists) == 2
+
+
+def test_conversion_job_reports_fine_grained_progress():
+    """转换任务应把转换器内部进度铺开，而不是从 45 直接跳到 90。"""
+    updates: list[tuple[int, str, str]] = []
+
+    class RecordingStore(ConversionJobStore):
+        def _update(self, job_id, *, status="running", progress, stage, message=""):
+            updates.append((progress, stage, message or stage))
+            super()._update(job_id, status=status, progress=progress, stage=stage, message=message)
+
+    store = RecordingStore()
+    job_id = store.create(demo_request()).job_id
+    snapshot = wait_for(store, job_id)
+    assert snapshot.status == "succeeded"
+
+    progresses = [progress for progress, _, _ in updates]
+    assert progresses == sorted(progresses)          # 单调不减
+    assert progresses[-1] == 90                      # 收尾交给 _complete 置 100
+
+    # 45→88 区间内应出现多个中间点，而不是只有 45 和 90 两个值
+    generation = [progress for progress, stage, _ in updates if stage == "生成剧本"]
+    assert len(generation) >= 3
+    assert all(45 <= progress <= 88 for progress in generation)
+    assert any("章" in message for _, stage, message in updates if stage == "生成剧本")

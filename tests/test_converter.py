@@ -241,3 +241,29 @@ def test_demo_converter_applies_adaptation_type_profile() -> None:
         if element.type == "action"
     )
 
+
+
+def test_demo_converter_reports_progress() -> None:
+    chapters = parse_chapters(load_example_novel()["novel_text"])
+    events: list[tuple[int, int, str]] = []
+
+    screenplay = DemoConverter().convert(
+        chapters, title="低智商犯罪", progress_cb=lambda done, total, note: events.append((done, total, note))
+    )
+
+    assert screenplay.scenes
+    assert events
+    dones = [done for done, _, _ in events]
+    assert dones == sorted(dones)              # 单调不减
+    assert dones[-1] == events[-1][1]           # 终值到达总数
+    assert any("拆分" in note for _, _, note in events)
+    assert any("校验" in note for _, _, note in events)
+
+
+def test_demo_converter_without_progress_cb_is_unaffected() -> None:
+    chapters = parse_chapters(load_example_novel()["novel_text"])
+
+    with_cb = DemoConverter().convert(chapters, title="x", progress_cb=lambda *args: None)
+    without_cb = DemoConverter().convert(chapters, title="x")
+
+    assert len(with_cb.scenes) == len(without_cb.scenes)

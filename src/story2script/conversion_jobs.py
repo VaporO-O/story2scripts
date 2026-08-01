@@ -59,11 +59,22 @@ class ConversionJobStore(DurableJobStore):
                 stage="生成剧本",
                 message=_generation_message(converter.mode),
             )
+
+            # 转换是整条链路里最慢的一段（AI 模式下藏着建索引、逐段检索、
+            # 分块调用与人物小传共约 20 次网络往返），把它的内部进度铺开到
+            # 45→68（开启机审时给后续阶段留出区间）或 45→88。
+            span = 23 if request.enable_review else 43
+
+            def progress_cb(done: int, total: int, note: str) -> None:
+                progress = 45 + int(span * done / max(1, total))
+                self._update(job_id, progress=progress, stage="生成剧本", message=note)
+
             screenplay = converter.convert(
                 chapters=chapters,
                 title=request.title,
                 genre=request.genre,
                 adaptation_type=request.adaptation_type,
+                progress_cb=progress_cb,
             )
 
             review_report = None
