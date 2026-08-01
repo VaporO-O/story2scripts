@@ -213,7 +213,8 @@ def configure_ai(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_converter_prompt_contains_data_fence(monkeypatch: pytest.MonkeyPatch):
-    from tests.test_ai_converter import scene_dict
+    # 顶层导入：tests/ 不是包，CI 的 pytest 控制台脚本不会把 CWD 加进 sys.path。
+    from test_ai_converter import scene_dict
 
     configure_ai(monkeypatch)
     prompts: list[str] = []
