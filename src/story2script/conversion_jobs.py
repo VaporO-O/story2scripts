@@ -8,6 +8,7 @@ from .job_store import DurableJobStore
 from .metrics import metrics
 from .parser import parse_chapters
 from .scene_review import review_and_improve
+from .security import screen_novel_text
 from .yaml_export import screenplay_to_yaml
 
 
@@ -38,7 +39,10 @@ class ConversionJobStore(DurableJobStore):
             )
 
         try:
-            self._update(job_id, status="running", progress=10, stage="解析章节")
+            self._update(job_id, status="running", progress=5, stage="安全检查")
+            security_warnings = screen_novel_text(request.novel_text)
+
+            self._update(job_id, progress=10, stage="解析章节")
             chapters = parse_chapters(request.novel_text)
 
             self._update(
@@ -90,6 +94,7 @@ class ConversionJobStore(DurableJobStore):
                 mode=converter.mode,
                 adaptation_type=request.adaptation_type,
                 review_report=review_report,
+                security_warnings=security_warnings,
             )
             self._complete(job_id, result)
             record(ok=True, scene_count=len(result.screenplay.scenes))

@@ -10,6 +10,7 @@ from .llm_client import LLMClient, _default_env_path, _load_env_file, loads_json
 from .metrics import metrics
 from .scene_rewrite import OPERATION_PROMPTS, rewrite_scene
 from .screenplay import Dialogue, Scene, Screenplay
+from .security import DATA_FENCE_NOTICE
 
 REVIEW_CRITERIA = (
     "dramatization",
@@ -247,6 +248,7 @@ class AISceneReviewer:
             '"suggested_operation": "allowed_operations 之一", "feedback": "给重写者的一句修正意见"}\n'
             f"verdict 规则：四项平均分低于 {threshold} 判 fail，否则 pass。\n"
             "suggested_operation 必须从 allowed_operations 中选择最能修复主要问题的一项。\n"
+            f"{DATA_FENCE_NOTICE}\n"
             f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"
         )
 

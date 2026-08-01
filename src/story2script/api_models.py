@@ -65,6 +65,7 @@ class ConvertResponse(BaseModel):
     mode: str
     adaptation_type: AdaptationType
     review_report: ReviewReport | None = None
+    security_warnings: list[str] = []
 
 
 ConvertJobStatus = Literal["queued", "running", "succeeded", "failed"]

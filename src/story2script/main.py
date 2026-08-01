@@ -1,8 +1,10 @@
+import os
+from hmac import compare_digest
 from pathlib import Path
 from time import perf_counter
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api_models import ChapterPreviewItem
@@ -53,6 +55,7 @@ from .scene_review import review_and_improve
 from .scene_review import review_scenes_report
 from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
+from .security import API_TOKEN_ENV, screen_novel_text
 from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
@@ -67,6 +70,32 @@ app = FastAPI(
     description="AI-assisted novel-to-screenplay workbench.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+_PUBLIC_PATHS = {"/", "/api/health", "/docs", "/redoc", "/openapi.json"}
+
+
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    """可选的 API Token 校验。
+
+    STORY2SCRIPT_API_TOKEN 未设置时完全放行（本地工作台默认）；设置后除公开
+    路径外的 /api/* 都要求 ``Authorization: Bearer <token>``。Token 每请求读取，
+    便于在运行期开关，也便于测试注入。
+    """
+    token = os.getenv(API_TOKEN_ENV, "").strip()
+    path = request.url.path
+    if (
+        token
+        and path.startswith("/api/")
+        and path not in _PUBLIC_PATHS
+    ):
+        header = request.headers.get("authorization", "")
+        provided = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        if not compare_digest(provided, token):
+            return JSONResponse(
+                status_code=401, content={"detail": "缺少或无效的 API Token。"}
+            )
+    return await call_next(request)
 
 
 @app.get("/", include_in_schema=False)
@@ -178,6 +207,7 @@ async def convert_novel(request: ConvertRequest) -> ConvertResponse:
 
 
 def _convert_novel_impl(request: ConvertRequest) -> ConvertResponse:
+    security_warnings = screen_novel_text(request.novel_text)
     try:
         chapters = parse_chapters(request.novel_text)
     except ValueError as exc:
@@ -211,6 +241,7 @@ def _convert_novel_impl(request: ConvertRequest) -> ConvertResponse:
         mode=converter.mode,
         adaptation_type=request.adaptation_type,
         review_report=review_report,
+        security_warnings=security_warnings,
     )
 
 

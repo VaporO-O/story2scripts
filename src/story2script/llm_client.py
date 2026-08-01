@@ -8,6 +8,7 @@ import httpx
 
 from .llm_cache import cache_key, llm_cache
 from .metrics import metrics
+from .security import redact_secrets
 
 
 DOTENV_FILENAME = ".env"
@@ -120,7 +121,7 @@ def loads_json_object(content: str) -> object:
         if ok:
             return value
 
-    preview = text[:500].replace("\n", "\\n") or "(空响应)"
+    preview = redact_secrets(text[:500].replace("\n", "\\n")) or "(空响应)"
     raise ValueError(f"无法从模型响应中解析出 JSON（原始响应前 500 字：{preview}）")
 
 
@@ -243,7 +244,9 @@ class LLMClient:
                 raise ValueError(f"{self.usage_label} request timed out.") from exc
             except httpx.RequestError as exc:
                 error_kind = "network"
-                raise ValueError(f"{self.usage_label} network error: {exc}") from exc
+                raise ValueError(
+                    f"{self.usage_label} network error: {redact_secrets(str(exc))}"
+                ) from exc
             except httpx.HTTPStatusError as exc:
                 error_kind = "http_status"
                 status_code = exc.response.status_code
@@ -376,7 +379,9 @@ class LLMClient:
                 raise ValueError(f"{self.usage_label} embeddings request timed out.") from exc
             except httpx.RequestError as exc:
                 error_kind = "network"
-                raise ValueError(f"{self.usage_label} embeddings network error: {exc}") from exc
+                raise ValueError(
+                    f"{self.usage_label} embeddings network error: {redact_secrets(str(exc))}"
+                ) from exc
             except httpx.HTTPStatusError as exc:
                 error_kind = "http_status"
                 status_code = exc.response.status_code

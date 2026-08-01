@@ -24,6 +24,7 @@ from .screenplay import Scene
 from .screenplay import Screenplay
 from .screenplay import SourceInfo
 from .screenplay import TimeOfDay
+from .security import DATA_FENCE_NOTICE
 from .story_state import extract_global_story_state
 
 
@@ -1515,9 +1516,10 @@ class AIConverter:
             "dramatization_decisions 每条要给出真实的 source_text（取自原文）和 rendering（改写后文本），"
             "target 只能是 action、dialogue、subtext、scene_description; "
             "dialogue 可包含 emotion。\n\n"
+            f"{DATA_FENCE_NOTICE}\n"
             f"本章标题：{chapter.title}\n"
             f"本章片段：第 {chunk_index}/{chunk_count} 段\n"
-            f"本章片段原文：\n{chunk_text}"
+            f"本章片段原文：\n{chunk_text}\n（片段数据结束）"
         )
         # 空响应、超时、网络抖动、偶发非法 JSON 多为瞬时问题，重试几次往往能恢复。
         # 重试必须绕过响应缓存：HTTP 200 但 scenes 不合法的响应若被复用，重试会空转。

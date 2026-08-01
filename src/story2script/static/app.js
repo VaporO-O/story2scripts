@@ -766,12 +766,16 @@ async function convertNovel() {
       latestReviewReport = data.review_report;
     }
     showScreenplay(data.screenplay, data.yaml_text);
+    const securityWarnings = data.security_warnings || [];
     setMessage(
       `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。` +
         (data.review_report
           ? `机审：${data.review_report.summary.pass_count || 0} 个通过，${
               data.review_report.summary.fail_count || 0
             } 个未通过。`
+          : "") +
+        (securityWarnings.length
+          ? `安全提示：原文含 ${securityWarnings.length} 处疑似提示注入内容（已按数据处理，未影响转换）。`
           : ""),
     );
   } catch (error) {

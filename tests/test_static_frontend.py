@@ -164,3 +164,10 @@ def test_workbench_metrics_panel_shows_cache_hits() -> None:
 
     assert "缓存命中" in script
     assert "row.cache_hits" in script
+
+
+def test_workbench_shows_security_warnings() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "data.security_warnings" in script
+    assert "疑似提示注入" in script
