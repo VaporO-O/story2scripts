@@ -37,6 +37,9 @@ from .api_models import SceneReviewRequest
 from .api_models import SceneReviewResponse
 from .api_models import SceneRewriteRequest
 from .api_models import SceneRewriteResponse
+from .api_models import TeamJobStartResponse
+from .api_models import TeamJobStatusResponse
+from .api_models import TeamRunRequest
 from .api_models import ValidateYamlRequest
 from .api_models import ValidateYamlResponse
 from .character_profiles_ai import get_character_profiler
@@ -44,6 +47,7 @@ from .agent import AgentSessionStore
 from .agent_jobs import agent_jobs
 from .conversion_jobs import conversion_jobs
 from .job_store import list_jobs as list_recent_jobs
+from .team_jobs import team_jobs
 from .metrics import metrics
 from .converter import get_converter
 from .examples import load_example_novel
@@ -313,6 +317,41 @@ async def cancel_agent_run(job_id: str) -> AgentJobStatusResponse:
 @app.get("/api/agent/sessions", response_model=AgentSessionListResponse)
 async def list_agent_sessions() -> AgentSessionListResponse:
     return AgentSessionListResponse(sessions=AgentSessionStore().list_sessions())
+
+
+@app.post("/api/agent/teams/runs", response_model=TeamJobStartResponse)
+async def start_team_run(request: TeamRunRequest) -> TeamJobStartResponse:
+    snapshot = team_jobs.create(request)
+    return TeamJobStartResponse(
+        job_id=snapshot.job_id,
+        status=snapshot.status,
+        progress=snapshot.progress,
+        stage=snapshot.stage,
+        message=snapshot.message,
+    )
+
+
+@app.get("/api/agent/teams/runs/{job_id}", response_model=TeamJobStatusResponse)
+async def get_team_run(job_id: str) -> TeamJobStatusResponse:
+    if not team_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="协作任务不存在。")
+    return team_jobs.snapshot(job_id)
+
+
+@app.post("/api/agent/teams/runs/{job_id}/cancel", response_model=TeamJobStatusResponse)
+async def cancel_team_run(job_id: str) -> TeamJobStatusResponse:
+    if not team_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="协作任务不存在。")
+    try:
+        team_jobs.cancel(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return team_jobs.snapshot(job_id)
+
+
+@app.get("/api/agent/teams/sessions", response_model=AgentSessionListResponse)
+async def list_team_sessions() -> AgentSessionListResponse:
+    return AgentSessionListResponse(sessions=AgentSessionStore().list_team_sessions())
 
 
 @app.get("/api/metrics", response_model=MetricsSummaryResponse)

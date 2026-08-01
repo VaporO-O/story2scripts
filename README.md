@@ -44,6 +44,7 @@ Web 工作台支持完整演示链路：
 - 支持局部重生成：重新生成本场对白、加强戏剧冲突、改成短剧节奏、增加镜头提示、减少旁白、调整人物语气。
 - 支持机审打分与逐场景人审，审校报告可下载。
 - 「改编 Agent」面板：设定目标后一键启动自主改编代理，实时进度、逐步决策轨迹、前后分数对比，可保存 / 载入历史会话。
+- 「多智能体协作」面板：审校 / 一致性 / 改编三个专职代理由主管派单，分角色的协作时间线、消息流与一致性问题列表。
 - 「运行指标」面板：LLM 调用成功率 / 延迟 / Token 消耗与任务成败统计，一键刷新。
 
 ## 核心设计
@@ -161,6 +162,10 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 | `GET /api/agent/runs/{job_id}` | 查询 Agent 任务进度、决策轨迹与结果 |
 | `POST /api/agent/runs/{job_id}/cancel` | 取消还在排队的 Agent 任务 |
 | `GET /api/jobs?limit=50` | 任务历史（转换 + Agent，含上次进程遗留任务） |
+| `POST /api/agent/teams/runs` | 启动多智能体协作任务（异步，带进度） |
+| `GET /api/agent/teams/runs/{job_id}` | 查询协作进度、分角色轨迹与一致性问题 |
+| `POST /api/agent/teams/runs/{job_id}/cancel` | 取消还在排队的协作任务 |
+| `GET /api/agent/teams/sessions` | 列出已持久化的协作会话 |
 | `GET /api/agent/sessions` | 列出已持久化的 Agent 会话 |
 | `GET /api/agent/sessions/{session_id}` | 读取会话详情（剧本 YAML + 轨迹 + 报告） |
 | `GET /api/metrics` | 运行指标汇总（LLM 成功率/延迟/Token、任务成败） |
@@ -200,7 +205,60 @@ LLM 只负责生成 JSON；服务端负责归一化、校验和导出 YAML。校
 
 环境变量：`AGENT_MAX_STEPS`（单次运行步数上限，默认 12）、`AGENT_SESSION_DIR`（会话存储目录）；质量阈值复用 `AI_REVIEW_THRESHOLD`。
 
-REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session, novel_text}`（带 `novel_text` 时代理获得 `search_story_context` 前文检索工具），轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。Web 工作台的「04 改编 Agent」面板封装了同一流程：目标输入、实时进度条、决策轨迹时间线、前后分数对比与历史会话载入。
+REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, max_steps, save_session, novel_text}`（带 `novel_text` 时代理获得 `search_story_context` 前文检索工具），轮询 `GET /api/agent/runs/{job_id}` 获取进度与逐步决策轨迹（thought / action / observation / 耗时）。MCP 用法：`run_adaptation_agent` 让 Claude 直接把某个 `screenplay_id` 交给代理接管，`load_agent_session` 恢复历史会话。Web 工作台的「改编 Agent」面板封装了同一流程：目标输入、实时进度条、决策轨迹时间线、前后分数对比与历史会话载入。
+
+## 多智能体协作
+
+单体代理只有一个循环、一套工具、一个目标函数（审校均分）。`AdaptationTeam`
+（`story2script/agent/team.py`）把改编拆成三个专职代理，由**主管**按共享黑板的状态
+决定每一轮调谁、交什么任务：
+
+```text
+┌─────────────── AdaptationTeam 协作 ───────────────┐
+│ 主管 Supervisor（受控 JSON 派单协议）              │
+│   {"thought": "...",                              │
+│    "dispatch": {"role": "...", "instruction"}}    │
+│         ↓ 角色校验                                 │
+│ ┌── 审校 reviewer ──── 打分，产出不达标清单 ──┐    │
+│ ├── 一致性 continuity ─ 查跨章矛盾 ──────────┤    │
+│ └── 改编 adapter ───── 修复（内含自主循环）──┘    │
+│         ↓ 回报                                     │
+│ 黑板 Blackboard：剧本 / 报告 / 问题 / 消息流       │
+│         ↺ 直到 finish / 双达标 / 轮次耗尽 / 熔断   │
+└───────────────────────────────────────────────────┘
+```
+
+| 角色 | 职责 | 实现方式 |
+| --- | --- | --- |
+| 主管 supervisor | 读黑板派单、判断收工 | ai 模式由 LLM 决策；demo 模式确定性策略走同一协议 |
+| 审校 reviewer | 四项标准打分 | 确定性分析器，复用 `review_scenes_report` |
+| 一致性 continuity | 查跨章矛盾 | 确定性分析器 + ai 模式可选 LLM 复核，见下 |
+| 改编 adapter | 唯一会改剧本的角色 | 内部复用 `AdaptationAgent` 的自主循环（一行未改） |
+
+**为什么审校与一致性不是 LLM 循环**：它们本质是分析器，不需要"规划下一步"。硬塞进
+代理循环等于凭空造出决策空间，多花 token 还更不稳定。多智能体的实质——角色分工、
+消息传递、黑板共享、主管调度——完全体现在主管层，因此单体代理的实现保持原样。
+
+**跨章一致性校验**（`story2script/continuity.py`）是本期新增能力：此前项目只有一致性
+事实的*提取*（`global_state`），没有*校验*。四条本地规则确定性、零依赖：人物出现在其
+出场章节之外（严重）、有台词者不在在场名单（严重）、地点不在全局地点表（中等）、场景
+顺序与章节时间线逆序（中等）；ai 模式额外做一次人物弧光漂移的 LLM 复核，失败时静默
+降级为仅本地规则。规则刻意保守——`aliases` 目前恒为空、`time_marker` 常缺失，且本地
+转换器抽不到地点时会退化成章节标题（属转换质量，不算跨章矛盾），这些都不报。45 个
+场景的示例小说上零误报。
+
+**主管的决策历史进提示词**：派单无效时黑板并无变化，若提示词一字不变就会命中响应
+缓存、重放同一个坏决策，自我修正随之失效（单体代理不受影响，它的提示词含每步都在变
+的 scratchpad）。因此主管把自己的决策历史（含被拒绝的派单）纳入提示词，且条数有界。
+
+环境变量：`TEAM_MAX_ROUNDS`（协作轮次上限，默认 6）、`TEAM_MAX_STEPS_PER_AGENT`
+（单个专职每次被派单的步数上限，默认 4）；质量阈值复用 `AI_REVIEW_THRESHOLD`。
+
+REST 用法：`POST /api/agent/teams/runs` 提交
+`{yaml_text, goal, mode, threshold, max_rounds, max_steps_per_agent, save_session, novel_text}`，
+轮询 `GET /api/agent/teams/runs/{job_id}` 获取进度、分角色轨迹、消息流与一致性问题。
+协作会话以 `mag-` 前缀持久化，与单体的 `ag-` 互不串台。MCP 用法：`run_adaptation_team`
+把某个 `screenplay_id` 交给团队，`load_team_session` 恢复协作会话。
 
 ## RAG 前文检索
 
@@ -218,9 +276,9 @@ REST 用法：`POST /api/agent/runs` 提交 `{yaml_text, goal, mode, threshold, 
 全链路进程内指标（`story2script/metrics.py`），为缓存、并发调优、prompt 优化提供数据：
 
 - **调用级**：`LLMClient.complete_json` 是所有大模型请求的唯一出口，每次调用记录成败（8 类错误：timeout / network / http_status / invalid_json / malformed / truncated / empty / unknown）、耗时、`usage` 里的 prompt/completion tokens，按 5 个子系统维度（全文转换 / 改编代理 / 人物小传 / 场景审校 / 场景重写）聚合。
-- **任务级**：`convert`（同步 + 异步任务）、`scene_review`、`scene_rewrite`、`agent_run` 四类任务的成败、耗时与业务字段（场景数、操作、轮次、Agent 步数等）。
+- **任务级**：`convert`（同步 + 异步任务）、`scene_review`、`scene_rewrite`、`agent_run`、`team_run`、`continuity_check`、`rag_index`、`rag_query`、`security` 各类任务的成败、耗时与业务字段（场景数、操作、轮次、Agent 步数、协作轮次与参与角色等）。
 - **口径**：累计聚合永不丢失；p50/p95 基于最近事件环形缓冲（`STORY2SCRIPT_METRICS_MAX_EVENTS`，默认 500）；分块转换的重试每次真实请求都计一次调用，缓存命中也计一次调用（`cached=true`、耗时 0，并计入各维度的 `cache_hits`）；任务只计终态一次。
-- **查看**：工作台「05 运行指标」面板一键刷新；`GET /api/metrics`（汇总）与 `GET /api/metrics/events`（明细）；MCP 工具 `get_metrics`。
+- **查看**：工作台「运行指标」面板一键刷新；`GET /api/metrics`（汇总）与 `GET /api/metrics/events`（明细）；MCP 工具 `get_metrics`。
 - **落盘（可选）**：设 `STORY2SCRIPT_METRICS_LOG=/path/metrics.jsonl` 后逐事件追加 JSONL，写失败静默停写不影响业务。
 
 ## 响应缓存
@@ -310,6 +368,8 @@ claude mcp add story2script -- python -m story2script.mcp_server --env-file D:/s
 | `extract_character_profiles` | 提取人物小传（demo/ai） |
 | `run_adaptation_agent` | 自主改编代理接管剧本：自主规划审校/重写/复评并返回决策轨迹（传 `novel_id` 可启用前文检索工具） |
 | `load_agent_session` | 恢复已持久化的 Agent 会话到工作区 |
+| `run_adaptation_team` | 改编团队接管剧本：审校 / 一致性 / 改编三个专职由主管调度，返回分角色轨迹与消息流 |
+| `load_team_session` | 恢复已持久化的协作会话（`mag-*`）到工作区 |
 | `get_metrics` | 运行指标：LLM 成功率/延迟/Token 消耗与任务统计 |
 | `build_novel_knowledge` / `search_novel_knowledge` | 构建 / 查询小说 RAG 前文知识库 |
 

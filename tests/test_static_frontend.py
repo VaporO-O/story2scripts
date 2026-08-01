@@ -171,3 +171,47 @@ def test_workbench_shows_security_warnings() -> None:
 
     assert "data.security_warnings" in script
     assert "疑似提示注入" in script
+
+
+def test_workbench_exposes_team_panel() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "多智能体协作" in html
+    assert 'id="teamGoalInput"' in html
+    assert 'id="teamModeInput"' in html
+    assert 'id="teamThresholdInput"' in html
+    assert 'id="teamMaxRoundsInput"' in html
+    assert 'id="teamSaveSessionInput"' in html
+    assert 'id="runTeamButton"' in html
+    assert 'id="listTeamSessionsButton"' in html
+    assert 'id="teamProgress"' in html
+    assert 'id="teamSummary"' in html
+    assert 'id="teamFindings"' in html
+    assert 'id="teamTrace"' in html
+    assert 'id="teamMessages"' in html
+    assert 'id="teamSessions"' in html
+
+
+def test_workbench_runs_team_via_job_api() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/agent/teams/runs"' in script
+    assert "fetch(`/api/agent/teams/runs/${jobId}`)" in script
+    assert 'fetch("/api/agent/teams/sessions")' in script
+    assert "async function waitForTeamRun(" in script
+    assert "function setTeamProgress(" in script
+    assert "function applyTeamRunResponse(" in script
+    assert "runTeamButton.addEventListener" in script
+    assert "listTeamSessionsButton.addEventListener" in script
+
+
+def test_workbench_renders_role_tagged_team_trace() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # 协作时间线复用单体 Agent 的步骤渲染，靠 container 参数与 role 标签区分
+    assert "function renderAgentTrace(trace, container = agentTrace)" in script
+    assert "renderAgentTrace(data.result.trace, teamTrace)" in script
+    assert "agent-step-role" in script
+    assert "function renderTeamFindings(" in script
+    assert "function renderTeamMessages(" in script
+    assert "const ROLE_LABELS" in script

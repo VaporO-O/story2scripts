@@ -1152,3 +1152,125 @@ textarea {
 .metrics-row .agent-metrics {
   padding-top: 0;
 }
+
+/* ---------------------------------------------- 多智能体协作面板 */
+
+.team-panel .section-heading p {
+  max-width: 620px;
+}
+
+.agent-step-role {
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--muted);
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.agent-step-role-supervisor {
+  border-left-color: #7c3aed;
+}
+
+.agent-step-role-supervisor .agent-step-role {
+  color: #5b21b6;
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.agent-step-role-reviewer {
+  border-left-color: #0f766e;
+}
+
+.agent-step-role-reviewer .agent-step-role {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.12);
+}
+
+.agent-step-role-continuity {
+  border-left-color: #b45309;
+}
+
+.agent-step-role-continuity .agent-step-role {
+  color: #92400e;
+  background: rgba(180, 83, 9, 0.12);
+}
+
+.agent-step-role-adapter {
+  border-left-color: var(--accent);
+}
+
+.agent-step-role-adapter .agent-step-role {
+  color: var(--accent-strong);
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.team-findings,
+.team-messages {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.team-finding {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.team-finding-high {
+  border-left-color: var(--danger);
+}
+
+.team-finding-medium {
+  border-left-color: #b45309;
+}
+
+.team-finding-low {
+  border-left-color: var(--muted);
+}
+
+.team-finding-tag {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.team-finding-detail {
+  color: var(--ink);
+}
+
+.team-finding-suggestion {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.team-message {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 13px;
+}
+
+.team-message-dispatch {
+  background: rgba(124, 58, 237, 0.06);
+}
+
+.team-message-route {
+  min-width: 132px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.team-message-content {
+  color: var(--ink);
+}
