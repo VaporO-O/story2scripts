@@ -53,6 +53,7 @@ class _Aggregate:
         "duration_ms_total",
         "prompt_tokens",
         "completion_tokens",
+        "cache_hits",
         "last_error",
     )
 
@@ -62,6 +63,7 @@ class _Aggregate:
         self.duration_ms_total = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self.cache_hits = 0
         self.last_error = ""
 
 
@@ -79,6 +81,7 @@ def _summary_row(aggregate: _Aggregate, durations: list[int]) -> dict:
         "prompt_tokens": aggregate.prompt_tokens,
         "completion_tokens": aggregate.completion_tokens,
         "total_tokens": aggregate.prompt_tokens + aggregate.completion_tokens,
+        "cache_hits": aggregate.cache_hits,
     }
     if aggregate.last_error:
         row["last_error"] = aggregate.last_error
@@ -107,6 +110,7 @@ class MetricsRegistry:
         completion_tokens: int = 0,
         prompt_chars: int = 0,
         response_chars: int = 0,
+        cached: bool = False,
     ) -> None:
         event = {
             "type": "llm_call",
@@ -120,6 +124,7 @@ class MetricsRegistry:
             "completion_tokens": int(completion_tokens or 0),
             "prompt_chars": int(prompt_chars or 0),
             "response_chars": int(response_chars or 0),
+            "cached": bool(cached),
         }
         with self._lock:
             aggregate = self._llm.setdefault(label, _Aggregate())
@@ -127,6 +132,8 @@ class MetricsRegistry:
             aggregate.duration_ms_total += event["duration_ms"]
             aggregate.prompt_tokens += event["prompt_tokens"]
             aggregate.completion_tokens += event["completion_tokens"]
+            if cached:
+                aggregate.cache_hits += 1
             if ok:
                 aggregate.success += 1
             else:
@@ -186,7 +193,7 @@ class MetricsRegistry:
                     for key, value in _summary_row(
                         aggregate, task_durations.get(kind, [])
                     ).items()
-                    if not key.endswith("_tokens")
+                    if not key.endswith("_tokens") and key != "cache_hits"
                 }
                 for kind, aggregate in sorted(self._tasks.items())
             }
@@ -197,6 +204,7 @@ class MetricsRegistry:
                 overall.duration_ms_total += aggregate.duration_ms_total
                 overall.prompt_tokens += aggregate.prompt_tokens
                 overall.completion_tokens += aggregate.completion_tokens
+                overall.cache_hits += aggregate.cache_hits
             all_llm_durations = [d for values in llm_durations.values() for d in values]
             return {
                 "generated_at": _now_iso(),

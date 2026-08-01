@@ -1520,10 +1520,11 @@ class AIConverter:
             f"本章片段原文：\n{chunk_text}"
         )
         # 空响应、超时、网络抖动、偶发非法 JSON 多为瞬时问题，重试几次往往能恢复。
+        # 重试必须绕过响应缓存：HTTP 200 但 scenes 不合法的响应若被复用，重试会空转。
         last_error: str = "未知错误"
         for _attempt in range(_CHUNK_CONVERSION_ATTEMPTS):
             try:
-                content = self.llm_client.complete_json(prompt)
+                content = self.llm_client.complete_json(prompt, use_cache=(_attempt == 0))
                 data = loads_json_object(content)
             except ValueError as exc:
                 last_error = str(exc)

@@ -283,3 +283,18 @@ def test_metrics_api_summary_and_events():
     listed = events.json()["events"]
     assert len(listed) == 1
     assert listed[0]["type"] == "task"
+
+
+def test_registry_tracks_cache_hits_for_llm_rows_only():
+    registry = MetricsRegistry()
+    registry.record_llm_call("AI mode", duration_ms=100, ok=True)
+    registry.record_llm_call("AI mode", duration_ms=0, ok=True, cached=True)
+    registry.record_task("convert", duration_ms=10, ok=True)
+
+    summary = registry.summary()
+    assert summary["llm"]["AI mode"]["cache_hits"] == 1
+    assert summary["llm_overall"]["cache_hits"] == 1
+    assert "cache_hits" not in summary["tasks"]["convert"]
+
+    cached_event = next(event for event in registry.recent_events() if event.get("cached"))
+    assert cached_event["type"] == "llm_call"

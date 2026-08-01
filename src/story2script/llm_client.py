@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 
+from .llm_cache import cache_key, llm_cache
 from .metrics import metrics
 
 
@@ -193,8 +194,12 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} requires integer AI_EMBED_BATCH_SIZE.") from exc
         return max(1, value)
 
-    def complete_json(self, prompt: str, temperature: float = 0.3) -> str:
-        """Return the model's JSON text response for a single user prompt."""
+    def complete_json(self, prompt: str, temperature: float = 0.3, use_cache: bool = True) -> str:
+        """Return the model's JSON text response for a single user prompt.
+
+        use_cache=False 用于"重新生成"语义的调用（场景重写）与分块转换的
+        重试路径：同请求需要不同结果时不得复用缓存。
+        """
         self._ensure_configured()
 
         body: dict = {
@@ -206,6 +211,21 @@ class LLMClient:
         # 长剧本 JSON 可能超出服务商默认输出上限被截断；配置 AI_MAX_TOKENS 可显式调高。
         if self.max_tokens is not None:
             body["max_tokens"] = self.max_tokens
+
+        key = cache_key("chat", self.base_url, self.model, temperature, prompt)
+        if use_cache:
+            cached = llm_cache.get(key)
+            if isinstance(cached, str):
+                metrics.record_llm_call(
+                    label=self.usage_label,
+                    model=self.model,
+                    duration_ms=0,
+                    ok=True,
+                    prompt_chars=len(prompt),
+                    response_chars=len(cached),
+                    cached=True,
+                )
+                return cached
 
         started = time.perf_counter()
         error_kind = ""
@@ -279,6 +299,8 @@ class LLMClient:
             prompt_chars=len(prompt),
             response_chars=len(content),
         )
+        if use_cache:
+            llm_cache.put(key, content)
         return content
 
     def _ensure_configured(self) -> None:
@@ -289,20 +311,52 @@ class LLMClient:
         if not self.model:
             raise ValueError(f"{self.usage_label} requires AI_MODEL.")
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], use_cache: bool = True) -> list[list[float]]:
         """Batch-embed texts via the OpenAI-compatible ``/embeddings`` endpoint.
 
-        Calls are recorded in metrics under the fixed "AI embeddings" label so
-        embedding cost stays a separate dimension from chat completions.
+        逐文本缓存：只把未命中的文本发给服务商（重建知识库时只需 embed 新增
+        文本）。Calls are recorded in metrics under the fixed "AI embeddings"
+        label so embedding cost stays a separate dimension from chat completions.
         """
         self._ensure_embed_configured()
         if not texts:
             return []
-        vectors: list[list[float]] = []
+
+        keys = [
+            cache_key("embed", self.base_url, self.embed_model, text) for text in texts
+        ]
+        results: list[list[float] | None] = [None] * len(texts)
+        pending: list[int] = []
+        if use_cache:
+            hit_chars = 0
+            for index, key in enumerate(keys):
+                cached = llm_cache.get(key)
+                if isinstance(cached, list) and cached:
+                    results[index] = [float(value) for value in cached]
+                    hit_chars += len(texts[index])
+                else:
+                    pending.append(index)
+            if len(pending) < len(texts):
+                metrics.record_llm_call(
+                    label=EMBEDDINGS_METRICS_LABEL,
+                    model=self.embed_model,
+                    duration_ms=0,
+                    ok=True,
+                    prompt_chars=hit_chars,
+                    cached=True,
+                )
+        else:
+            pending = list(range(len(texts)))
+
         batch_size = self.embed_batch_size
-        for start in range(0, len(texts), batch_size):
-            vectors.extend(self._embed_batch(texts[start : start + batch_size]))
-        return vectors
+        for start in range(0, len(pending), batch_size):
+            index_batch = pending[start : start + batch_size]
+            vectors = self._embed_batch([texts[index] for index in index_batch])
+            for index, vector in zip(index_batch, vectors):
+                results[index] = vector
+                if use_cache:
+                    llm_cache.put(keys[index], vector)
+        return [vector for vector in results if vector is not None]
 
     def _embed_batch(self, batch: list[str]) -> list[list[float]]:
         started = time.perf_counter()

@@ -243,3 +243,7 @@ class RagQueryResponse(BaseModel):
     stats: dict
     hits: list[dict]
 
+
+class JobListResponse(BaseModel):
+    jobs: list[dict]
+

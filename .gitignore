@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .pytest-tmp/
 .agent_sessions/
+.story2script/
 .ruff_cache/
 .venv/
 .env

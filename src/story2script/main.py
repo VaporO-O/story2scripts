@@ -21,6 +21,7 @@ from .api_models import ConvertJobStartResponse
 from .api_models import ConvertJobStatusResponse
 from .api_models import ExampleNovelResponse
 from .api_models import GlobalStateRequest
+from .api_models import JobListResponse
 from .api_models import GlobalStateResponse
 from .api_models import MetricsEventsResponse
 from .api_models import MetricsSummaryResponse
@@ -40,6 +41,7 @@ from .character_profiles_ai import get_character_profiler
 from .agent import AgentSessionStore
 from .agent_jobs import agent_jobs
 from .conversion_jobs import conversion_jobs
+from .job_store import list_jobs as list_recent_jobs
 from .metrics import metrics
 from .converter import get_converter
 from .examples import load_example_novel
@@ -231,6 +233,22 @@ async def get_convert_job(job_id: str) -> ConvertJobStatusResponse:
     return conversion_jobs.snapshot(job_id)
 
 
+@app.post("/api/convert/jobs/{job_id}/cancel", response_model=ConvertJobStatusResponse)
+async def cancel_convert_job(job_id: str) -> ConvertJobStatusResponse:
+    if not conversion_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="转换任务不存在。")
+    try:
+        conversion_jobs.cancel(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return conversion_jobs.snapshot(job_id)
+
+
+@app.get("/api/jobs", response_model=JobListResponse)
+async def list_all_jobs(limit: int = 50) -> JobListResponse:
+    return JobListResponse(jobs=list_recent_jobs(limit=limit))
+
+
 @app.post("/api/agent/runs", response_model=AgentJobStartResponse)
 async def start_agent_run(request: AgentRunRequest) -> AgentJobStartResponse:
     snapshot = agent_jobs.create(request)
@@ -247,6 +265,17 @@ async def start_agent_run(request: AgentRunRequest) -> AgentJobStartResponse:
 async def get_agent_run(job_id: str) -> AgentJobStatusResponse:
     if not agent_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="Agent 任务不存在。")
+    return agent_jobs.snapshot(job_id)
+
+
+@app.post("/api/agent/runs/{job_id}/cancel", response_model=AgentJobStatusResponse)
+async def cancel_agent_run(job_id: str) -> AgentJobStatusResponse:
+    if not agent_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="Agent 任务不存在。")
+    try:
+        agent_jobs.cancel(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return agent_jobs.snapshot(job_id)
 
 

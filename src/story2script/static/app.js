@@ -1186,6 +1186,9 @@ function renderMetricsSection(title, rows, isLlm) {
       chips.append(
         agentMetric("Tokens", `${row.total_tokens}（入 ${row.prompt_tokens} / 出 ${row.completion_tokens}）`),
       );
+      if (row.cache_hits !== undefined) {
+        chips.append(agentMetric("缓存命中", row.cache_hits));
+      }
     }
     if (row.last_error) {
       chips.append(agentMetric("最近错误", row.last_error));

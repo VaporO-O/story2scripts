@@ -157,3 +157,10 @@ def test_workbench_fetches_metrics_api() -> None:
     assert 'fetch("/api/metrics")' in script
     assert "function renderMetricsSection(" in script
     assert "refreshMetricsButton.addEventListener" in script
+
+
+def test_workbench_metrics_panel_shows_cache_hits() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "缓存命中" in script
+    assert "row.cache_hits" in script
