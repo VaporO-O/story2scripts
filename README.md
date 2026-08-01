@@ -389,3 +389,14 @@ python -m pytest
 python -m ruff check .
 python -m compileall -q src tests
 ```
+
+提交前建议再跑一次不带 `python -m` 的裸命令：
+
+```bash
+pytest
+```
+
+两者的差别是 `sys.path`：`python -m pytest` 会把当前目录加入 `sys.path`，而 CI 调用的
+`pytest` 控制台脚本不会。`tests/` 不是包，测试之间若写成 `from tests.xxx import ...`
+只能在前者下通过，在 CI 会于收集阶段直接 `ModuleNotFoundError`。跨测试复用请写顶层
+导入（`from test_ai_converter import scene_dict`）。

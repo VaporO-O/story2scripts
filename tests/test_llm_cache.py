@@ -144,7 +144,9 @@ def scene_payload(converter_scene: dict) -> dict:
 
 
 def test_converter_retry_bypasses_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_ai_converter import scene_dict
+    # 顶层导入：tests/ 不是包，CI 用 pytest 控制台脚本时 CWD 不在 sys.path，
+    # 写成 tests.test_ai_converter 会在收集期 ModuleNotFoundError。
+    from test_ai_converter import scene_dict
 
     configure_ai(monkeypatch)
     chunk_calls = {"count": 0}
