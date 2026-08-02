@@ -287,11 +287,8 @@ textarea {
   overflow-y: auto;
 }
 
-.rewrite-tools {
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
-}
-
+/* 六个重写按钮已被对话式改写取代，.rewrite-tools 容器随之删除；
+   但 .rewrite-fields / .rewrite-actions 仍被 .review-tools 复用，不能一起删。 */
 .rewrite-fields {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1454,4 +1451,115 @@ textarea {
 
 .team-message-content {
   color: var(--ink);
+}
+
+
+/* 对话式改写 */
+.scene-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.scene-chat-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scene-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.scene-chat-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* 对话不该和剧本抢空间：超出就自己滚动，面板高度不受影响。 */
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.chat-message {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.chat-message-user {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.chat-message-role {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chat-message-body {
+  margin: 4px 0 0;
+  color: var(--ink);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.chat-message-op {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scene-chat-input {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* 覆盖两条会打到这里的既有规则：全局 textarea 的 425px 固定高度，
+   以及 .script-panel textarea 给 YAML 编辑器用的深色主题。 */
+.scene-chat-input textarea {
+  flex: 1;
+  height: auto;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 13px/1.6 var(--font-sans);
+  resize: vertical;
+}
+
+.scene-chat-input button {
+  align-self: stretch;
+  padding: 0 20px;
+  white-space: nowrap;
 }

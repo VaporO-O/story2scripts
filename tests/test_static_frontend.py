@@ -87,9 +87,12 @@ def test_workbench_rewrite_selects_character_by_name() -> None:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
-    assert '<select id="rewriteCharacterInput">' in html
-    assert "function populateCharacterOptions(" in script
-    assert "populateCharacterOptions(screenplay)" in script
+    # 「按名字指定角色」的能力没有消失，而是从下拉框搬进了对话：用户直接写名字，
+    # 服务端按 name 精确匹配回 id（见 test_scene_chat.py 的解析测试），
+    # 所以前端不再维护角色清单。
+    assert 'id="rewriteCharacterInput"' not in html
+    assert "function populateCharacterOptions(" not in script
+    assert 'id="chatInput"' in html
 
 
 def test_workbench_reads_imported_novel_file() -> None:
@@ -237,6 +240,39 @@ def test_workbench_switches_views() -> None:
     assert 'viewMetricsButton.addEventListener' in script
     # 转换时切回工作台，让进度条与结果在同一视野
     assert 'setActiveView("workbench")' in script
+
+
+def test_workbench_exposes_scene_chat() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="chatInput"' in html
+    assert 'id="chatSendButton"' in html
+    assert 'id="chatLog"' in html
+    assert 'id="chatModeInput"' in html
+    # 场景 ID 从输入框变成 chip + 内部状态，点剧本里的 SCENE 徽章切换
+    assert 'id="chatSceneChip"' in html
+
+
+def test_scene_chat_replaces_preset_rewrite_buttons() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    # 六个预设操作按钮已被对话取代；操作枚举仍在后端白名单里，前端不再直接提交
+    assert "data-rewrite-operation" not in html
+    assert 'id="sceneIdInput"' not in html
+    assert 'id="rewriteToneInput"' not in html
+
+
+def test_workbench_sends_chat_rewrite_requests() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/scenes/chat"' in script
+    assert "function renderChatMessages(" in script
+    assert "function sendChatMessage(" in script
+    # class="message" 被负向断言占用（见 test_workbench_status_bar_is_global），
+    # 聊天条目用 chat-message 前缀
+    assert "chat-message-user" in script
+    # 本地模式会丢弃原话里的细微差别，界面必须说明，不能让用户以为对话没生效
+    assert "function updateChatModeHint(" in script
 
 
 def test_workbench_exposes_profiles_view() -> None:

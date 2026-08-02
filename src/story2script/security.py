@@ -166,6 +166,19 @@ def screen_agent_goal(goal: str) -> None:
         raise ValueError(f"目标包含疑似提示注入内容，已拒绝执行：{findings[0]}")
 
 
+def screen_chat_message(message: str) -> None:
+    """筛查对话式改写的用户消息：命中即拒绝执行。
+
+    这句话会进入意图解析提示词的指令位（操作白名单之上），能改写"选哪个操作"
+    的判断，性质与 Agent 目标相同，因此照 `screen_agent_goal` 的口径阻断，
+    而不是像小说正文那样只告警。
+    """
+    findings = scan_prompt_injection(message, source="改写要求")
+    if findings:
+        _record_security_event("chat", findings, blocked=True)
+        raise ValueError(f"改写要求包含疑似提示注入内容，已拒绝执行：{findings[0]}")
+
+
 def _record_security_event(mode: str, findings: list[str], blocked: bool) -> None:
     # 延迟导入：metrics 不依赖本模块，本模块也只在真正命中时才用到它。
     from .metrics import metrics

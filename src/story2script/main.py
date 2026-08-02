@@ -33,6 +33,8 @@ from .api_models import ReviewReportMergeRequest
 from .api_models import ReviewReportMergeResponse
 from .api_models import RagQueryRequest
 from .api_models import RagQueryResponse
+from .api_models import SceneChatRequest
+from .api_models import SceneChatResponse
 from .api_models import SceneReviewRequest
 from .api_models import SceneReviewResponse
 from .api_models import SceneRewriteRequest
@@ -59,7 +61,8 @@ from .scene_review import review_and_improve
 from .scene_review import review_scenes_report
 from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
-from .security import API_TOKEN_ENV, screen_novel_text
+from .scene_chat import parse_rewrite_intent
+from .security import API_TOKEN_ENV, screen_chat_message, screen_novel_text
 from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
@@ -426,6 +429,7 @@ async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewrite
             character_id=request.character_id,
             tone=request.tone,
             mode=request.mode,
+            feedback=request.feedback,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"局部重写失败：{exc}") from exc
@@ -437,6 +441,60 @@ async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewrite
         operation=request.operation,
         mode=request.mode,
         message=message,
+    )
+
+
+@app.post("/api/scenes/chat", response_model=SceneChatResponse)
+async def chat_rewrite_scene(request: SceneChatRequest) -> SceneChatResponse:
+    """对话式改写：解析一句自然语言要求，再执行对应的受校验局部重写。"""
+    # 这句话会进入意图解析提示词的指令位，按 Agent 目标的口径阻断而非告警。
+    try:
+        screen_chat_message(request.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        screenplay = screenplay_from_yaml(request.yaml_text)
+        intent = parse_rewrite_intent(
+            screenplay=screenplay,
+            message=request.message,
+            history=request.history,
+            mode=request.mode,
+            current_scene_id=request.scene_id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"改写要求解析失败：{exc}") from exc
+
+    if intent.operation is None:
+        # 解析不出可执行操作（含"改到白天"这类硬性不可改字段）：只回话，不动剧本。
+        return SceneChatResponse(
+            reply=intent.reply or intent.refusal,
+            mode=request.mode,
+            scene_id=intent.scene_id,
+            refusal=intent.refusal,
+        )
+
+    try:
+        updated_screenplay, message = rewrite_scene(
+            screenplay=screenplay,
+            scene_id=intent.scene_id,
+            operation=intent.operation,
+            character_id=intent.character_id,
+            tone=intent.tone or "更克制",
+            mode=request.mode,
+            # 用户原话随行：操作定大方向，原话提供枚举表达不了的细微差别。
+            feedback=intent.feedback,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"局部重写失败：{exc}") from exc
+
+    return SceneChatResponse(
+        reply=f"{intent.reply} {message}".strip(),
+        mode=request.mode,
+        screenplay=updated_screenplay,
+        yaml_text=screenplay_to_yaml(updated_screenplay),
+        scene_id=intent.scene_id,
+        operation=intent.operation,
     )
 
 

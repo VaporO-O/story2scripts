@@ -22,17 +22,22 @@ let currentScriptView = "preview";
 let currentNovelView = "edit";
 let latestScreenplay = null;
 let latestReviewReport = null;
+// 场景 ID 从输入框变成内部状态：点剧本里的 SCENE 徽章切换，chip 显示当前值。
+let currentSceneId = "scene-1";
+// 对话历史由前端持有并随请求回传（服务端无状态），照 renderTeamMessages 的风格全量重渲染。
+const chatMessages = [];
 const conversionPollIntervalMs = 1000;
 const conversionMaxPolls = 720;
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
 const importNovelFileButton = document.querySelector("#importNovelFileButton");
 const novelFileInput = document.querySelector("#novelFileInput");
-const sceneIdInput = document.querySelector("#sceneIdInput");
-const rewriteModeInput = document.querySelector("#rewriteModeInput");
-const rewriteCharacterInput = document.querySelector("#rewriteCharacterInput");
-const rewriteToneInput = document.querySelector("#rewriteToneInput");
-const rewriteButtons = document.querySelectorAll("[data-rewrite-operation]");
+const chatModeInput = document.querySelector("#chatModeInput");
+const chatModeHint = document.querySelector("#chatModeHint");
+const chatInput = document.querySelector("#chatInput");
+const chatSendButton = document.querySelector("#chatSendButton");
+const chatLog = document.querySelector("#chatLog");
+const chatSceneChip = document.querySelector("#chatSceneChip");
 const enableReviewInput = document.querySelector("#enableReviewInput");
 const reviewModeInput = document.querySelector("#reviewModeInput");
 const reviewThresholdInput = document.querySelector("#reviewThresholdInput");
@@ -578,10 +583,10 @@ function renderScene(scene, index, names) {
   const slug = createElement("div", "scene-slug");
   const number = createElement("button", "scene-no", `SCENE ${index + 1}`);
   number.type = "button";
-  number.title = "点击把此场景填入重写工具";
+  number.title = "点击把此场景设为对话改写的当前场景";
   number.addEventListener("click", () => {
-    sceneIdInput.value = scene.id;
-    setMessage(`已选择 ${scene.id} 进行局部重写。`);
+    setCurrentScene(scene.id);
+    setMessage(`已选择 ${scene.id}，接下来的改写要求默认作用在这一场。`);
   });
   slug.append(
     number,
@@ -675,25 +680,24 @@ function setScriptView(view) {
   yamlOutput.classList.toggle("hidden", view !== "source");
 }
 
-function populateCharacterOptions(screenplay) {
-  // 重写工具按角色“名字”选择，内部仍提交稳定的 character id，用户无需知道 id。
-  const previous = rewriteCharacterInput.value;
-  rewriteCharacterInput.innerHTML = "";
-  rewriteCharacterInput.appendChild(createElement("option", null, "（自动选择）"));
-  (screenplay.characters || []).forEach((character) => {
-    const option = createElement("option", null, character.name || character.id);
-    option.value = character.id;
-    rewriteCharacterInput.appendChild(option);
-  });
-  const stillExists = (screenplay.characters || []).some((character) => character.id === previous);
-  rewriteCharacterInput.value = stillExists ? previous : "";
+// 角色不再由下拉框选择：用户在对话里直接写名字，服务端按 name 精确匹配回 id
+// （匹配不上就交给重写层自动挑人），所以前端不必再维护一份角色清单。
+function setCurrentScene(sceneId) {
+  currentSceneId = sceneId;
+  if (chatSceneChip) {
+    chatSceneChip.textContent = `当前场景：${sceneId}`;
+  }
 }
 
 function showScreenplay(screenplay, yamlText) {
   latestScreenplay = screenplay;
   yamlOutput.value = yamlText;
   renderScreenplay(screenplay);
-  populateCharacterOptions(screenplay);
+  const scenes = screenplay.scenes || [];
+  // 剧本换了以后旧的 currentSceneId 可能已不存在，回落到第一场。
+  if (scenes.length && !scenes.some((scene) => scene.id === currentSceneId)) {
+    setCurrentScene(scenes[0].id);
+  }
   setScriptView(currentScriptView);
   updateScreenplayStatus();
 }
@@ -1004,44 +1008,106 @@ async function validateYaml() {
   setMessage(data.message);
 }
 
-async function rewriteScene(operation) {
+function renderChatMessages() {
+  // 全量重渲染：对话条数是人工输入量级，简单胜过增量维护。
+  chatLog.innerHTML = "";
+  chatLog.classList.toggle("hidden", chatMessages.length === 0);
+
+  chatMessages.forEach((turn) => {
+    const item = createElement(
+      "div",
+      turn.role === "user" ? "chat-message chat-message-user" : "chat-message",
+    );
+    item.appendChild(
+      createElement("span", "chat-message-role", turn.role === "user" ? "你" : "改写助手"),
+    );
+    item.appendChild(createElement("p", "chat-message-body", turn.content));
+    if (turn.operation) {
+      // 让用户看清模型把这句话理解成了哪个操作，误解时能立刻换个说法。
+      item.appendChild(
+        createElement(
+          "span",
+          "chat-message-op",
+          `${OPERATION_LABELS[turn.operation] || turn.operation}（${turn.sceneId || ""}）`,
+        ),
+      );
+    }
+    chatLog.appendChild(item);
+  });
+
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function appendChatMessage(role, content, extra = {}) {
+  chatMessages.push({ role, content, ...extra });
+  renderChatMessages();
+}
+
+function updateChatModeHint() {
+  if (!chatModeHint) {
+    return;
+  }
+  chatModeHint.textContent =
+    chatModeInput.value === "ai"
+      ? "AI 模式：你的原话会作为改写要求一起交给模型，语气、指名角色这类细节都会生效。"
+      : "本地模式按关键词识别操作（对白 / 冲突 / 节奏 / 镜头 / 旁白 / 语气），不会理解原话里的细微差别；切到 AI 模式后，你的原话会作为改写要求一起交给模型。";
+}
+
+async function sendChatMessage() {
+  const text = chatInput.value.trim();
+  if (!text) {
+    setMessage("请先输入改写要求。", true);
+    return;
+  }
   if (!yamlOutput.value) {
     setMessage("请先生成或输入 YAML 剧本。", true);
     return;
   }
 
-  rewriteButtons.forEach((button) => {
-    button.disabled = true;
-  });
-  setMessage("正在局部重写场景……");
+  // 历史只回传本轮之前的对话：本轮消息由 message 字段单独携带。
+  const history = chatMessages.map((turn) => ({ role: turn.role, content: turn.content }));
+  appendChatMessage("user", text);
+  chatInput.value = "";
+  chatSendButton.disabled = true;
+  setMessage("正在理解改写要求……");
 
   try {
-    const response = await fetch("/api/scenes/rewrite", {
+    const response = await fetch("/api/scenes/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         yaml_text: yamlOutput.value,
-        scene_id: sceneIdInput.value,
-        operation,
-        mode: rewriteModeInput.value,
-        character_id: rewriteCharacterInput.value,
-        tone: rewriteToneInput.value,
+        message: text,
+        history,
+        mode: chatModeInput.value,
+        scene_id: currentSceneId,
       }),
     });
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(errorMessage(data, "局部重写失败"));
+      throw new Error(errorMessage(data, "对话改写失败"));
+    }
+
+    appendChatMessage("assistant", data.reply, {
+      operation: data.operation || "",
+      sceneId: data.scene_id || "",
+    });
+
+    if (data.refusal) {
+      // 只回话不改剧本：例如"改到白天"这类局部重写改不了的字段。
+      setMessage(data.refusal, true);
+      return;
     }
 
     showScreenplay(data.screenplay, data.yaml_text);
-    setMessage(`${data.message} 已更新 ${data.scene_id}，模式：${data.mode}。`);
+    setCurrentScene(data.scene_id);
+    setMessage(`已按你的要求更新 ${data.scene_id}，模式：${data.mode}。`);
   } catch (error) {
+    appendChatMessage("assistant", error.message);
     setMessage(error.message, true);
   } finally {
-    rewriteButtons.forEach((button) => {
-      button.disabled = false;
-    });
+    chatSendButton.disabled = false;
   }
 }
 
@@ -1696,9 +1762,15 @@ previewViewButton.addEventListener("click", () => setScriptView("preview"));
 sourceViewButton.addEventListener("click", () => setScriptView("source"));
 novelEditViewButton.addEventListener("click", () => setNovelView("edit"));
 novelChapterViewButton.addEventListener("click", () => setNovelView("chapter"));
-rewriteButtons.forEach((button) => {
-  button.addEventListener("click", () => rewriteScene(button.dataset.rewriteOperation));
+chatSendButton.addEventListener("click", sendChatMessage);
+chatInput.addEventListener("keydown", (event) => {
+  // Enter 发送、Shift+Enter 换行：多行改写要求仍可手动折行。
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendChatMessage();
+  }
 });
+chatModeInput.addEventListener("change", updateChatModeHint);
 runReviewButton.addEventListener("click", runMachineReview);
 downloadReviewReportButton.addEventListener("click", downloadReviewReport);
 runAgentButton.addEventListener("click", runAgent);
