@@ -215,3 +215,73 @@ def test_workbench_renders_role_tagged_team_trace() -> None:
     assert "function renderTeamFindings(" in script
     assert "function renderTeamMessages(" in script
     assert "const ROLE_LABELS" in script
+
+
+def test_workbench_exposes_view_navigation() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="viewWorkbenchButton"' in html
+    assert 'id="viewAgentsButton"' in html
+    assert 'id="viewMetricsButton"' in html
+    assert 'id="viewWorkbench"' in html
+    assert 'id="viewAgents"' in html
+    assert 'id="viewMetrics"' in html
+
+
+def test_workbench_switches_views() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "function setActiveView(" in script
+    assert 'viewWorkbenchButton.addEventListener' in script
+    assert 'viewAgentsButton.addEventListener' in script
+    assert 'viewMetricsButton.addEventListener' in script
+    # 转换时切回工作台，让进度条与结果在同一视野
+    assert 'setActiveView("workbench")' in script
+
+
+def test_workbench_status_bar_is_global() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    # 状态栏从剧本面板内部（绝对定位）提到全局常规流，切换分区后仍可见
+    assert 'id="message" class="status-bar"' in html
+    assert 'class="message"' not in html
+
+
+def test_workbench_shows_screenplay_status_in_agents_view() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="screenplayStatusText"' in html
+    assert 'id="backToWorkbenchButton"' in html
+    assert "function updateScreenplayStatus(" in script
+
+
+def test_workbench_explains_review_scoring_rules() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert "评分规则" in html
+    assert "等权算术平均" in html
+    assert "AI_REVIEW_THRESHOLD" in html
+    # 两种模式不可比，必须写明，否则用户会误以为同标尺
+    assert "不可直接比较" in html
+
+
+def test_workbench_renders_review_score_detail() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "function renderReviewDetail(" in script
+    assert "renderReviewDetail(scene.id)" in script
+    # 标签与后端 CRITERIA_LABELS 一致
+    assert 'dramatization: "戏剧化程度"' in script
+    assert 'dialogue_conflict: "对白推动冲突"' in script
+    assert 'character_voice: "人物语气一致性"' in script
+    # 通过的场景把建议操作显示为"可选优化方向"
+    assert "可选优化方向" in script
+
+
+def test_team_trace_appends_into_its_own_container() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # 此前写死 agentTrace.appendChild，导致协作时间线渲染进了改编 Agent 面板
+    assert "container.appendChild(item)" in script
+    assert "agentTrace.appendChild(item)" not in script

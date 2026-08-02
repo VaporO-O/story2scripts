@@ -443,3 +443,87 @@ def test_chunk_prompt_includes_retrieved_memo_without_future_leak(
     )
     assert "第一章 开场" in memo_line
     assert "回头看了一眼" not in memo_line  # 第三章内容不得泄漏进第二章的备忘
+
+
+def _progress_handler(bad_chunk_index: int | None = None):
+    """构造一个 handler，可让指定序号的分块首次返回坏数据以触发重试。"""
+    state = {"chunk_calls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if "本章片段原文" not in prompt:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+        state["chunk_calls"] += 1
+        if bad_chunk_index is not None and state["chunk_calls"] == bad_chunk_index:
+            return httpx.Response(
+                200, json={"choices": [{"message": {"content": '{"scenes": "不是列表"}'}}]}
+            )
+        title = prompt.split("本章标题：")[1].split("\n")[0]
+        return chapter_response([scene_dict(source_chapter=title)])
+
+    return handler, state
+
+
+def test_ai_converter_reports_chunk_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ai(monkeypatch)
+    handler, _ = _progress_handler()
+    events: list[tuple[int, int, str]] = []
+
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    converter.convert(
+        NOVEL_CHAPTERS, progress_cb=lambda done, total, note: events.append((done, total, note))
+    )
+
+    assert events
+    dones = [done for done, _, _ in events]
+    totals = {total for _, total, _ in events}
+    assert dones == sorted(dones)                       # 单调不减
+    assert len(totals) == 1                             # 总数在整轮里稳定
+    assert dones[-1] == events[-1][1]                   # 终值到达总数
+    # 三段耗时都可见：建索引、逐段检索、逐段处理，以及收尾
+    assert any("建立前文检索索引" in note for _, _, note in events)
+    assert any("检索前文备忘" in note for _, _, note in events)
+    assert any("已处理" in note for _, _, note in events)
+    assert any("归一化" in note for _, _, note in events)
+
+
+def test_ai_converter_reports_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ai(monkeypatch)
+    handler, _ = _progress_handler(bad_chunk_index=1)
+    events: list[tuple[int, int, str]] = []
+
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    screenplay = converter.convert(
+        NOVEL_CHAPTERS, progress_cb=lambda done, total, note: events.append((done, total, note))
+    )
+
+    # 重试此前完全不可见（进度条卡住），现在应作为诊断信息出现
+    assert any("次尝试" in note for _, _, note in events)
+    assert screenplay.scenes
+
+
+def test_ai_converter_reports_skipped_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ai(monkeypatch)
+    state = {"chunk_calls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if "本章片段原文" not in prompt:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+        state["chunk_calls"] += 1
+        # 第一章的片段始终失败，其余正常：整篇仍应出稿并汇报跳过数
+        if "第一章" in prompt.split("本章标题：")[1].split("\n")[0]:
+            return httpx.Response(500)
+        title = prompt.split("本章标题：")[1].split("\n")[0]
+        return chapter_response([scene_dict(source_chapter=title)])
+
+    events: list[tuple[int, int, str]] = []
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    screenplay = converter.convert(
+        NOVEL_CHAPTERS, progress_cb=lambda done, total, note: events.append((done, total, note))
+    )
+
+    assert screenplay.scenes                                  # 其余片段仍出稿
+    assert any("失败已跳过" in note for _, _, note in events)
+    # 失败的片段也计入"已处理"，进度不会停在中途
+    assert events[-1][0] == events[-1][1]

@@ -255,13 +255,24 @@ class DurableJobStore:
         stage: str,
         message: str = "",
     ) -> None:
+        resolved_message = message or stage
         with self._lock:
             row = self._rows[job_id]
+            # 细粒度进度会把更新次数从个位数拉到几十次，而每次 _persist 都要新建
+            # 连接并重写整行（含整篇小说的 request_json）。四个字段都没变就直接
+            # 返回，避免把磁盘写放大成噪音。
+            if (
+                row["status"] == status
+                and row["progress"] == progress
+                and row["stage"] == stage
+                and row["message"] == resolved_message
+            ):
+                return
             row.update(
                 status=status,
                 progress=progress,
                 stage=stage,
-                message=message or stage,
+                message=resolved_message,
                 updated_at=_now_iso(),
             )
             self._persist(row)

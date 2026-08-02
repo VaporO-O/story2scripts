@@ -369,15 +369,151 @@ textarea {
   font-size: 12px;
 }
 
-.message {
-  position: absolute;
-  bottom: 0;
-  width: 100%;
-  padding: 13px 20px;
-  border-top: 1px solid var(--line);
+/* 状态栏从剧本面板底部（原 .message，绝对定位）提到全局常规流：
+   切换分区后所有状态提示仍然可见——约 40 处调用都写这里。 */
+.status-bar {
+  margin-bottom: 16px;
+  padding: 11px 18px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
   background: var(--panel);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.view-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.view-nav-button {
+  padding: 9px 20px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.view-nav-button:hover {
+  color: var(--ink);
+}
+
+.view-nav-button.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.screenplay-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+/* 评分明细：原生 title 提示触屏和键盘都不可达，这里做成可展开区域 */
+.review-detail {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 12px;
+}
+
+.review-detail-summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.review-detail-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.review-detail-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.review-detail-label {
+  color: var(--muted);
+}
+
+.review-detail-rule,
+.review-detail-operation {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.review-detail-issues {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.review-rules {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.review-rules summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.review-rules table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+}
+
+.review-rules th,
+.review-rules td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.6;
+}
+
+.review-rules th {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.review-rules p {
+  margin: 10px 0 0;
+  line-height: 1.7;
 }
 
 .hidden {

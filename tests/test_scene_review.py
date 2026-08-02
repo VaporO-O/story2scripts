@@ -324,3 +324,59 @@ def test_merge_human_verdicts_rejects_unknown_scene() -> None:
 
     with pytest.raises(ValueError, match="scene-9"):
         merge_human_verdicts(report, [HumanVerdict(scene_id="scene-9", status="approved")])
+
+
+def test_ai_verdict_is_adjudicated_by_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    """模型自报 pass 但均分低于达标线时，按阈值裁决为 fail。
+
+    否则界面会出现"7.25 分 · 通过"而达标线是 9.5 的自相矛盾展示。
+    """
+    configure_ai(monkeypatch)
+    screenplay = sample_screenplay()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return ai_response(
+            {
+                "scores": {
+                    "dramatization": 7,
+                    "dialogue_conflict": 7,
+                    "residual_narration": 8,
+                    "character_voice": 7,
+                },
+                "verdict": "pass",
+                "issues": ["冲突还不够"],
+                "feedback": "再加强对抗。",
+            }
+        )
+
+    reviewer = get_scene_reviewer("ai", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    result = reviewer.review_scene(screenplay, screenplay.scenes[0], threshold=9.5)
+
+    assert result.total == 7.25
+    assert result.verdict == "fail"          # 不采信模型自报的 pass
+    assert result.issues == ["冲突还不够"]    # 模型的定性判断仍保留
+    assert result.feedback == "再加强对抗。"
+
+
+def test_ai_verdict_flips_to_pass_under_low_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ai(monkeypatch)
+    screenplay = sample_screenplay()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return ai_response(
+            {
+                "scores": {
+                    "dramatization": 4,
+                    "dialogue_conflict": 4,
+                    "residual_narration": 4,
+                    "character_voice": 4,
+                },
+                "verdict": "fail",
+            }
+        )
+
+    reviewer = get_scene_reviewer("ai", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    result = reviewer.review_scene(screenplay, screenplay.scenes[0], threshold=1.0)
+
+    assert result.total == 4.0
+    assert result.verdict == "pass"

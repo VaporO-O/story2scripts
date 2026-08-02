@@ -21,6 +21,17 @@
         <p>将您的小说转为剧本</p>
       </section>
 
+      <nav class="view-nav" aria-label="功能分区">
+        <button id="viewWorkbenchButton" class="view-nav-button is-active" type="button">
+          工作台
+        </button>
+        <button id="viewAgentsButton" class="view-nav-button" type="button">智能改编</button>
+        <button id="viewMetricsButton" class="view-nav-button" type="button">运行指标</button>
+      </nav>
+
+      <div id="message" class="status-bar">准备就绪</div>
+
+      <div id="viewWorkbench" class="view">
       <section class="workspace">
         <section class="panel">
           <div class="panel-heading">
@@ -157,10 +168,53 @@
               <button id="runReviewButton" class="ghost-button">机审全部场景</button>
               <button id="downloadReviewReportButton" class="ghost-button">下载审校报告</button>
             </div>
+
+            <details class="review-rules">
+              <summary>评分规则</summary>
+              <p>
+                四项标准各 0-10 分，<strong>等权算术平均</strong>后保留 2
+                位小数得到本场得分；得分不低于「达标分数」即判通过（等于也算通过）。
+              </p>
+              <table>
+                <tr>
+                  <th>戏剧化程度</th>
+                  <td>动作与对白都有 = 8 分，只有一类 = 6 分；有镜头提示 +1；戏剧化决策 ≥2 条 +1。</td>
+                </tr>
+                <tr>
+                  <th>对白推动冲突</th>
+                  <td>
+                    无对白 = 3 分；否则 6 + 对白条数（最多计 2）+ 含对抗信号再 +2。对抗信号指对白里出现
+                    ？、！、不、别、冲突、必须、凭什么。
+                  </td>
+                </tr>
+                <tr>
+                  <th>残留旁白</th>
+                  <td>从 10 分起，每有一段超过 60 字的动作描述扣 3 分，最低 0 分。</td>
+                </tr>
+                <tr>
+                  <th>人物语气一致性</th>
+                  <td>
+                    无对白 = 6 分；否则 8 ×（说话人在本场人物表中的对白比例）+ 2 ×（标注了语气或情绪的对白比例）。
+                  </td>
+                </tr>
+              </table>
+              <p>
+                以上是<strong>本地模式</strong>的确定性算法，同一剧本反复审校结果一致。<strong>AI
+                模式</strong>只把四项标准的定义交给大模型评判，不含上述数值细则，因此
+                <strong>两种模式的分数不可直接比较</strong>；判定通过与否仍统一按"均分 vs
+                达标分数"裁决。
+              </p>
+              <p>
+                达标分数与自动修正轮次也可用环境变量 <code>AI_REVIEW_THRESHOLD</code>、<code>AI_REVIEW_MAX_ROUNDS</code>
+                配置（默认 7.0 与 2）。
+              </p>
+            </details>
           </div>
 
-          <div id="conversionProgress" class="conversion-progress hidden" aria-live="polite">
-            <div class="progress-meta">
+          <div id="conversionProgress" class="conversion-progress hidden">
+            <!-- 细粒度进度会让消息每秒变化多次：只朗读阶段与百分比，
+                 分块明细留在下方非 live 区域，避免读屏软件刷屏。 -->
+            <div class="progress-meta" aria-live="polite">
               <span id="conversionProgressStage">等待转换</span>
               <span id="conversionProgressPercent">0%</span>
             </div>
@@ -178,7 +232,6 @@
 
           <div id="scriptPreview" class="script-preview hidden"></div>
           <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
-          <div id="message" class="message">准备就绪</div>
         </section>
       </section>
 
@@ -192,6 +245,13 @@
         <div id="profileEmptyState" class="profile-empty">点击“分析人物”后，将在这里生成人物小传表。</div>
         <div id="profileGrid" class="profile-grid"></div>
       </section>
+      </div>
+
+      <div id="viewAgents" class="view hidden">
+      <div class="screenplay-status">
+        <span id="screenplayStatusText">还没有剧本：请先在「工作台」生成，或粘贴 YAML 后校验。</span>
+        <button id="backToWorkbenchButton" class="ghost-button">前往工作台</button>
+      </div>
 
       <section class="agent-panel">
         <div class="section-heading">
@@ -294,7 +354,9 @@
         <div id="teamMessages" class="team-messages hidden"></div>
         <div id="teamSessions" class="agent-sessions hidden"></div>
       </section>
+      </div>
 
+      <div id="viewMetrics" class="view hidden">
       <section class="metrics-panel">
         <div class="section-heading">
           <div>
@@ -309,6 +371,7 @@
         </div>
         <div id="metricsContent" class="metrics-content hidden"></div>
       </section>
+      </div>
     </main>
 
     <script src="/static/app.js"></script>

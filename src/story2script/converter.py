@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
@@ -53,7 +54,9 @@ class Converter(Protocol):
         title: str = "",
         genre: str = "",
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
+        progress_cb=None,
     ) -> Screenplay:
+        """progress_cb(done, total, note)：可选，与 Agent / 团队回调同款签名。"""
         raise NotImplementedError
 
 
@@ -1147,6 +1150,7 @@ class DemoConverter:
         title: str = "",
         genre: str = "",
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
+        progress_cb=None,
     ) -> Screenplay:
         style = _adaptation_style_profile(adaptation_type)
         global_state = extract_global_story_state(chapters)
@@ -1154,6 +1158,16 @@ class DemoConverter:
         # 副词、动作短语注册成新人物。
         known_names = {state.name for state in global_state.characters}
         chapter_slices: list[tuple[Chapter, list[SceneSlice]]] = []
+
+        # 本地转换只要几百毫秒，用户几乎看不到中间态；仍然按章汇报，保证两条实现
+        # 的回调行为一致——只接参数不上报会让调用方无法分辨"没进度"和"不支持"。
+        total = max(1, len(chapters))
+
+        def report(done: int, note: str) -> None:
+            if progress_cb is not None:
+                progress_cb(done, total, note)
+
+        report(0, f"正在按本地规则拆分 {len(chapters)} 个章节的场景。")
 
         for chapter in chapters:
             scene_slices = _split_scene_slices(chapter.content)
@@ -1192,7 +1206,7 @@ class DemoConverter:
 
         scenes: list[Scene] = []
         scene_index = 1
-        for chapter, scene_slices in chapter_slices:
+        for chapter_no, (chapter, scene_slices) in enumerate(chapter_slices, start=1):
             for scene_slice in scene_slices:
                 dialogue = _dialogue_from_text(scene_slice.text, known_names)
                 inner_state = _inner_state_from_text(scene_slice.text, known_names)
@@ -1265,6 +1279,12 @@ class DemoConverter:
                 )
                 scene_index += 1
 
+            report(
+                chapter_no,
+                f"已生成前 {chapter_no}/{len(chapters)} 章的场景（累计 {len(scenes)} 个）",
+            )
+
+        report(total, "正在校验剧本结构")
         resolved_title = title.strip() or "未命名改编"
         return Screenplay(
             schema_version="1.0",
@@ -1352,6 +1372,7 @@ class AIConverter:
         title: str = "",
         genre: str = "",
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
+        progress_cb=None,
     ) -> Screenplay:
         style = _adaptation_style_profile(adaptation_type)
         global_state = extract_global_story_state(chapters)
@@ -1366,49 +1387,80 @@ class AIConverter:
             if character.get("name")
         }
 
-        # 先把所有章节片段列成有序任务，再并发调用 LLM：每个片段相互独立，
-        # 总耗时从“逐个片段串行相加”降到“最慢的片段”。结果按原始顺序回收，
-        # 因此场景顺序与串行时完全一致。
+        # 先切分片段：纯文本操作、不走网络，所以能提前拿到总数用于进度反馈。
+        chunk_specs: list[tuple[Chapter, str, int, int, int]] = []
+        for chapter_no, chapter in enumerate(chapters, start=1):
+            chapter_chunks = _chapter_text_chunks(chapter)
+            for chunk_index, chunk_text in enumerate(chapter_chunks, start=1):
+                chunk_specs.append(
+                    (chapter, chunk_text, chunk_index, len(chapter_chunks), chapter_no)
+                )
+        total = len(chunk_specs)
+
+        def report(done: int, note: str) -> None:
+            """向调用方汇报进度。可能从工作线程调用，实现需自行保证线程安全。"""
+            if progress_cb is not None:
+                progress_cb(done, total, note)
+
         # 每个任务附带按需检索出的前文备忘（只允许引用更早章节，防未来剧情泄漏），
         # 替代此前随章节数线性膨胀的全量 timeline 注入。
+        report(0, f"已切分 {total} 个片段，正在建立前文检索索引。")
         knowledge = build_story_knowledge(
             chapters, global_state, mode="ai", llm_client=self.llm_client
         )
         retrieval_top_k = rag_top_k()
         tasks: list[tuple[Chapter, str, int, int, list[dict]]] = []
-        for chapter_no, chapter in enumerate(chapters, start=1):
-            chapter_chunks = _chapter_text_chunks(chapter)
-            for chunk_index, chunk_text in enumerate(chapter_chunks, start=1):
-                retrieved = knowledge.search(
-                    chunk_text[:400],
-                    top_k=retrieval_top_k,
-                    before_chapter=chapter_no,
-                    kinds=("chunk", "event"),
-                )
-                tasks.append(
-                    (chapter, chunk_text, chunk_index, len(chapter_chunks), retrieved)
-                )
+        # 检索在建线程池之前串行执行：embedding 模式下每次都要 embed 一次 query，
+        # 这段耗时若不单独汇报就会表现为进度条长时间停在起点。
+        for position, spec in enumerate(chunk_specs, start=1):
+            chapter, chunk_text, chunk_index, chunk_count, chapter_no = spec
+            retrieved = knowledge.search(
+                chunk_text[:400],
+                top_k=retrieval_top_k,
+                before_chapter=chapter_no,
+                kinds=("chunk", "event"),
+            )
+            tasks.append((chapter, chunk_text, chunk_index, chunk_count, retrieved))
+            report(0, f"检索前文备忘 {position}/{total}")
 
         results: list[list[dict] | None] = [None] * len(tasks)
         failures: list[str] = []
         ai_profiles: list[dict] = []
+        processed = 0
+        processed_lock = threading.Lock()
 
         def run_task(task_index: int) -> None:
+            nonlocal processed
             chapter, chunk_text, chunk_index, chunk_count, retrieved = tasks[task_index]
-            results[task_index] = self._convert_chapter_chunk(
-                chapter,
-                chunk_text,
-                chunk_index,
-                chunk_count,
-                global_state,
-                characters,
-                adaptation_type,
-                style,
-                retrieved,
-            )
+
+            def notify_retry(attempt: int, reason: str) -> None:
+                report(processed, f"片段 {task_index + 1}/{total} 第 {attempt} 次尝试（{reason}）")
+
+            try:
+                results[task_index] = self._convert_chapter_chunk(
+                    chapter,
+                    chunk_text,
+                    chunk_index,
+                    chunk_count,
+                    global_state,
+                    characters,
+                    adaptation_type,
+                    style,
+                    retrieved,
+                    notify_retry,
+                )
+            finally:
+                # 成功与失败都推进计数：进度反映"已处理"，失败数在收尾时单独汇报。
+                # 计数必须在这里加锁自增，不能挂在下面的回收循环上——那个循环按
+                # 提交顺序阻塞取结果，会让进度先滞后再跳变。
+                with processed_lock:
+                    processed += 1
+                    done = processed
+                report(done, f"已处理 {done}/{total} 个片段")
 
         def run_profiles() -> None:
             # 与片段并发跑：人物小传输出短（截断风险低），失败就保留本地占位，不影响出稿。
+            report(processed, "正在并发提取人物小传")
             try:
                 ai_profiles.extend(
                     AICharacterProfiler(llm_client=self.llm_client).extract(chapters)
@@ -1431,6 +1483,10 @@ class AIConverter:
                     # 内容审查）让整篇转换前功尽弃；只要还有其它片段成功即可出稿。
                     failures.append(str(exc))
             profile_future.result()
+
+        if failures:
+            report(total, f"{len(failures)} 个片段转换失败已跳过，正在整理其余场景")
+        report(total, "正在归一化场景并校验剧本结构")
 
         # 用 AI 人物小传补全 global_state 的 arc/goal/性格，再据此重建顶层 characters。
         if ai_profiles:
@@ -1483,6 +1539,7 @@ class AIConverter:
         adaptation_type: AdaptationType,
         style: AdaptationStyleProfile,
         retrieved: list[dict] | None = None,
+        notify_retry=None,
     ) -> list[dict]:
         roster = [{"id": item["id"], "name": item["name"]} for item in characters]
         memo = [
@@ -1525,6 +1582,9 @@ class AIConverter:
         # 重试必须绕过响应缓存：HTTP 200 但 scenes 不合法的响应若被复用，重试会空转。
         last_error: str = "未知错误"
         for _attempt in range(_CHUNK_CONVERSION_ATTEMPTS):
+            if _attempt and notify_retry is not None:
+                # 重试此前完全不可见：一个片段静默重试三次，用户只看到进度条卡住。
+                notify_retry(_attempt + 1, last_error[:40])
             try:
                 content = self.llm_client.complete_json(prompt, use_cache=(_attempt == 0))
                 data = loads_json_object(content)
