@@ -9,6 +9,8 @@ from .screenplay import Screenplay
 from .agent.models import AgentRunResult
 from .agent.models import TeamRunResult
 from .continuity import ContinuityFinding
+from .scene_chat import ChatTurn
+from .scene_chat import SceneChatMode
 from .scene_rewrite import SceneRewriteMode
 from .scene_rewrite import SceneRewriteOperation
 from .scene_review import HumanVerdict
@@ -110,6 +112,8 @@ class SceneRewriteRequest(BaseModel):
     mode: SceneRewriteMode = "demo"
     character_id: str = ""
     tone: str = "更克制"
+    # feedback 在库内已全线打通（agent/tools.py、mcp_server.py），REST 是唯一漏掉它的调用方。
+    feedback: str = ""
 
 
 class SceneRewriteResponse(BaseModel):
@@ -119,6 +123,26 @@ class SceneRewriteResponse(BaseModel):
     operation: SceneRewriteOperation
     mode: SceneRewriteMode
     message: str
+
+
+class SceneChatRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    # 无状态：历史由前端回传，与其它路由一致（项目里没有任何 REST 路由持有会话状态）。
+    history: list[ChatTurn] = Field(default_factory=list)
+    mode: SceneChatMode = "demo"
+    scene_id: str = ""
+
+
+class SceneChatResponse(BaseModel):
+    reply: str
+    mode: SceneChatMode
+    # 只回话不改剧本时（refusal 非空）后四项为空，前端据此决定是否刷新预览。
+    screenplay: Screenplay | None = None
+    yaml_text: str = ""
+    scene_id: str = ""
+    operation: SceneRewriteOperation | None = None
+    refusal: str = ""
 
 
 class ExampleNovelResponse(BaseModel):

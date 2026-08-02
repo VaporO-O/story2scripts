@@ -25,6 +25,7 @@
         <button id="viewWorkbenchButton" class="view-nav-button is-active" type="button">
           工作台
         </button>
+        <button id="viewProfilesButton" class="view-nav-button" type="button">人物小传</button>
         <button id="viewAgentsButton" class="view-nav-button" type="button">智能改编</button>
         <button id="viewMetricsButton" class="view-nav-button" type="button">运行指标</button>
       </nav>
@@ -109,43 +110,59 @@
             </div>
           </div>
 
-          <div class="rewrite-tools">
-            <div class="rewrite-fields">
-              <label>场景 ID<input id="sceneIdInput" value="scene-1" /></label>
-              <label>
-                重写模式
-                <select id="rewriteModeInput">
+          <div id="conversionProgress" class="conversion-progress hidden">
+            <!-- 细粒度进度会让消息每秒变化多次：只朗读阶段与百分比，
+                 分块明细留在下方非 live 区域，避免读屏软件刷屏。 -->
+            <div class="progress-meta" aria-live="polite">
+              <span id="conversionProgressStage">等待转换</span>
+              <span id="conversionProgressPercent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="conversionProgressBar" class="progress-bar"></div>
+            </div>
+            <p id="conversionProgressMessage">转换任务尚未开始。</p>
+          </div>
+
+          <div id="emptyState" class="empty-state">
+            <div class="script-card">SCENE<br /><strong>01</strong></div>
+            <h3>等待故事开场</h3>
+            <p>生成后的剧本会以分场预览显示，可切换到“源码”直接编辑 YAML 再校验。</p>
+          </div>
+
+          <div id="scriptPreview" class="script-preview hidden"></div>
+          <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
+
+          <div class="scene-chat">
+            <div class="scene-chat-bar">
+              <span id="chatSceneChip" class="scene-chip" title="点剧本里的 SCENE 徽章可切换当前场景">
+                当前场景：scene-1
+              </span>
+              <label class="mode-select">
+                改写模式
+                <select id="chatModeInput">
                   <option value="demo" selected>本地</option>
                   <option value="ai">AI</option>
                 </select>
               </label>
-              <label>
-                角色
-                <select id="rewriteCharacterInput">
-                  <option value="">（自动选择）</option>
-                </select>
-              </label>
-              <label>语气<input id="rewriteToneInput" value="更克制" /></label>
             </div>
-            <div class="rewrite-actions">
-              <button class="ghost-button" data-rewrite-operation="rewrite_dialogue">
-                重新生成本场对白
-              </button>
-              <button class="ghost-button" data-rewrite-operation="strengthen_conflict">
-                加强戏剧冲突
-              </button>
-              <button class="ghost-button" data-rewrite-operation="short_drama_pace">
-                改成短剧节奏
-              </button>
-              <button class="ghost-button" data-rewrite-operation="add_camera_hints">
-                增加镜头提示
-              </button>
-              <button class="ghost-button" data-rewrite-operation="reduce_narration">
-                减少旁白
-              </button>
-              <button class="ghost-button" data-rewrite-operation="adjust_character_voice">
-                调整人物语气
-              </button>
+
+            <!-- 本地模式按关键词匹配操作、且六个本地改写函数都不接 feedback：
+                 用户的原话在本地模式下只用于选操作，细微差别要 AI 模式才生效。
+                 工作台默认本地，所以必须写明，不能让用户以为对话没起作用。 -->
+            <p id="chatModeHint" class="scene-chat-hint">
+              本地模式按关键词识别操作（对白 / 冲突 / 节奏 / 镜头 / 旁白 / 语气），不会理解原话里的细微差别；切到
+              AI 模式后，你的原话会作为改写要求一起交给模型。
+            </p>
+
+            <div id="chatLog" class="chat-log" aria-live="polite"></div>
+
+            <div class="scene-chat-input">
+              <textarea
+                id="chatInput"
+                rows="2"
+                placeholder="直接说要改什么，例如：第三场对白太软，让林夏更强硬一点"
+              ></textarea>
+              <button id="chatSendButton" class="primary-button" type="button">发送</button>
             </div>
           </div>
 
@@ -210,38 +227,23 @@
               </p>
             </details>
           </div>
-
-          <div id="conversionProgress" class="conversion-progress hidden">
-            <!-- 细粒度进度会让消息每秒变化多次：只朗读阶段与百分比，
-                 分块明细留在下方非 live 区域，避免读屏软件刷屏。 -->
-            <div class="progress-meta" aria-live="polite">
-              <span id="conversionProgressStage">等待转换</span>
-              <span id="conversionProgressPercent">0%</span>
-            </div>
-            <div class="progress-track">
-              <div id="conversionProgressBar" class="progress-bar"></div>
-            </div>
-            <p id="conversionProgressMessage">转换任务尚未开始。</p>
-          </div>
-
-          <div id="emptyState" class="empty-state">
-            <div class="script-card">SCENE<br /><strong>01</strong></div>
-            <h3>等待故事开场</h3>
-            <p>生成后的剧本会以分场预览显示，可切换到“源码”直接编辑 YAML 再校验。</p>
-          </div>
-
-          <div id="scriptPreview" class="script-preview hidden"></div>
-          <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
         </section>
       </section>
+      </div>
 
+      <div id="viewProfiles" class="view hidden">
       <section class="profile-panel">
         <div class="section-heading">
           <div>
             <h2>人物小传</h2>
           </div>
-          <p>从小说中自动提取角色定位、性格、目标、关系、出场章节和关键变化。</p>
+          <div class="button-row">
+            <button id="reanalyzeCharactersButton" class="ghost-button">重新分析</button>
+          </div>
         </div>
+        <p class="profile-hint">
+          人物小传只依赖小说原文：在「工作台」粘贴或导入正文后，点这里的「重新分析」即可提取角色定位、性格、目标、关系、出场章节和关键变化。
+        </p>
         <div id="profileEmptyState" class="profile-empty">点击“分析人物”后，将在这里生成人物小传表。</div>
         <div id="profileGrid" class="profile-grid"></div>
       </section>

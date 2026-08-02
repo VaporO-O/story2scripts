@@ -69,12 +69,28 @@ class ConversionJobStore(DurableJobStore):
                 progress = 45 + int(span * done / max(1, total))
                 self._update(job_id, progress=progress, stage="生成剧本", message=note)
 
+            scene_count = 0
+
+            def meta_cb(meta: dict) -> None:
+                # 先于第一个场景到达：流式场景里的说话人是 character id，
+                # 前端要靠这份名册才能显示人名而不是 character-1。
+                self.publish(job_id, {"type": "meta", "meta": meta})
+
+            def scene_cb(scene: dict) -> None:
+                # 场景定稿即推送，让用户看到剧本逐场长出来。编号在转换器的水位
+                # 刷新时就已定终值，所以这里推出去的 id 不会再变动。
+                nonlocal scene_count
+                scene_count += 1
+                self.publish(job_id, {"type": "scene", "index": scene_count, "scene": scene})
+
             screenplay = converter.convert(
                 chapters=chapters,
                 title=request.title,
                 genre=request.genre,
                 adaptation_type=request.adaptation_type,
                 progress_cb=progress_cb,
+                scene_cb=scene_cb,
+                meta_cb=meta_cb,
             )
 
             review_report = None

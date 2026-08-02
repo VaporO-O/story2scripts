@@ -1,10 +1,13 @@
+import json
 import os
 from hmac import compare_digest
 from pathlib import Path
+from queue import Empty
 from time import perf_counter
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api_models import ChapterPreviewItem
@@ -33,6 +36,8 @@ from .api_models import ReviewReportMergeRequest
 from .api_models import ReviewReportMergeResponse
 from .api_models import RagQueryRequest
 from .api_models import RagQueryResponse
+from .api_models import SceneChatRequest
+from .api_models import SceneChatResponse
 from .api_models import SceneReviewRequest
 from .api_models import SceneReviewResponse
 from .api_models import SceneRewriteRequest
@@ -59,7 +64,8 @@ from .scene_review import review_and_improve
 from .scene_review import review_scenes_report
 from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
-from .security import API_TOKEN_ENV, screen_novel_text
+from .scene_chat import parse_rewrite_intent
+from .security import API_TOKEN_ENV, screen_chat_message, screen_novel_text
 from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
@@ -280,6 +286,93 @@ async def cancel_convert_job(job_id: str) -> ConvertJobStatusResponse:
     return conversion_jobs.snapshot(job_id)
 
 
+def _sse_frame(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+# 队列是线程 Queue（事件由工作线程推送），阻塞 get 会占住事件循环：改为
+# 短轮询 + 让出。这两个常量只影响本端点的响应粒度，与业务无关。
+_SSE_POLL_SECONDS = 0.2
+_SSE_KEEPALIVE_SECONDS = 15.0
+_TERMINAL_STATUSES = ("succeeded", "failed")
+
+
+@app.get("/api/convert/jobs/{job_id}/events")
+async def stream_convert_job_events(job_id: str, request: Request) -> StreamingResponse:
+    """SSE 事件流：转换过程中逐场景推送，让剧本边生成边显示。
+
+    没有引入 sse-starlette——它只是 mcp 的传递依赖（pyproject 未声明），用了
+    就成了隐式依赖。StreamingResponse + anyio 已经够用。
+    前端仍保留 1Hz 轮询作为回退：本端点连不上时不影响转换本身。
+    """
+    if not conversion_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="转换任务不存在。")
+
+    async def event_stream():
+        queue, backlog = conversion_jobs.subscribe(job_id)
+        try:
+            finished = False
+            # 补发订阅之前已发生的事件：重连不丢场景。
+            for event in backlog:
+                yield _sse_frame(event)
+                if event.get("type") == "done":
+                    finished = True
+
+            idle = 0.0
+            while not finished:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = queue.get_nowait()
+                except Empty:
+                    # 任务可能在订阅之前就结束了（缓存命中时转换近乎瞬间完成，
+                    # 事件镜像也已随之释放）：补一条终态事件收尾，而不是空转。
+                    if conversion_jobs.snapshot(job_id).status in _TERMINAL_STATUSES:
+                        # 终态确立后不会再有新的 publish，但这两步之间可能刚好
+                        # 到过事件：再排空一次，避免丢掉最后几场。
+                        while True:
+                            try:
+                                yield _sse_frame(queue.get_nowait())
+                            except Empty:
+                                break
+                        snapshot = conversion_jobs.snapshot(job_id)
+                        yield _sse_frame(
+                            {
+                                "type": "done",
+                                "status": snapshot.status,
+                                "progress": snapshot.progress,
+                                "stage": snapshot.stage,
+                                "message": snapshot.message,
+                            }
+                        )
+                        break
+                    await anyio.sleep(_SSE_POLL_SECONDS)
+                    idle += _SSE_POLL_SECONDS
+                    if idle >= _SSE_KEEPALIVE_SECONDS:
+                        # 注释行（以 : 开头）不触发前端事件，只用于保活。
+                        idle = 0.0
+                        yield ": keepalive\n\n"
+                    continue
+                idle = 0.0
+                yield _sse_frame(event)
+                if event.get("type") == "done":
+                    break
+        finally:
+            # 断开时必须移除订阅者，否则关掉的标签页会留下一个持续增长的队列。
+            conversion_jobs.unsubscribe(job_id, queue)
+            conversion_jobs.discard_events_if_idle(job_id)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # 防反向代理缓冲，否则事件会被攒成一批、流式效果消失。
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/api/jobs", response_model=JobListResponse)
 async def list_all_jobs(limit: int = 50) -> JobListResponse:
     return JobListResponse(jobs=list_recent_jobs(limit=limit))
@@ -426,6 +519,7 @@ async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewrite
             character_id=request.character_id,
             tone=request.tone,
             mode=request.mode,
+            feedback=request.feedback,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"局部重写失败：{exc}") from exc
@@ -437,6 +531,60 @@ async def rewrite_screenplay_scene(request: SceneRewriteRequest) -> SceneRewrite
         operation=request.operation,
         mode=request.mode,
         message=message,
+    )
+
+
+@app.post("/api/scenes/chat", response_model=SceneChatResponse)
+async def chat_rewrite_scene(request: SceneChatRequest) -> SceneChatResponse:
+    """对话式改写：解析一句自然语言要求，再执行对应的受校验局部重写。"""
+    # 这句话会进入意图解析提示词的指令位，按 Agent 目标的口径阻断而非告警。
+    try:
+        screen_chat_message(request.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        screenplay = screenplay_from_yaml(request.yaml_text)
+        intent = parse_rewrite_intent(
+            screenplay=screenplay,
+            message=request.message,
+            history=request.history,
+            mode=request.mode,
+            current_scene_id=request.scene_id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"改写要求解析失败：{exc}") from exc
+
+    if intent.operation is None:
+        # 解析不出可执行操作（含"改到白天"这类硬性不可改字段）：只回话，不动剧本。
+        return SceneChatResponse(
+            reply=intent.reply or intent.refusal,
+            mode=request.mode,
+            scene_id=intent.scene_id,
+            refusal=intent.refusal,
+        )
+
+    try:
+        updated_screenplay, message = rewrite_scene(
+            screenplay=screenplay,
+            scene_id=intent.scene_id,
+            operation=intent.operation,
+            character_id=intent.character_id,
+            tone=intent.tone or "更克制",
+            mode=request.mode,
+            # 用户原话随行：操作定大方向，原话提供枚举表达不了的细微差别。
+            feedback=intent.feedback,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"局部重写失败：{exc}") from exc
+
+    return SceneChatResponse(
+        reply=f"{intent.reply} {message}".strip(),
+        mode=request.mode,
+        screenplay=updated_screenplay,
+        yaml_text=screenplay_to_yaml(updated_screenplay),
+        scene_id=intent.scene_id,
+        operation=intent.operation,
     )
 
 
