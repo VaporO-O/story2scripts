@@ -79,11 +79,14 @@ const refreshMetricsButton = document.querySelector("#refreshMetricsButton");
 const metricsEmptyState = document.querySelector("#metricsEmptyState");
 const metricsContent = document.querySelector("#metricsContent");
 const viewWorkbench = document.querySelector("#viewWorkbench");
+const viewProfiles = document.querySelector("#viewProfiles");
 const viewAgents = document.querySelector("#viewAgents");
 const viewMetrics = document.querySelector("#viewMetrics");
 const viewWorkbenchButton = document.querySelector("#viewWorkbenchButton");
+const viewProfilesButton = document.querySelector("#viewProfilesButton");
 const viewAgentsButton = document.querySelector("#viewAgentsButton");
 const viewMetricsButton = document.querySelector("#viewMetricsButton");
+const reanalyzeCharactersButton = document.querySelector("#reanalyzeCharactersButton");
 const screenplayStatusText = document.querySelector("#screenplayStatusText");
 const backToWorkbenchButton = document.querySelector("#backToWorkbenchButton");
 const agentPollIntervalMs = 1000;
@@ -720,6 +723,7 @@ function updateScreenplayStatus() {
 function setActiveView(view) {
   const views = {
     workbench: [viewWorkbenchButton, viewWorkbench],
+    profiles: [viewProfilesButton, viewProfiles],
     agents: [viewAgentsButton, viewAgents],
     metrics: [viewMetricsButton, viewMetrics],
   };
@@ -933,7 +937,19 @@ async function convertNovel() {
 }
 
 async function analyzeCharacters() {
-  analyzeCharactersButton.disabled = true;
+  // 触发按钮在「工作台」，结果渲染在「人物小传」视图：两处都要置灰，
+  // 否则切过去还能再点一次，产生并发请求。
+  const triggers = [analyzeCharactersButton, reanalyzeCharactersButton].filter(Boolean);
+
+  if (!novelInput.value.trim()) {
+    setMessage("请先在「工作台」粘贴或导入小说正文，再分析人物。", true);
+    setActiveView("workbench");
+    return;
+  }
+
+  triggers.forEach((button) => {
+    button.disabled = true;
+  });
   const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
   setMessage(`正在使用${modeName}模式分析人物小传……`);
 
@@ -950,11 +966,15 @@ async function analyzeCharacters() {
     }
 
     renderProfiles(data.profiles);
+    // 结果不在当前视图里，照 convertNovel 的做法直接把用户带过去。
+    setActiveView("profiles");
     setMessage(`已提取 ${data.profiles.length} 个人物小传，当前模式：${data.mode}。`);
   } catch (error) {
     setMessage(error.message, true);
   } finally {
-    analyzeCharactersButton.disabled = false;
+    triggers.forEach((button) => {
+      button.disabled = false;
+    });
   }
 }
 
@@ -1669,6 +1689,7 @@ novelFileInput.addEventListener("change", () => {
 });
 document.querySelector("#convertButton").addEventListener("click", convertNovel);
 document.querySelector("#analyzeCharactersButton").addEventListener("click", analyzeCharacters);
+reanalyzeCharactersButton.addEventListener("click", analyzeCharacters);
 document.querySelector("#validateButton").addEventListener("click", validateYaml);
 document.querySelector("#downloadButton").addEventListener("click", downloadYaml);
 previewViewButton.addEventListener("click", () => setScriptView("preview"));
@@ -1686,6 +1707,7 @@ runTeamButton.addEventListener("click", runTeam);
 listTeamSessionsButton.addEventListener("click", listTeamSessions);
 refreshMetricsButton.addEventListener("click", refreshMetrics);
 viewWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));
+viewProfilesButton.addEventListener("click", () => setActiveView("profiles"));
 viewAgentsButton.addEventListener("click", () => setActiveView("agents"));
 viewMetricsButton.addEventListener("click", () => setActiveView("metrics"));
 backToWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));

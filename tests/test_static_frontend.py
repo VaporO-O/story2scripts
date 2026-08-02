@@ -239,6 +239,44 @@ def test_workbench_switches_views() -> None:
     assert 'setActiveView("workbench")' in script
 
 
+def test_workbench_exposes_profiles_view() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    # 人物小传只依赖小说原文、与剧本流程无关，独立成第 4 个分区
+    assert 'id="viewProfilesButton"' in html
+    assert 'id="viewProfiles"' in html
+    assert 'id="reanalyzeCharactersButton"' in html
+    assert 'id="profileGrid"' in html
+
+
+def test_workbench_switches_to_profiles_after_analysis() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # 触发按钮留在小说面板（它读 novelInput），结果在人物小传视图：分析完要把用户带过去
+    assert 'viewProfilesButton.addEventListener' in script
+    assert 'setActiveView("profiles")' in script
+    assert "reanalyzeCharactersButton.addEventListener" in script
+
+
+def test_review_tools_render_below_preview() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    # 机审是对预览内容的操作，必须排在预览之后而不是抢占预览上方的空间
+    preview_at = html.index('id="scriptPreview"')
+    review_at = html.index('class="review-tools"')
+    assert preview_at < review_at
+
+
+def test_screenplay_preview_is_flexible() -> None:
+    css = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+
+    # 预览/空状态/YAML 三块共用一条伸缩规则；硬钉死高度会让剧本空间上不去，
+    # 三处不同步还会导致切换视图时面板跳动
+    assert "height: 354px" not in css
+    assert ".script-panel > .script-preview," in css
+    assert ".script-panel > .empty-state," in css
+
+
 def test_workbench_status_bar_is_global() -> None:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 

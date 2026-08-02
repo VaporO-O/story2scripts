@@ -89,7 +89,8 @@ main {
 
 .workspace {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* 小说原文只需够读，剧本是主角：把宽度让给右侧。 */
+  grid-template-columns: minmax(360px, 5fr) 7fr;
   gap: 16px;
   padding-bottom: 18px;
 }
@@ -160,6 +161,18 @@ select {
 
 select {
   min-height: 38px;
+}
+
+/* 左右两栏同高（grid 默认 stretch），右栏现在跟着视口长高，
+   左栏若维持固定高度就会在页脚下方留出一块死白。 */
+.workspace > .panel:not(.script-panel) {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace > .panel:not(.script-panel) > textarea,
+.workspace > .panel:not(.script-panel) > .chapter-view {
+  flex: 1 1 auto;
 }
 
 textarea {
@@ -257,6 +270,21 @@ textarea {
 
 .script-panel {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  /* flex:1 只能分配「已确定高度」里的剩余空间。容器不给下限的话，
+     下方三块会停在各自 min-height 上，撑不满视口。 */
+  min-height: min(1000px, calc(100vh - 150px));
+}
+
+/* 预览 / 空状态 / YAML 源码共用同一套伸缩规则。三者是互斥显示的同一块区域，
+   任一处单独改高度都会让切换视图时面板跳动，所以合并成一条而不是各写一遍。 */
+.script-panel > .script-preview,
+.script-panel > .empty-state,
+.script-panel > textarea {
+  flex: 1 1 auto;
+  min-height: 420px;
+  overflow-y: auto;
 }
 
 .rewrite-tools {
@@ -330,14 +358,12 @@ textarea {
 }
 
 .script-panel textarea {
-  height: 354px;
   background: #0f172a;
   color: #e5edf7;
   font: 13px/1.65 var(--font-code);
 }
 
 .empty-state {
-  height: 354px;
   display: grid;
   place-content: center;
   text-align: center;
@@ -528,6 +554,13 @@ textarea {
   border-radius: 5px;
 }
 
+.profile-hint {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .section-heading {
   display: flex;
   align-items: end;
@@ -619,7 +652,6 @@ textarea {
 }
 
 .script-preview {
-  height: 354px;
   overflow-y: auto;
   padding: 22px;
   background:
@@ -924,13 +956,26 @@ textarea {
   .convert-controls {
     justify-content: flex-start;
   }
+
+  /* 单列堆叠时两个面板上下排，各自撑满视口高度会让页面长得离谱：
+     取消 100vh 联动，回落到固定下限。 */
+  .script-panel {
+    min-height: 0;
+  }
+
+  .script-panel > .script-preview,
+  .script-panel > .empty-state,
+  .script-panel > textarea {
+    min-height: 360px;
+  }
 }
 
 
 /* 场景质量审校 */
 .review-tools {
   padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
+  /* 审校是对预览内容的操作，现在排在预览下方：分隔线跟着挪到上边。 */
+  border-top: 1px solid var(--line);
 }
 
 .review-tools .rewrite-fields {

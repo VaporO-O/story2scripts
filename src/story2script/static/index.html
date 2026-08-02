@@ -25,6 +25,7 @@
         <button id="viewWorkbenchButton" class="view-nav-button is-active" type="button">
           工作台
         </button>
+        <button id="viewProfilesButton" class="view-nav-button" type="button">人物小传</button>
         <button id="viewAgentsButton" class="view-nav-button" type="button">智能改编</button>
         <button id="viewMetricsButton" class="view-nav-button" type="button">运行指标</button>
       </nav>
@@ -149,6 +150,28 @@
             </div>
           </div>
 
+          <div id="conversionProgress" class="conversion-progress hidden">
+            <!-- 细粒度进度会让消息每秒变化多次：只朗读阶段与百分比，
+                 分块明细留在下方非 live 区域，避免读屏软件刷屏。 -->
+            <div class="progress-meta" aria-live="polite">
+              <span id="conversionProgressStage">等待转换</span>
+              <span id="conversionProgressPercent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="conversionProgressBar" class="progress-bar"></div>
+            </div>
+            <p id="conversionProgressMessage">转换任务尚未开始。</p>
+          </div>
+
+          <div id="emptyState" class="empty-state">
+            <div class="script-card">SCENE<br /><strong>01</strong></div>
+            <h3>等待故事开场</h3>
+            <p>生成后的剧本会以分场预览显示，可切换到“源码”直接编辑 YAML 再校验。</p>
+          </div>
+
+          <div id="scriptPreview" class="script-preview hidden"></div>
+          <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
+
           <div class="review-tools">
             <div class="rewrite-fields">
               <label>
@@ -210,38 +233,23 @@
               </p>
             </details>
           </div>
-
-          <div id="conversionProgress" class="conversion-progress hidden">
-            <!-- 细粒度进度会让消息每秒变化多次：只朗读阶段与百分比，
-                 分块明细留在下方非 live 区域，避免读屏软件刷屏。 -->
-            <div class="progress-meta" aria-live="polite">
-              <span id="conversionProgressStage">等待转换</span>
-              <span id="conversionProgressPercent">0%</span>
-            </div>
-            <div class="progress-track">
-              <div id="conversionProgressBar" class="progress-bar"></div>
-            </div>
-            <p id="conversionProgressMessage">转换任务尚未开始。</p>
-          </div>
-
-          <div id="emptyState" class="empty-state">
-            <div class="script-card">SCENE<br /><strong>01</strong></div>
-            <h3>等待故事开场</h3>
-            <p>生成后的剧本会以分场预览显示，可切换到“源码”直接编辑 YAML 再校验。</p>
-          </div>
-
-          <div id="scriptPreview" class="script-preview hidden"></div>
-          <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
         </section>
       </section>
+      </div>
 
+      <div id="viewProfiles" class="view hidden">
       <section class="profile-panel">
         <div class="section-heading">
           <div>
             <h2>人物小传</h2>
           </div>
-          <p>从小说中自动提取角色定位、性格、目标、关系、出场章节和关键变化。</p>
+          <div class="button-row">
+            <button id="reanalyzeCharactersButton" class="ghost-button">重新分析</button>
+          </div>
         </div>
+        <p class="profile-hint">
+          人物小传只依赖小说原文：在「工作台」粘贴或导入正文后，点这里的「重新分析」即可提取角色定位、性格、目标、关系、出场章节和关键变化。
+        </p>
         <div id="profileEmptyState" class="profile-empty">点击“分析人物”后，将在这里生成人物小传表。</div>
         <div id="profileGrid" class="profile-grid"></div>
       </section>
