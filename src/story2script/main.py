@@ -246,6 +246,7 @@ def _convert_novel_impl(request: ConvertRequest) -> ConvertResponse:
         adaptation_type=request.adaptation_type,
         review_report=review_report,
         security_warnings=security_warnings,
+        conversion_warnings=list(getattr(converter, "last_run_warnings", [])),
     )
 
 

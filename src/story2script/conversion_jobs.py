@@ -106,6 +106,7 @@ class ConversionJobStore(DurableJobStore):
                 adaptation_type=request.adaptation_type,
                 review_report=review_report,
                 security_warnings=security_warnings,
+                conversion_warnings=list(getattr(converter, "last_run_warnings", [])),
             )
             self._complete(job_id, result)
             record(ok=True, scene_count=len(result.screenplay.scenes))

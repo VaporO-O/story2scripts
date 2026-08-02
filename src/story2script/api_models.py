@@ -68,6 +68,8 @@ class ConvertResponse(BaseModel):
     adaptation_type: AdaptationType
     review_report: ReviewReport | None = None
     security_warnings: list[str] = []
+    # 非致命的转换告警，如"3/9 个片段失败已跳过"。剧本偏薄时用户需要知道原因。
+    conversion_warnings: list[str] = []
 
 
 ConvertJobStatus = Literal["queued", "running", "succeeded", "failed"]

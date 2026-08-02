@@ -39,3 +39,10 @@ def sandbox_file_roots(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 @pytest.fixture(autouse=True)
 def no_api_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("STORY2SCRIPT_API_TOKEN", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 默认退避是 1s+3s，会让每个走重试路径的测试白等 4 秒。需要验证退避本身的
+    # 测试自己覆盖这个环境变量。
+    monkeypatch.setenv("AI_RETRY_BACKOFF_SECONDS", "0")
