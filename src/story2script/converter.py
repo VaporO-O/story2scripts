@@ -1,6 +1,7 @@
 import json
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
@@ -8,7 +9,7 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from .character_profiles_ai import PROFILE_PLACEHOLDERS, AICharacterProfiler
-from .llm_client import LLMClient, loads_json_object
+from .llm_client import LLMClient, is_fatal_error, loads_json_object
 from .parser import Chapter
 from .rag import build_story_knowledge, rag_top_k
 from .screenplay import DEFAULT_ADAPTATION_TYPE
@@ -47,6 +48,9 @@ AI_CHAPTER_CHUNK_CHAR_LIMIT = 1800
 
 class Converter(Protocol):
     mode: str
+    # 本次转换的非致命告警（如被跳过的失败片段）。调用方在 convert 返回后读取，
+    # 用于把"为什么剧本这么薄"如实告诉用户。
+    last_run_warnings: list[str]
 
     def convert(
         self,
@@ -1144,6 +1148,10 @@ class DemoConverter:
 
     mode = "demo"
 
+    def __init__(self) -> None:
+        # 实例级列表：类级可变默认值会被所有实例共享。
+        self.last_run_warnings: list[str] = []
+
     def convert(
         self,
         chapters: list[Chapter],
@@ -1152,6 +1160,7 @@ class DemoConverter:
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
         progress_cb=None,
     ) -> Screenplay:
+        self.last_run_warnings = []
         style = _adaptation_style_profile(adaptation_type)
         global_state = extract_global_story_state(chapters)
         # 仅以全局状态表中已识别的真实人物作为说话人解析依据，杜绝转换阶段再次把
@@ -1365,6 +1374,7 @@ class AIConverter:
 
     def __init__(self, llm_client: LLMClient | None = None, client=None) -> None:
         self.llm_client = llm_client or LLMClient(client=client, usage_label="AI mode")
+        self.last_run_warnings: list[str] = []
 
     def convert(
         self,
@@ -1374,6 +1384,8 @@ class AIConverter:
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
         progress_cb=None,
     ) -> Screenplay:
+        # 每轮开头清空：实例被复用时，上一轮的告警不应泄漏到这一轮。
+        self.last_run_warnings = []
         style = _adaptation_style_profile(adaptation_type)
         global_state = extract_global_story_state(chapters)
 
@@ -1390,7 +1402,9 @@ class AIConverter:
         # 先切分片段：纯文本操作、不走网络，所以能提前拿到总数用于进度反馈。
         chunk_specs: list[tuple[Chapter, str, int, int, int]] = []
         for chapter_no, chapter in enumerate(chapters, start=1):
-            chapter_chunks = _chapter_text_chunks(chapter)
+            chapter_chunks = _chapter_text_chunks(
+                chapter, limit=self.llm_client.chapter_chunk_chars
+            )
             for chunk_index, chunk_text in enumerate(chapter_chunks, start=1):
                 chunk_specs.append(
                     (chapter, chunk_text, chunk_index, len(chapter_chunks), chapter_no)
@@ -1486,6 +1500,12 @@ class AIConverter:
 
         if failures:
             report(total, f"{len(failures)} 个片段转换失败已跳过，正在整理其余场景")
+            # 跳过的片段此前只出现在滚动的进度消息里，最终响应不带这个信息：
+            # 用户拿到一份很薄的剧本却不知道为什么。这里让它进入结果。
+            self.last_run_warnings.append(
+                f"{len(failures)}/{total} 个片段转换失败已跳过，"
+                f"剧本内容不完整。最后一个错误：{failures[-1][:160]}"
+            )
         report(total, "正在归一化场景并校验剧本结构")
 
         # 用 AI 人物小传补全 global_state 的 arc/goal/性格，再据此重建顶层 characters。
@@ -1581,15 +1601,26 @@ class AIConverter:
         # 空响应、超时、网络抖动、偶发非法 JSON 多为瞬时问题，重试几次往往能恢复。
         # 重试必须绕过响应缓存：HTTP 200 但 scenes 不合法的响应若被复用，重试会空转。
         last_error: str = "未知错误"
+        backoff = self.llm_client.retry_backoff_seconds
         for _attempt in range(_CHUNK_CONVERSION_ATTEMPTS):
-            if _attempt and notify_retry is not None:
-                # 重试此前完全不可见：一个片段静默重试三次，用户只看到进度条卡住。
-                notify_retry(_attempt + 1, last_error[:40])
+            if _attempt:
+                # 退避后再试：网关超时（504）、限流（429）这类瞬时失败立刻重试往往
+                # 仍然失败，还会加重上游负担。此前三次重试几乎在同一瞬间打完。
+                delay = backoff[min(_attempt - 1, len(backoff) - 1)] if backoff else 0.0
+                if notify_retry is not None:
+                    # 重试此前完全不可见：一个片段静默重试三次，用户只看到进度条卡住。
+                    waiting = f"，等待 {delay:g}s 后重试" if delay else ""
+                    notify_retry(_attempt + 1, f"{last_error[:40]}{waiting}")
+                if delay:
+                    time.sleep(delay)
             try:
                 content = self.llm_client.complete_json(prompt, use_cache=(_attempt == 0))
                 data = loads_json_object(content)
             except ValueError as exc:
                 last_error = str(exc)
+                if is_fatal_error(exc):
+                    # 配置缺失或 4xx：重试多少次都一样，立即放弃，不白等退避。
+                    break
                 continue
             scenes = None
             if isinstance(data, dict):

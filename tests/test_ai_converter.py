@@ -3,6 +3,7 @@ import json
 import httpx
 import pytest
 
+import story2script.converter as converter_module
 from story2script.converter import AIConverter
 from story2script.parser import parse_chapters
 
@@ -527,3 +528,130 @@ def test_ai_converter_reports_skipped_failures(monkeypatch: pytest.MonkeyPatch) 
     assert any("失败已跳过" in note for _, _, note in events)
     # 失败的片段也计入"已处理"，进度不会停在中途
     assert events[-1][0] == events[-1][1]
+
+
+# ---------------------------------------------------------------- 504 相关修复
+
+
+def test_retry_uses_backoff_and_reports_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """瞬时失败（如网关 504）应退避后重试，而不是三次挤在同一瞬间。"""
+    configure_ai(monkeypatch)
+    monkeypatch.setenv("AI_RETRY_BACKOFF_SECONDS", "1,3")
+    slept: list[float] = []
+    monkeypatch.setattr(converter_module.time, "sleep", lambda seconds: slept.append(seconds))
+
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if "本章片段原文" not in prompt:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+        attempts["count"] += 1
+        if attempts["count"] <= 2:
+            return httpx.Response(504)          # 网关超时：值得重试
+        title = prompt.split("本章标题：")[1].split("\n")[0]
+        return chapter_response([scene_dict(source_chapter=title)])
+
+    events: list[str] = []
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    screenplay = converter.convert(
+        parse_chapters("第一章 甲\n甲的正文。\n第二章 乙\n乙的正文。\n第三章 丙\n丙的正文。")[:1]
+        + parse_chapters("第一章 甲\n甲的正文。\n第二章 乙\n乙的正文。\n第三章 丙\n丙的正文。")[1:],
+        progress_cb=lambda done, total, note: events.append(note),
+    )
+
+    assert screenplay.scenes
+    assert slept[:2] == [1.0, 3.0]                       # 两次退避按配置递增
+    assert any("等待" in note and "重试" in note for note in events)
+
+
+def test_fatal_error_skips_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """401 这类客户端错误重试也没用，应立即放弃而不是白等两轮退避。"""
+    configure_ai(monkeypatch)
+    monkeypatch.setenv("AI_RETRY_BACKOFF_SECONDS", "1,3")
+    slept: list[float] = []
+    monkeypatch.setattr(converter_module.time, "sleep", lambda seconds: slept.append(seconds))
+    chunk_calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if "本章片段原文" not in prompt:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+        chunk_calls["count"] += 1
+        return httpx.Response(401)
+
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(ValueError, match="AI 全文转换失败"):
+        converter.convert(NOVEL_CHAPTERS)
+
+    # 每个片段只尝试一次（共 3 章 → 3 个片段），且完全没有退避等待
+    assert chunk_calls["count"] == 3
+    assert slept == []
+
+
+def test_chunk_char_limit_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """调小分块上限可缩短单次请求，是应对网关超时最直接的手段。"""
+    configure_ai(monkeypatch)
+    long_novel = (
+        "第一章 甲\n" + "甲的正文。" * 200 + "\n"
+        "第二章 乙\n" + "乙的正文。" * 200 + "\n"
+        "第三章 丙\n" + "丙的正文。" * 200
+    )
+    chapters = parse_chapters(long_novel)
+
+    def make_counter():
+        seen = {"count": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+            if "本章片段原文" not in prompt:
+                return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+            seen["count"] += 1
+            title = prompt.split("本章标题：")[1].split("\n")[0]
+            return chapter_response([scene_dict(source_chapter=title)])
+
+        return handler, seen
+
+    handler_wide, wide = make_counter()
+    monkeypatch.setenv("AI_CHAPTER_CHUNK_CHARS", "1800")
+    AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler_wide))).convert(chapters)
+
+    handler_narrow, narrow = make_counter()
+    monkeypatch.setenv("AI_CHAPTER_CHUNK_CHARS", "400")
+    AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler_narrow))).convert(chapters)
+
+    assert narrow["count"] > wide["count"]
+
+
+def test_skipped_chunks_surface_as_conversion_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """被跳过的片段必须出现在结果里：否则用户拿到很薄的剧本却不知道原因。"""
+    configure_ai(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if "本章片段原文" not in prompt:
+            return httpx.Response(200, json={"choices": [{"message": {"content": "[]"}}]})
+        title = prompt.split("本章标题：")[1].split("\n")[0]
+        if "第一章" in title:
+            return httpx.Response(504)      # 首章始终网关超时
+        return chapter_response([scene_dict(source_chapter=title)])
+
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    screenplay = converter.convert(NOVEL_CHAPTERS)
+
+    assert screenplay.scenes                      # 其余片段仍出稿
+    assert converter.last_run_warnings
+    warning = converter.last_run_warnings[0]
+    assert "失败已跳过" in warning
+    assert "不完整" in warning
+
+
+def test_warnings_reset_between_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ai(monkeypatch)
+    handler, _ = _progress_handler()
+    converter = AIConverter(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    converter.last_run_warnings = ["上一轮的陈旧告警"]
+    converter.convert(NOVEL_CHAPTERS)
+
+    assert converter.last_run_warnings == []

@@ -909,6 +909,7 @@ async function convertNovel() {
     }
     showScreenplay(data.screenplay, data.yaml_text);
     const securityWarnings = data.security_warnings || [];
+    const conversionWarnings = data.conversion_warnings || [];
     setMessage(
       `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。` +
         (data.review_report
@@ -918,7 +919,10 @@ async function convertNovel() {
           : "") +
         (securityWarnings.length
           ? `安全提示：原文含 ${securityWarnings.length} 处疑似提示注入内容（已按数据处理，未影响转换）。`
-          : ""),
+          : "") +
+        // 片段被跳过意味着剧本不完整，必须显式告知，否则用户只会觉得"效果不好"。
+        (conversionWarnings.length ? ` ${conversionWarnings.join(" ")}` : ""),
+      conversionWarnings.length > 0,
     );
   } catch (error) {
     setMessage(error.message, true);

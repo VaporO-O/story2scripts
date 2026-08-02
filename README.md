@@ -99,15 +99,20 @@ Story2Script 的核心原则是“叙述 -> 戏剧化”。小说可以依靠心
 
 ### AI 模式
 
-`mode: "ai"` 使用 OpenAI-compatible Chat Completions API。配置写在项目根目录正式 `.env` 中，系统会自动读取：
+`mode: "ai"` 使用 OpenAI-compatible Chat Completions 或 Responses API。配置写在项目根目录正式 `.env` 中，系统会自动读取：
 
 ```bash
 AI_API_KEY=your-api-key
 AI_BASE_URL=https://your-provider.example/v1
 AI_MODEL=your-model-name
+AI_WIRE_API=chat_completions
+AI_REASONING_EFFORT=
+AI_DISABLE_RESPONSE_STORAGE=false
 AI_TIMEOUT_SECONDS=120
 AI_MAX_TOKENS=8192
 AI_MAX_CONCURRENCY=4
+AI_CHAPTER_CHUNK_CHARS=1800
+AI_RETRY_BACKOFF_SECONDS=1,3
 AI_REVIEW_THRESHOLD=7.0
 AI_REVIEW_MAX_ROUNDS=2
 AI_EMBED_MODEL=your-embedding-model
@@ -119,11 +124,32 @@ RAG_TOP_K=3
 
 - `.env` 已被 git 忽略，不要提交真实 API Key。
 - 系统环境变量优先级高于 `.env`。
+- `AI_WIRE_API` 可选值为 `chat_completions`（默认）或 `responses`；系统会分别在 `AI_BASE_URL` 后拼接 `/chat/completions` 或 `/responses`。
+- `AI_REASONING_EFFORT` 用于 Responses reasoning 配置，例如 `xhigh`；启用 reasoning 时不发送 `temperature`。
+- `AI_DISABLE_RESPONSE_STORAGE=true` 时，Responses 请求会发送 `store: false`。
 - `AI_MAX_TOKENS` 可选；当模型输出被截断时可以调高，例如 `16384`。
 - `AI_MAX_CONCURRENCY` 控制分块转换与审校的并发请求数，默认 `4`。
+- `AI_CHAPTER_CHUNK_CHARS` 控制单个分块的字符上限，默认 `1800`（下限 200）。调小可缩短单次请求的输入与输出，代价是分块数与总调用次数上升。
+- `AI_RETRY_BACKOFF_SECONDS` 是分块重试之间的等待秒数，逗号分隔，默认 `1,3`；设为 `0` 关闭等待。
 - `AI_REVIEW_THRESHOLD` / `AI_REVIEW_MAX_ROUNDS` 控制机审及格线（0-10）与自动修正轮次上限。
 - `AI_EMBED_MODEL` 可选；配置后 RAG 前文检索使用语义 embedding，否则用本地词法检索。
 - 没有 API Key 时继续使用本地模式即可演示。
+
+### 转换失败排查
+
+分块转换的单个片段重试到上限仍失败时会被**跳过**，只要还有片段成功就照常出稿——所以"只得到一个片段"通常意味着大部分片段都失败了。失败数与最后一个错误会出现在响应的 `conversion_warnings` 里，工作台也会以错误样式提示。
+
+先看 `GET /api/metrics` 与 `GET /api/metrics/events?limit=50` 判断失败类型（`error_kind`）：
+
+| error_kind | 含义 | 处理 |
+| --- | --- | --- |
+| `http_status` 504 / 502 | **网关超时**：网关先放弃并返回，不是本项目的客户端超时，调 `AI_TIMEOUT_SECONDS` 无效 | 调小 `AI_CHAPTER_CHUNK_CHARS`（如 `800`）与 `AI_MAX_TOKENS` 缩短单次请求；把 `AI_MAX_CONCURRENCY` 降到 `1` 避免网关排队 |
+| `http_status` 429 | 限流 | `AI_MAX_CONCURRENCY=1`，并调大 `AI_RETRY_BACKOFF_SECONDS`（如 `5,15`） |
+| `http_status` 401 / 403 | 凭证或权限问题 | 属于"重试也没用"，会立即失败不再退避；检查 `AI_API_KEY` 与 `AI_BASE_URL` |
+| `timeout` | 本项目的客户端超时（`AI_TIMEOUT_SECONDS`）先到 | 调高 `AI_TIMEOUT_SECONDS`，或按上面的办法缩短单次请求 |
+| `truncated` | 输出被截断 | 调高 `AI_MAX_TOKENS`，或调小 `AI_CHAPTER_CHUNK_CHARS` |
+
+瞬时失败（超时、限流、5xx）会按 `AI_RETRY_BACKOFF_SECONDS` 退避后重试，重试与跳过都会实时显示在转换进度里。
 
 AI 全文转换流程：
 
