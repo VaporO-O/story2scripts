@@ -242,6 +242,42 @@ def test_workbench_switches_views() -> None:
     assert 'setActiveView("workbench")' in script
 
 
+def test_workbench_streams_scenes_over_sse() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert "async function streamConversionJob(" in script
+    assert "/events" in script
+    # 手写 SSE 解析：EventSource 无法设置请求头，而鉴权中间件要求
+    # Authorization: Bearer，用它就只能 401。
+    # 只断言"没被使用"——代码注释里会提到它，说明为什么不用。
+    assert "new EventSource(" not in script
+    assert "getReader()" in script
+    assert "TextDecoder" in script
+    assert 'buffer.indexOf("\\n\\n")' in script
+
+
+def test_workbench_renders_streamed_scenes_incrementally() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # renderScreenplay 原来开头就 innerHTML = "" 全量重绘，追加一场要重画全部
+    assert "function renderScreenplayHeader(" in script
+    assert "function appendStreamedScene(" in script
+    assert "function beginSceneStream(" in script
+    assert "function resetSceneStream(" in script
+    # 场景数标签在流式过程中一直增长，要可变
+    assert "sceneCountTag" in script
+
+
+def test_workbench_keeps_polling_as_stream_fallback() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # SSE 连不上就退回 1Hz 轮询，转换本身不受影响
+    assert "await waitForConversionJob(jobId)" in script
+    assert "streamedToEnd" in script
+    # 流式期间 yaml_text 还没到，门禁不能再只看 yamlOutput.value
+    assert "hasStreamedContent" in script
+
+
 def test_workbench_exposes_scene_chat() -> None:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 

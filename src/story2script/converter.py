@@ -59,8 +59,18 @@ class Converter(Protocol):
         genre: str = "",
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
         progress_cb=None,
+        scene_cb=None,
+        meta_cb=None,
     ) -> Screenplay:
-        """progress_cb(done, total, note)：可选，与 Agent / 团队回调同款签名。"""
+        """progress_cb(done, total, note)：可选，与 Agent / 团队回调同款签名。
+
+        scene_cb(scene_dict)：可选，场景定稿即回调一次，用于边生成边显示。
+        它与 progress_cb 是两条独立通道——进度只关心"到哪了"，场景关心"生成了
+        什么"，混在一条回调里会让二者的语义互相牵制。
+
+        meta_cb(meta_dict)：可选，在第一个场景之前回调一次，带上标题与人物名册。
+        流式场景里的说话人是 character id，没有名册就只能显示"character-1"。
+        """
         raise NotImplementedError
 
 
@@ -1159,6 +1169,8 @@ class DemoConverter:
         genre: str = "",
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
         progress_cb=None,
+        scene_cb=None,
+        meta_cb=None,
     ) -> Screenplay:
         self.last_run_warnings = []
         style = _adaptation_style_profile(adaptation_type)
@@ -1212,6 +1224,18 @@ class DemoConverter:
             for state in global_state.characters
         ]
         character_ids = {character.name: character.id for character in characters}
+
+        if meta_cb is not None:
+            meta_cb(
+                {
+                    "title": title.strip() or "未命名改编",
+                    "genre": genre.strip(),
+                    "adaptation_type": adaptation_type,
+                    "characters": [
+                        {"id": character.id, "name": character.name} for character in characters
+                    ],
+                }
+            )
 
         scenes: list[Scene] = []
         scene_index = 1
@@ -1287,6 +1311,11 @@ class DemoConverter:
                     )
                 )
                 scene_index += 1
+                # 本地转换 300ms 就跑完，用户几乎看不到中间态；仍然接 scene_cb，
+                # 保证两条实现的回调行为对称（只接参数不上报会让调用方无法分辨
+                # "没有流式"和"不支持流式"）。
+                if scene_cb is not None:
+                    scene_cb(scenes[-1].model_dump(mode="json"))
 
             report(
                 chapter_no,
@@ -1383,6 +1412,8 @@ class AIConverter:
         genre: str = "",
         adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE,
         progress_cb=None,
+        scene_cb=None,
+        meta_cb=None,
     ) -> Screenplay:
         # 每轮开头清空：实例被复用时，上一轮的告警不应泄漏到这一轮。
         self.last_run_warnings = []
@@ -1438,10 +1469,50 @@ class AIConverter:
             report(0, f"检索前文备忘 {position}/{total}")
 
         results: list[list[dict] | None] = [None] * len(tasks)
+        # results[i] 为 None 有两种含义：还没跑完、或该片段失败。水位推进要能区分
+        # 二者，否则一个失败片段会永久挡住后面所有场景的显示。
+        finished: list[bool] = [False] * len(tasks)
         failures: list[str] = []
         ai_profiles: list[dict] = []
         processed = 0
         processed_lock = threading.Lock()
+
+        # location_names 原先在收尾处计算，现在归一化提前到 flush 路径，需要上提。
+        # global_state.locations 在建线程池前就已确定（后续的小传富集只改人物）。
+        location_names = {location.id: location.name for location in global_state.locations}
+        scenes: list[dict] = []
+        # 连续前缀水位：results 按索引槽存放，水位之前的槽位都已成为最终值，
+        # 因此可以边完成边 flush，并在 flush 时一次性定下 scene-N 编号——取代
+        # 收尾时的全局重排，编号从出现那一刻起就不再变动。
+        # 代价是队头阻塞：慢的片段 0 会挡住 1-3 的显示。4 worker 下这是有界的
+        # 小停顿，换来编号稳定，值得。
+        watermark = 0
+        flush_lock = threading.Lock()
+
+        def flush_ready() -> None:
+            """把水位之后已完成的连续片段归一化、编号并逐场景上报。"""
+            nonlocal watermark
+            with flush_lock:
+                while watermark < len(tasks) and finished[watermark]:
+                    raw_scenes = results[watermark]
+                    chapter_title = tasks[watermark][0].title
+                    watermark += 1
+                    if raw_scenes is None:
+                        continue  # 该片段失败，跳过但不阻塞后续片段
+                    for scene in _normalize_screenplay_scene_data(
+                        raw_scenes, known_ids, name_to_id, [chapter_title], location_names
+                    ):
+                        scene["id"] = f"scene-{len(scenes) + 1}"
+                        scenes.append(scene)
+                        if scene_cb is None:
+                            continue
+                        # 逐场景校验：只决定这一场能不能流给前端，不改变收尾处
+                        # 整篇校验的行为——某一场有问题不该拖累其它场景的显示。
+                        try:
+                            validated = Scene.model_validate(scene)
+                        except ValidationError:
+                            continue
+                        scene_cb(validated.model_dump(mode="json"))
 
         def run_task(task_index: int) -> None:
             nonlocal processed
@@ -1464,6 +1535,10 @@ class AIConverter:
                     notify_retry,
                 )
             finally:
+                # 先标记完成再推进水位：flush_ready 的 while 会把此刻能连成前缀的
+                # 片段一次刷完，因此任意交错顺序都不会漏刷。
+                finished[task_index] = True
+                flush_ready()
                 # 成功与失败都推进计数：进度反映"已处理"，失败数在收尾时单独汇报。
                 # 计数必须在这里加锁自增，不能挂在下面的回收循环上——那个循环按
                 # 提交顺序阻塞取结果，会让进度先滞后再跳变。
@@ -1482,6 +1557,20 @@ class AIConverter:
             except ValueError:
                 pass
 
+        if meta_cb is not None:
+            # 名册在建线程池前就已确定：后续的小传富集只填 arc/goal/traits，不增删
+            # 人物也不改名字，所以这份名册对流式显示就是最终值。
+            meta_cb(
+                {
+                    "title": title.strip() or "未命名改编",
+                    "genre": genre.strip(),
+                    "adaptation_type": adaptation_type,
+                    "characters": [
+                        {"id": item["id"], "name": item.get("name", "")} for item in characters
+                    ],
+                }
+            )
+
         max_workers = max(1, min(self.llm_client.max_concurrency, len(tasks) + 1))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {
@@ -1489,7 +1578,6 @@ class AIConverter:
             }
             profile_future = executor.submit(run_profiles)
             for future in future_to_index:
-                index = future_to_index[future]
                 try:
                     future.result()
                 except ValueError as exc:
@@ -1515,24 +1603,13 @@ class AIConverter:
                 [_state_character_data(state) for state in global_state.characters]
             )
 
-        location_names = {location.id: location.name for location in global_state.locations}
-        scenes: list[dict] = []
-        for index, raw_scenes in enumerate(results):
-            if raw_scenes is None:
-                continue
-            chapter_title = tasks[index][0].title
-            scenes.extend(
-                _normalize_screenplay_scene_data(
-                    raw_scenes, known_ids, name_to_id, [chapter_title], location_names
-                )
-            )
+        # 场景已在水位推进时归一化并编号（见 flush_ready）。这里兜底再刷一次：
+        # 正常路径下最后完成的片段已把水位推到末尾，这一次是空操作。
+        flush_ready()
         if not scenes:
             raise ValueError(
                 failures[-1] if failures else "AI 全文转换失败：模型没有返回任何有效场景。"
             )
-        # 合并各章场景后统一重排 scene id，避免分块产生的编号冲突。
-        for index, scene in enumerate(scenes, start=1):
-            scene["id"] = f"scene-{index}"
 
         resolved_title = title.strip() or "未命名改编"
         screenplay_data = {

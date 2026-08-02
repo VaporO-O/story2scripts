@@ -18,9 +18,11 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from queue import Queue
 from uuid import uuid4
 
 from .security import redact_secrets
@@ -31,6 +33,9 @@ DEFAULT_DB_DIRNAME = ".story2script"
 DEFAULT_DB_FILENAME = "jobs.db"
 CANCELLED_MESSAGE = "任务在排队时被取消。"
 _MAX_RESTART_ATTEMPTS = 3
+# 重连补发用的内存镜像上限。一篇长篇小说约几十个场景加几十条进度，留足余量；
+# 有界是为了防止某个没人看的任务把内存拖大。
+_EVENT_MIRROR_LIMIT = 500
 
 _COLUMNS = (
     "job_id",
@@ -140,8 +145,68 @@ class DurableJobStore:
         self._db_override = db_path
         self._lock = threading.Lock()
         self._rows: dict[str, dict] = {}
+        # 事件通道：订阅者队列 + 一份内存镜像供重连补发。
+        # 事件不进 SQLite——_persist 每次都要新建连接并重写整行（含整篇小说的
+        # request_json），把逐场景事件写进去会把磁盘写放大成噪音；而且这些事件
+        # 只对"正在观看的这一次转换"有意义，重启后没有补发价值。
+        self._subscribers: dict[str, list[Queue]] = {}
+        self._events: dict[str, deque] = {}
         self._executor = ThreadPoolExecutor(max_workers=_workers())
         self._recover()
+
+    # ------------------------------------------------------------------ 事件
+
+    def subscribe(self, job_id: str) -> tuple[Queue, list[dict]]:
+        """注册订阅者，同时取回已发生的事件。
+
+        补发与注册必须在同一把锁内完成：先读镜像再注册的话，两步之间到达的
+        事件谁都不收（漏一个事件就丢一个场景）；先注册再读镜像则会重复。
+        """
+        queue: Queue = Queue()
+        with self._lock:
+            backlog = list(self._events.get(job_id, ()))
+            self._subscribers.setdefault(job_id, []).append(queue)
+        return queue, backlog
+
+    def unsubscribe(self, job_id: str, queue: Queue) -> None:
+        """移除订阅者。客户端断开时必须调用，否则关掉的标签页会留下一个持续增长的队列。"""
+        with self._lock:
+            queues = self._subscribers.get(job_id)
+            if not queues:
+                return
+            if queue in queues:
+                queues.remove(queue)
+            if not queues:
+                self._subscribers.pop(job_id, None)
+
+    def publish(self, job_id: str, event: dict) -> None:
+        with self._lock:
+            self._publish_locked(job_id, event)
+
+    def _publish_locked(self, job_id: str, event: dict) -> None:
+        """在已持有 self._lock 的前提下扇出事件（_update / _complete / _fail 复用）。"""
+        mirror = self._events.setdefault(job_id, deque(maxlen=_EVENT_MIRROR_LIMIT))
+        mirror.append(event)
+        for queue in self._subscribers.get(job_id, ()):
+            queue.put(event)
+
+    def _discard_events_locked(self, job_id: str) -> None:
+        """任务终结且无人订阅时丢弃镜像，避免长跑进程里累积。
+
+        还有订阅者时保留：它们可能尚未读完队列，镜像要等它们退订后再由
+        ``discard_events_if_idle`` 清掉。没人看过的任务在这里当场释放。
+        """
+        if job_id not in self._subscribers:
+            self._events.pop(job_id, None)
+
+    def discard_events_if_idle(self, job_id: str) -> None:
+        """最后一个订阅者退订后调用：任务已终结就释放镜像。"""
+        with self._lock:
+            if job_id in self._subscribers:
+                return
+            row = self._rows.get(job_id)
+            if row is None or row["status"] in ("succeeded", "failed"):
+                self._events.pop(job_id, None)
 
     # ------------------------------------------------------------------ 公共面
 
@@ -276,6 +341,18 @@ class DurableJobStore:
                 updated_at=_now_iso(),
             )
             self._persist(row)
+            # 在同一把锁内扇出：轮询只能看到落盘的四个字段、且会漏掉两次 poll
+            # 之间的变化——对进度无妨，对场景是致命的（漏一个事件就丢一个场景）。
+            self._publish_locked(
+                job_id,
+                {
+                    "type": "progress",
+                    "status": status,
+                    "progress": progress,
+                    "stage": stage,
+                    "message": resolved_message,
+                },
+            )
 
     def _complete(self, job_id: str, result) -> None:
         with self._lock:
@@ -291,6 +368,19 @@ class DurableJobStore:
             )
             row["_result_obj"] = result
             self._persist(row)
+            # 终态事件只带状态不带整份结果：结果可能是一整篇剧本，走既有的
+            # snapshot 路由取回即可，不必塞进事件流复制一遍。
+            self._publish_locked(
+                job_id,
+                {
+                    "type": "done",
+                    "status": "succeeded",
+                    "progress": 100,
+                    "stage": row["stage"],
+                    "message": row["message"],
+                },
+            )
+            self._discard_events_locked(job_id)
 
     def _complete_message(self, result) -> str:
         return "任务完成。"
@@ -308,6 +398,18 @@ class DurableJobStore:
                 updated_at=_now_iso(),
             )
             self._persist(row)
+            self._publish_locked(
+                job_id,
+                {
+                    "type": "done",
+                    "status": "failed",
+                    "progress": row["progress"],
+                    "stage": row["stage"],
+                    "message": safe_error,
+                    "error": safe_error,
+                },
+            )
+            self._discard_events_locked(job_id)
 
     # ------------------------------------------------------------------ 存储
 

@@ -1,10 +1,13 @@
+import json
 import os
 from hmac import compare_digest
 from pathlib import Path
+from queue import Empty
 from time import perf_counter
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api_models import ChapterPreviewItem
@@ -281,6 +284,93 @@ async def cancel_convert_job(job_id: str) -> ConvertJobStatusResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return conversion_jobs.snapshot(job_id)
+
+
+def _sse_frame(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+# 队列是线程 Queue（事件由工作线程推送），阻塞 get 会占住事件循环：改为
+# 短轮询 + 让出。这两个常量只影响本端点的响应粒度，与业务无关。
+_SSE_POLL_SECONDS = 0.2
+_SSE_KEEPALIVE_SECONDS = 15.0
+_TERMINAL_STATUSES = ("succeeded", "failed")
+
+
+@app.get("/api/convert/jobs/{job_id}/events")
+async def stream_convert_job_events(job_id: str, request: Request) -> StreamingResponse:
+    """SSE 事件流：转换过程中逐场景推送，让剧本边生成边显示。
+
+    没有引入 sse-starlette——它只是 mcp 的传递依赖（pyproject 未声明），用了
+    就成了隐式依赖。StreamingResponse + anyio 已经够用。
+    前端仍保留 1Hz 轮询作为回退：本端点连不上时不影响转换本身。
+    """
+    if not conversion_jobs.has_job(job_id):
+        raise HTTPException(status_code=404, detail="转换任务不存在。")
+
+    async def event_stream():
+        queue, backlog = conversion_jobs.subscribe(job_id)
+        try:
+            finished = False
+            # 补发订阅之前已发生的事件：重连不丢场景。
+            for event in backlog:
+                yield _sse_frame(event)
+                if event.get("type") == "done":
+                    finished = True
+
+            idle = 0.0
+            while not finished:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = queue.get_nowait()
+                except Empty:
+                    # 任务可能在订阅之前就结束了（缓存命中时转换近乎瞬间完成，
+                    # 事件镜像也已随之释放）：补一条终态事件收尾，而不是空转。
+                    if conversion_jobs.snapshot(job_id).status in _TERMINAL_STATUSES:
+                        # 终态确立后不会再有新的 publish，但这两步之间可能刚好
+                        # 到过事件：再排空一次，避免丢掉最后几场。
+                        while True:
+                            try:
+                                yield _sse_frame(queue.get_nowait())
+                            except Empty:
+                                break
+                        snapshot = conversion_jobs.snapshot(job_id)
+                        yield _sse_frame(
+                            {
+                                "type": "done",
+                                "status": snapshot.status,
+                                "progress": snapshot.progress,
+                                "stage": snapshot.stage,
+                                "message": snapshot.message,
+                            }
+                        )
+                        break
+                    await anyio.sleep(_SSE_POLL_SECONDS)
+                    idle += _SSE_POLL_SECONDS
+                    if idle >= _SSE_KEEPALIVE_SECONDS:
+                        # 注释行（以 : 开头）不触发前端事件，只用于保活。
+                        idle = 0.0
+                        yield ": keepalive\n\n"
+                    continue
+                idle = 0.0
+                yield _sse_frame(event)
+                if event.get("type") == "done":
+                    break
+        finally:
+            # 断开时必须移除订阅者，否则关掉的标签页会留下一个持续增长的队列。
+            conversion_jobs.unsubscribe(job_id, queue)
+            conversion_jobs.discard_events_if_idle(job_id)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # 防反向代理缓冲，否则事件会被攒成一批、流式效果消失。
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/jobs", response_model=JobListResponse)

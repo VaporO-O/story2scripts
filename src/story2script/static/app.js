@@ -24,6 +24,13 @@ let latestScreenplay = null;
 let latestReviewReport = null;
 // 场景 ID 从输入框变成内部状态：点剧本里的 SCENE 徽章切换，chip 显示当前值。
 let currentSceneId = "scene-1";
+// 流式渲染状态：已追加的场景数、人物 id→名字映射（来自 meta 事件）、
+// 以及表头里那个"N 场"标签的引用（逐场就地更新，不重画表头）。
+let streamedSceneCount = 0;
+let streamedNames = new Map();
+let sceneCountTag = null;
+// 有场景流进来后，预览里已经有内容可看，即使 yaml_text 还没到。
+let hasStreamedContent = false;
 // 对话历史由前端持有并随请求回传（服务端无状态），照 renderTeamMessages 的风格全量重渲染。
 const chatMessages = [];
 const conversionPollIntervalMs = 1000;
@@ -635,32 +642,73 @@ function renderScene(scene, index, names) {
   return article;
 }
 
+// 表头与场景列表拆开：流式转换要能先画表头、再逐场追加，而原来的实现开头就
+// innerHTML = "" 全量重绘，追加一场就得把已显示的全部重画一遍。
+function renderScreenplayHeader(meta, sceneCount) {
+  scriptPreview.innerHTML = "";
+  const header = createElement("header", "script-meta");
+  header.appendChild(createElement("h3", "script-title", meta.title));
+  if (meta.logline) {
+    header.appendChild(createElement("p", "script-logline", meta.logline));
+  }
+  const tags = createElement("div", "script-tags");
+  if (meta.genre) {
+    tags.appendChild(createElement("span", "tag", meta.genre));
+  }
+  if (meta.adaptation_type) {
+    tags.appendChild(createElement("span", "tag tag-accent", meta.adaptation_type));
+  }
+  // 场景数在流式过程中一直增长：留住这个节点的引用，逐场就地更新。
+  sceneCountTag = createElement("span", "tag", `${sceneCount} 场`);
+  tags.appendChild(sceneCountTag);
+  header.appendChild(tags);
+  scriptPreview.appendChild(header);
+}
+
 function renderScreenplay(screenplay) {
   scriptPreview.innerHTML = "";
   if (!screenplay) {
     return;
   }
   const names = characterNameMap(screenplay);
+  const scenes = screenplay.scenes || [];
+  renderScreenplayHeader(screenplay, scenes.length);
 
-  const header = createElement("header", "script-meta");
-  header.appendChild(createElement("h3", "script-title", screenplay.title));
-  if (screenplay.logline) {
-    header.appendChild(createElement("p", "script-logline", screenplay.logline));
-  }
-  const tags = createElement("div", "script-tags");
-  if (screenplay.genre) {
-    tags.appendChild(createElement("span", "tag", screenplay.genre));
-  }
-  if (screenplay.adaptation_type) {
-    tags.appendChild(createElement("span", "tag tag-accent", screenplay.adaptation_type));
-  }
-  tags.appendChild(createElement("span", "tag", `${(screenplay.scenes || []).length} 场`));
-  header.appendChild(tags);
-  scriptPreview.appendChild(header);
-
-  (screenplay.scenes || []).forEach((scene, index) => {
+  scenes.forEach((scene, index) => {
     scriptPreview.appendChild(renderScene(scene, index, names));
   });
+}
+
+// ------------------------------------------------------------------ 流式渲染
+
+function resetSceneStream() {
+  streamedSceneCount = 0;
+  streamedNames = new Map();
+  sceneCountTag = null;
+  hasStreamedContent = false;
+}
+
+function beginSceneStream(meta) {
+  streamedNames = new Map();
+  (meta.characters || []).forEach((character) => {
+    streamedNames.set(character.id, character.name || character.id);
+  });
+  streamedSceneCount = 0;
+  renderScreenplayHeader(meta, 0);
+  // 流式是预览侧的能力：此刻 yaml_text 还没到，停在"源码"视图只会看到空文本域。
+  setScriptView("preview");
+}
+
+function appendStreamedScene(scene) {
+  if (!sceneCountTag) {
+    // 没收到 meta 就先来了场景（理论上不会发生）：补一个最小表头，不丢内容。
+    beginSceneStream({ title: titleInput.value || "未命名改编", characters: [] });
+  }
+  scriptPreview.appendChild(renderScene(scene, streamedSceneCount, streamedNames));
+  streamedSceneCount += 1;
+  sceneCountTag.textContent = `${streamedSceneCount} 场`;
+  hasStreamedContent = true;
+  setScriptView(currentScriptView);
 }
 
 function setScriptView(view) {
@@ -668,7 +716,9 @@ function setScriptView(view) {
   previewViewButton.classList.toggle("is-active", view === "preview");
   sourceViewButton.classList.toggle("is-active", view === "source");
 
-  if (!yamlOutput.value) {
+  // 门禁放宽：yaml_text 只在转换完成时才有，而流式场景在那之前就该可见。
+  // 仍以 yamlOutput.value 为准会把已流出的场景渲染进隐藏面板。
+  if (!yamlOutput.value && !hasStreamedContent) {
     emptyState.classList.remove("hidden");
     scriptPreview.classList.add("hidden");
     yamlOutput.classList.add("hidden");
@@ -676,8 +726,11 @@ function setScriptView(view) {
   }
 
   emptyState.classList.add("hidden");
-  scriptPreview.classList.toggle("hidden", view !== "preview");
-  yamlOutput.classList.toggle("hidden", view !== "source");
+  // 流式过程中源码还是空的：即使停在"源码"视图也先显示预览，否则用户对着
+  // 空文本域，看不到正在生成的内容。
+  const showPreview = view !== "source" || !yamlOutput.value;
+  scriptPreview.classList.toggle("hidden", !showPreview);
+  yamlOutput.classList.toggle("hidden", showPreview);
 }
 
 // 角色不再由下拉框选择：用户在对话里直接写名字，服务端按 name 精确匹配回 id
@@ -889,6 +942,96 @@ async function waitForConversionJob(jobId) {
   throw new Error("转换任务等待超时，请稍后重试。");
 }
 
+function handleConversionEvent(event) {
+  if (event.type === "meta") {
+    beginSceneStream(event.meta || {});
+    return false;
+  }
+  if (event.type === "scene") {
+    if (event.scene) {
+      appendStreamedScene(event.scene);
+    }
+    return false;
+  }
+  if (event.type === "progress") {
+    setConversionProgress(event, event.status === "failed");
+    return false;
+  }
+  // done：终态。结果本身不在事件里（可能是一整篇剧本），由 snapshot 取回。
+  setConversionProgress(event, event.status === "failed");
+  return true;
+}
+
+// 手写 SSE 解析而不用 EventSource：EventSource 无法设置请求头，而鉴权中间件
+// 要求 Authorization: Bearer，用它就只能 401。
+// 返回 true 表示流已读到终态；返回 false 表示这条通道不可用，调用方回退轮询。
+async function streamConversionJob(jobId) {
+  let response;
+  try {
+    response = await fetch(`/api/convert/jobs/${jobId}/events`, {
+      headers: { Accept: "text/event-stream" },
+    });
+  } catch {
+    return false;
+  }
+  if (!response.ok || !response.body || typeof response.body.getReader !== "function") {
+    return false;
+  }
+
+  const reader = response.body.getReader();
+  // stream: true 让跨 chunk 切断的多字节字符正确拼接——中文剧本必然踩到。
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        // 流提前结束（代理断开等）而没有 done 事件：交给轮询收尾。
+        return false;
+      }
+      buffer += decoder.decode(value, { stream: true });
+
+      let separator = buffer.indexOf("\n\n");
+      while (separator >= 0) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        separator = buffer.indexOf("\n\n");
+
+        const payload = frame
+          .split("\n")
+          // 以 : 开头的是注释（保活），没有 data: 前缀的行一律忽略。
+          .filter((line) => line.startsWith("data: "))
+          .map((line) => line.slice(6))
+          .join("\n");
+        if (!payload) {
+          continue;
+        }
+
+        let event;
+        try {
+          event = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (handleConversionEvent(event)) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    // 读流中途出错：已显示的场景留着，剩下的交给轮询。
+    return false;
+  } finally {
+    // 主动取消，让服务端的订阅者立刻被移除，不等超时。
+    try {
+      await reader.cancel();
+    } catch {
+      /* 已关闭 */
+    }
+  }
+}
+
 async function convertNovel() {
   convertButton.disabled = true;
   // 进度条和结果都在工作台，转换时切回来，避免在别的分区干等。
@@ -896,12 +1039,19 @@ async function convertNovel() {
   const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
   setMessage(`正在使用${modeName}模式生成 YAML 剧本……`);
   resetConversionProgress();
+  // 上一轮流出来的场景不能留到这一轮：计数和名册都要归零。
+  resetSceneStream();
   // 重新转换会重排 scene id，旧的审校报告随之失效。
   latestReviewReport = null;
 
   try {
     const jobId = await startConversionJob();
-    const snapshot = await waitForConversionJob(jobId);
+    // 先走 SSE 看剧本逐场长出来；这条通道不可用就退回 1Hz 轮询，
+    // 转换本身不受影响（服务端不依赖有没有订阅者）。
+    const streamedToEnd = await streamConversionJob(jobId);
+    const snapshot = streamedToEnd
+      ? await fetchConversionJob(jobId)
+      : await waitForConversionJob(jobId);
 
     if (snapshot.status === "failed") {
       setConversionProgress(snapshot, true);
@@ -915,6 +1065,10 @@ async function convertNovel() {
     if (data.review_report) {
       latestReviewReport = data.review_report;
     }
+    // 完成时必须整篇重渲染，不能沿用流式追加的 DOM：机审在转换之后运行且会
+    // 改写场景内容，而 yaml_text / review_report / conversion_warnings 也都
+    // 只在这一刻才到齐。
+    const rewritten = streamedSceneCount > 0 && data.review_report;
     showScreenplay(data.screenplay, data.yaml_text);
     const securityWarnings = data.security_warnings || [];
     const conversionWarnings = data.conversion_warnings || [];
@@ -928,6 +1082,8 @@ async function convertNovel() {
         (securityWarnings.length
           ? `安全提示：原文含 ${securityWarnings.length} 处疑似提示注入内容（已按数据处理，未影响转换）。`
           : "") +
+        // 机审会改写已经流出来的场景：不说明的话，用户会以为自己看错了。
+        (rewritten ? "（机审已修正部分场景，上方内容为最终版本。）" : "") +
         // 片段被跳过意味着剧本不完整，必须显式告知，否则用户只会觉得"效果不好"。
         (conversionWarnings.length ? ` ${conversionWarnings.join(" ")}` : ""),
       conversionWarnings.length > 0,
