@@ -12,6 +12,7 @@ from .security import redact_secrets
 
 
 DOTENV_FILENAME = ".env"
+ENV_FILE_ENV = "STORY2SCRIPT_ENV_FILE"
 DOTENV_DISABLE_ENV = "STORY2SCRIPT_DISABLE_DOTENV"
 DOTENV_DISABLED_VALUES = {"1", "true", "yes", "on"}
 EMBEDDINGS_METRICS_LABEL = "AI embeddings"
@@ -58,6 +59,12 @@ FALSE_VALUES = {"0", "false", "no", "off"}
 
 
 def _default_env_path() -> Path:
+    # 可覆盖是必需的：provider_config 会写这个文件，测试必须能指到 tmp 目录，
+    # 否则会覆盖开发者本机含真实密钥的 .env。读写两侧共用这一个解析函数，
+    # 保证「写进去的就是读出来的」。
+    override = os.getenv(ENV_FILE_ENV, "").strip()
+    if override:
+        return Path(override)
     return Path.cwd() / DOTENV_FILENAME
 
 
@@ -174,12 +181,17 @@ class LLMClient:
         usage_label: str = "AI mode",
         env_file: str | Path | None = None,
         load_dotenv: bool = True,
+        overrides: dict[str, str] | None = None,
     ) -> None:
         self.usage_label = usage_label
         self.env_file = Path(env_file) if env_file is not None else _default_env_path()
         self.env_values = (
             _load_env_file(self.env_file) if load_dotenv and not _dotenv_is_disabled() else {}
         )
+        # overrides 优先级高于进程环境：用于"用这一套配置发一次请求"的场景
+        # （如切换前的连通性测试）。默认 None，对既有调用方零影响。
+        # 必须在读 timeout_seconds 之前赋值——下一行就会用到它。
+        self.overrides = dict(overrides or {})
         self.client = client or httpx.Client(timeout=self.timeout_seconds)
 
     @property
@@ -646,6 +658,12 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} requires AI_EMBED_MODEL.")
 
     def _config_value(self, name: str, default: str = "") -> str:
+        # 优先级：显式 overrides > 进程环境 > .env > 默认值。
+        # overrides 排在进程环境之前是有意的：调用方明确指定"用这一套"时，
+        # 不该被 shell 里残留的同名变量悄悄改掉（连通性测试就依赖这一点）。
+        override = self.overrides.get(name)
+        if override is not None:
+            return override.strip()
         env_value = os.getenv(name)
         if env_value is not None:
             return env_value.strip()

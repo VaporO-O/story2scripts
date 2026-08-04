@@ -311,6 +311,46 @@ def test_workbench_sends_chat_rewrite_requests() -> None:
     assert "function updateChatModeHint(" in script
 
 
+def test_workbench_exposes_provider_view() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="viewProvidersButton"' in html
+    assert 'id="viewProviders"' in html
+    assert 'id="providerList"' in html
+    assert 'id="providerForm"' in html
+    # 504 相关的三个旋钮要能在界面上调
+    assert 'data-provider-field="AI_TIMEOUT_SECONDS"' in html
+    assert 'data-provider-field="AI_MAX_CONCURRENCY"' in html
+    assert 'data-provider-field="AI_CHAPTER_CHUNK_CHARS"' in html
+
+
+def test_provider_view_never_prefills_secret() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # 密钥框必须是 password 类型，且绝不回填遮罩值——回填了用户一保存就会把
+    # "••••1234" 当成真密钥写进配置。
+    assert 'data-provider-field="AI_API_KEY"' in html
+    assert 'type="password"' in html
+    assert "留空表示保持原密钥不变" in html
+    assert "input.value = \"\";" in script
+
+
+def test_provider_view_switches_and_saves() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/providers"' in script or '"/api/providers"' in script
+    assert '"/api/providers/activate"' in script
+    assert '"/api/providers/delete"' in script
+    assert '"/api/providers/test"' in script
+    assert "function saveProvider(" in script
+    assert 'viewProvidersButton.addEventListener' in script
+    # 静默失效（进程环境遮盖 / dotenv 被禁用）必须显示出来
+    assert "function renderProviderWarning(" in script
+    assert "shadowed_fields" in script
+    assert "dotenv_disabled" in script
+
+
 def test_workbench_exposes_profiles_view() -> None:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
@@ -347,6 +387,23 @@ def test_screenplay_preview_is_flexible() -> None:
     assert "height: 354px" not in css
     assert ".script-panel > .script-preview," in css
     assert ".script-panel > .empty-state," in css
+
+
+def test_screenplay_preview_scrolls_inside_itself() -> None:
+    """预览必须在自己内部滚动，而不是把滚动条推给整个页面。"""
+    css = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+    panel = css.split(".script-panel {")[1].split("}")[0]
+
+    # 关键：必须是 height 而不是 min-height。min-height 只设下限，容器仍会被
+    # 45 个场景撑高，flex 就没有「多余空间」可分配，内层 overflow-y 永不触发。
+    assert "height: min(1000px, calc(100vh - 150px));" in panel
+    assert "min-height: min(" not in panel
+
+    # flex 子元素的 min-height 默认为 auto（不小于内容），不归零就会撑破面板
+    # 并被 .panel 的 overflow:hidden 裁掉。
+    shared = css.split(".script-panel > .script-preview,")[1].split("}")[0]
+    assert "min-height: 0;" in shared
+    assert "overflow-y: auto;" in shared
 
 
 def test_workbench_status_bar_is_global() -> None:
