@@ -1,7 +1,19 @@
+import re
 from pathlib import Path
 
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "src" / "story2script" / "static"
+
+_CSS_COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def strip_css_comments(css: str) -> str:
+    """去掉 /* … */ 注释后再做断言。
+
+    本项目的 CSS 注释会解释「为什么不用某种写法」，因此注释里必然出现被否定的
+    那个字符串。带注释比对负向断言，等于把说明文字当成代码，会误报。
+    """
+    return _CSS_COMMENT_PATTERN.sub("", css)
 
 
 def test_workbench_exposes_full_conversion_mode_selector() -> None:
@@ -390,20 +402,25 @@ def test_screenplay_preview_is_flexible() -> None:
 
 
 def test_screenplay_preview_scrolls_inside_itself() -> None:
-    """预览必须在自己内部滚动，而不是把滚动条推给整个页面。"""
-    css = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
-    panel = css.split(".script-panel {")[1].split("}")[0]
+    """预览必须在自己内部滚动，而不是把滚动条推给整个页面。
 
-    # 关键：必须是 height 而不是 min-height。min-height 只设下限，容器仍会被
-    # 45 个场景撑高，flex 就没有「多余空间」可分配，内层 overflow-y 永不触发。
-    assert "height: min(1000px, calc(100vh - 150px));" in panel
-    assert "min-height: min(" not in panel
-
-    # flex 子元素的 min-height 默认为 auto（不小于内容），不归零就会撑破面板
-    # 并被 .panel 的 overflow:hidden 裁掉。
+    要让内层滚动生效，预览需要一个**确定的上限**：没有上限时它会被 45 个场景
+    一路撑高，overflow-y 永不触发，滚动条就落到页面上。
+    """
+    # 先剥掉注释再断言：注释里会解释「为什么不用 calc(100vh - …)」，
+    # 带着注释比对等于拿说明文字当代码，会误报。
+    css = strip_css_comments((STATIC_DIR / "styles.css").read_text(encoding="utf-8"))
     shared = css.split(".script-panel > .script-preview,")[1].split("}")[0]
-    assert "min-height: 0;" in shared
+
+    assert "max-height:" in shared
     assert "overflow-y: auto;" in shared
+
+    # 刻意不用 calc(100vh - 上方各块高度)：那要把 topbar/hero/导航/状态栏的高度
+    # 手算成一个魔法数字。曾误写 150px（实际约 385px），面板因此溢出视口、页面
+    # 照样滚动；而且状态栏换行、导航增减标签都会让这个数字失准。
+    assert "calc(100vh" not in shared
+    panel = css.split(".script-panel {")[1].split("}")[0]
+    assert "calc(100vh" not in panel
 
 
 def test_workbench_status_bar_is_global() -> None:

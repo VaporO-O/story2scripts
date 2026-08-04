@@ -272,11 +272,6 @@ textarea {
   position: relative;
   display: flex;
   flex-direction: column;
-  /* 必须是 height 而不是 min-height：min-height 只设下限，容器仍会被内容撑高，
-     于是 flex-basis:auto 解析成整篇剧本的高度、没有「多余空间」需要分配，
-     内层的 overflow-y 永远不触发——滚动条会落到整个页面上。
-     给了确定高度，剩余空间才有界，预览才能在自己内部滚动。 */
-  height: min(1000px, calc(100vh - 150px));
 }
 
 /* 预览 / 空状态 / YAML 源码共用同一套伸缩规则。三者是互斥显示的同一块区域，
@@ -285,9 +280,15 @@ textarea {
 .script-panel > .empty-state,
 .script-panel > textarea {
   flex: 1 1 auto;
-  /* flex 元素的 min-height 默认是 auto（不小于内容），会把面板撑破、再被
-     .panel 的 overflow:hidden 裁掉。显式归零才允许收缩并交给内层滚动。 */
-  min-height: 0;
+  min-height: 420px;
+  /* 让滚动发生在预览内部的关键，是给它一个**确定的上限**：
+     内容超过上限就出现自己的滚动条，而不是把面板越撑越高、把滚动条推给页面。
+
+     刻意不写 calc(100vh - 面板上方各块高度)：那需要把 topbar / hero / 导航 /
+     状态栏的高度手算成一个魔法数字（实测约 385px，此前误写 150px 就导致面板
+     溢出视口、页面照样滚动），而且状态栏文案换行、导航增减标签都会让它失准。
+     max-height 只依赖视口本身，没有这种耦合。 */
+  max-height: min(760px, 62vh);
   overflow-y: auto;
 }
 
@@ -958,17 +959,14 @@ textarea {
     justify-content: flex-start;
   }
 
-  /* 单列堆叠时两个面板上下排，各自撑满视口高度会让页面长得离谱：
-     解除视口联动。窄屏上嵌套滚动比页面滚动更难用，这里就让内容自然撑开、
-     由页面滚动——与宽屏的「预览内部滚动」是有意的差异。 */
-  .script-panel {
-    height: auto;
-  }
-
+  /* 窄屏上两个面板上下堆叠，且可视高度本就紧张：嵌套滚动比页面滚动更难用
+     （手指要精确落在预览区内才滚得动）。这里解除上限，让内容自然撑开、由页面
+     滚动——与宽屏的「预览内部滚动」是有意的差异。 */
   .script-panel > .script-preview,
   .script-panel > .empty-state,
   .script-panel > textarea {
     min-height: 360px;
+    max-height: none;
   }
 }
 

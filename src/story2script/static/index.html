@@ -437,8 +437,12 @@
                   <th><code>HTTP 504</code></th>
                   <td>
                     网关等不到模型、<strong>自己先放弃了</strong>。这时调大「超时秒数」没有用——我们的超时
-                    根本没触发。要让单次请求变快：把「分块字符数」调小（1800 → 1200 → 900），
-                    再压「最大输出 token」；用推理模型时把「推理强度」降下来。
+                    根本没触发；降并发通常也不对症。要让<strong>单次请求</strong>变快，按这个顺序试：
+                    <br />1. <strong>推理强度</strong>降一档（<code>high</code> →
+                    <code>medium</code> → <code>low</code> 或留空）。推理模型会在看不见的地方
+                    烧掉大量思考 token，这一项往往就是 504 的真正原因。
+                    <br />2. <strong>分块字符数</strong>调小（1800 → 1200 → 900）。
+                    <br />3. 压低<strong>最大输出 token</strong>。
                   </td>
                 </tr>
                 <tr>

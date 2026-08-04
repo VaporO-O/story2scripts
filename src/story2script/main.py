@@ -8,7 +8,7 @@ from time import perf_counter
 import anyio
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api_models import ChapterPreviewItem
@@ -91,7 +91,26 @@ app = FastAPI(
     version="0.1.0",
     description="AI-assisted novel-to-screenplay workbench.",
 )
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """静态资源强制回源校验。
+
+    Starlette 默认只发 ETag / Last-Modified，不发 Cache-Control。缺了它，浏览器会
+    对子资源（<script src> / <link href>）启发式缓存、不回源，于是出现「新
+    index.html + 旧 app.js/styles.css」这种最难排查的中间态：新加的标签能看见，
+    但点击没反应（旧 JS 里没有那个监听），CSS 修复也不生效。
+
+    no-cache 是「先校验再用」而不是「不许存」：ETag 仍在，未改动就返回 304，
+    代价只有一个空响应。本项目是本地工作台，正确性远比省这点带宽重要。
+    （生产 CDN 场景应改用文件名指纹 + 长缓存，而不是每次校验。）
+    """
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=STATIC_DIR), name="static")
 
 _PUBLIC_PATHS = {"/", "/api/health", "/docs", "/redoc", "/openapi.json"}
 
@@ -126,7 +145,11 @@ async def require_api_token(request: Request, call_next):
 
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # 与 /static/* 同口径：index.html 是入口，它一旦被缓存，里面引用的
+    # app.js / styles.css 版本也跟着被钉死。
+    return FileResponse(
+        STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/api/health")

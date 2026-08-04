@@ -28,6 +28,33 @@ def test_index_page() -> None:
     assert "chatModeInput" in response.text
 
 
+def test_static_assets_force_revalidation() -> None:
+    """静态资源必须带 Cache-Control，否则浏览器会启发式缓存子资源。
+
+    Starlette 默认只发 ETag / Last-Modified。缺了 Cache-Control 时，浏览器对
+    <script src> / <link href> 可以不回源直接用旧文件，于是出现「新 index.html
+    + 旧 app.js/styles.css」的中间态：新加的导航标签能看见，但点击毫无反应
+    （旧 JS 里没有那个监听），CSS 修复同样不生效。这类症状看起来像功能没做，
+    极难排查，所以钉死在测试里。
+    """
+    for path in ("/", "/static/app.js", "/static/styles.css"):
+        response = client.get(path)
+
+        assert response.status_code == 200, path
+        assert response.headers.get("cache-control") == "no-cache", path
+
+
+def test_static_assets_still_return_304_when_unchanged() -> None:
+    """no-cache 是「先校验再用」而非「不许存」：未改动仍应命中 304，不白传内容。"""
+    first = client.get("/static/app.js")
+    etag = first.headers["etag"]
+
+    revalidated = client.get("/static/app.js", headers={"If-None-Match": etag})
+
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+
+
 def test_static_assets_are_served() -> None:
     response = client.get("/static/app.js")
 
