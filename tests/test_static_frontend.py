@@ -1,7 +1,19 @@
+import re
 from pathlib import Path
 
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "src" / "story2script" / "static"
+
+_CSS_COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def strip_css_comments(css: str) -> str:
+    """去掉 /* … */ 注释后再做断言。
+
+    本项目的 CSS 注释会解释「为什么不用某种写法」，因此注释里必然出现被否定的
+    那个字符串。带注释比对负向断言，等于把说明文字当成代码，会误报。
+    """
+    return _CSS_COMMENT_PATTERN.sub("", css)
 
 
 def test_workbench_exposes_full_conversion_mode_selector() -> None:
@@ -311,6 +323,46 @@ def test_workbench_sends_chat_rewrite_requests() -> None:
     assert "function updateChatModeHint(" in script
 
 
+def test_workbench_exposes_provider_view() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="viewProvidersButton"' in html
+    assert 'id="viewProviders"' in html
+    assert 'id="providerList"' in html
+    assert 'id="providerForm"' in html
+    # 504 相关的三个旋钮要能在界面上调
+    assert 'data-provider-field="AI_TIMEOUT_SECONDS"' in html
+    assert 'data-provider-field="AI_MAX_CONCURRENCY"' in html
+    assert 'data-provider-field="AI_CHAPTER_CHUNK_CHARS"' in html
+
+
+def test_provider_view_never_prefills_secret() -> None:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    # 密钥框必须是 password 类型，且绝不回填遮罩值——回填了用户一保存就会把
+    # "••••1234" 当成真密钥写进配置。
+    assert 'data-provider-field="AI_API_KEY"' in html
+    assert 'type="password"' in html
+    assert "留空表示保持原密钥不变" in html
+    assert "input.value = \"\";" in script
+
+
+def test_provider_view_switches_and_saves() -> None:
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/providers"' in script or '"/api/providers"' in script
+    assert '"/api/providers/activate"' in script
+    assert '"/api/providers/delete"' in script
+    assert '"/api/providers/test"' in script
+    assert "function saveProvider(" in script
+    assert 'viewProvidersButton.addEventListener' in script
+    # 静默失效（进程环境遮盖 / dotenv 被禁用）必须显示出来
+    assert "function renderProviderWarning(" in script
+    assert "shadowed_fields" in script
+    assert "dotenv_disabled" in script
+
+
 def test_workbench_exposes_profiles_view() -> None:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
@@ -347,6 +399,28 @@ def test_screenplay_preview_is_flexible() -> None:
     assert "height: 354px" not in css
     assert ".script-panel > .script-preview," in css
     assert ".script-panel > .empty-state," in css
+
+
+def test_screenplay_preview_scrolls_inside_itself() -> None:
+    """预览必须在自己内部滚动，而不是把滚动条推给整个页面。
+
+    要让内层滚动生效，预览需要一个**确定的上限**：没有上限时它会被 45 个场景
+    一路撑高，overflow-y 永不触发，滚动条就落到页面上。
+    """
+    # 先剥掉注释再断言：注释里会解释「为什么不用 calc(100vh - …)」，
+    # 带着注释比对等于拿说明文字当代码，会误报。
+    css = strip_css_comments((STATIC_DIR / "styles.css").read_text(encoding="utf-8"))
+    shared = css.split(".script-panel > .script-preview,")[1].split("}")[0]
+
+    assert "max-height:" in shared
+    assert "overflow-y: auto;" in shared
+
+    # 刻意不用 calc(100vh - 上方各块高度)：那要把 topbar/hero/导航/状态栏的高度
+    # 手算成一个魔法数字。曾误写 150px（实际约 385px），面板因此溢出视口、页面
+    # 照样滚动；而且状态栏换行、导航增减标签都会让这个数字失准。
+    assert "calc(100vh" not in shared
+    panel = css.split(".script-panel {")[1].split("}")[0]
+    assert "calc(100vh" not in panel
 
 
 def test_workbench_status_bar_is_global() -> None:

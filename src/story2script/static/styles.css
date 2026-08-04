@@ -272,9 +272,6 @@ textarea {
   position: relative;
   display: flex;
   flex-direction: column;
-  /* flex:1 只能分配「已确定高度」里的剩余空间。容器不给下限的话，
-     下方三块会停在各自 min-height 上，撑不满视口。 */
-  min-height: min(1000px, calc(100vh - 150px));
 }
 
 /* 预览 / 空状态 / YAML 源码共用同一套伸缩规则。三者是互斥显示的同一块区域，
@@ -284,6 +281,14 @@ textarea {
 .script-panel > textarea {
   flex: 1 1 auto;
   min-height: 420px;
+  /* 让滚动发生在预览内部的关键，是给它一个**确定的上限**：
+     内容超过上限就出现自己的滚动条，而不是把面板越撑越高、把滚动条推给页面。
+
+     刻意不写 calc(100vh - 面板上方各块高度)：那需要把 topbar / hero / 导航 /
+     状态栏的高度手算成一个魔法数字（实测约 385px，此前误写 150px 就导致面板
+     溢出视口、页面照样滚动），而且状态栏文案换行、导航增减标签都会让它失准。
+     max-height 只依赖视口本身，没有这种耦合。 */
+  max-height: min(760px, 62vh);
   overflow-y: auto;
 }
 
@@ -954,16 +959,14 @@ textarea {
     justify-content: flex-start;
   }
 
-  /* 单列堆叠时两个面板上下排，各自撑满视口高度会让页面长得离谱：
-     取消 100vh 联动，回落到固定下限。 */
-  .script-panel {
-    min-height: 0;
-  }
-
+  /* 窄屏上两个面板上下堆叠，且可视高度本就紧张：嵌套滚动比页面滚动更难用
+     （手指要精确落在预览区内才滚得动）。这里解除上限，让内容自然撑开、由页面
+     滚动——与宽屏的「预览内部滚动」是有意的差异。 */
   .script-panel > .script-preview,
   .script-panel > .empty-state,
   .script-panel > textarea {
     min-height: 360px;
+    max-height: none;
   }
 }
 
@@ -1562,4 +1565,219 @@ textarea {
   align-self: stretch;
   padding: 0 20px;
   white-space: nowrap;
+}
+
+
+/* API 配置 */
+.provider-panel {
+  margin-bottom: 42px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.provider-hint {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.provider-hint code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--panel-soft);
+  font: 12px var(--font-code);
+}
+
+/* 静默失效的警告（进程环境遮盖 / dotenv 被禁用）必须显眼：
+   否则用户会以为切换成功了，实际毫无效果。 */
+.provider-warning {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: rgba(194, 65, 58, 0.06);
+}
+
+.provider-warning p {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.provider-warning p + p {
+  margin-top: 8px;
+}
+
+.provider-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) 3fr;
+  gap: 22px;
+  padding-top: 18px;
+}
+
+.provider-subhead {
+  margin: 0 0 12px;
+  font: 800 14px/1.2 var(--font-sans);
+}
+
+.provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.provider-card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+
+.provider-card.is-active {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.provider-card.is-editing {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.provider-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.provider-badge.is-warn {
+  background: var(--danger);
+}
+
+.provider-card-meta {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font: 12px/1.5 var(--font-code);
+  overflow-wrap: anywhere;
+}
+
+.provider-card-actions {
+  display: flex;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.provider-form {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.provider-field {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.provider-required {
+  margin-left: 6px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+  padding-top: 12px;
+}
+
+.provider-advanced {
+  margin: 6px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+
+.provider-advanced summary {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.provider-advanced-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.provider-advanced-hint.is-error {
+  color: var(--danger);
+}
+
+.provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.provider-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+@media (max-width: 900px) {
+  .provider-layout,
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 504 / 超时 / 限流的对照排错表：照 .review-rules 的表格样式，保持一致观感。 */
+.provider-troubleshoot {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.provider-troubleshoot th,
+.provider-troubleshoot td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.7;
+}
+
+.provider-troubleshoot th {
+  white-space: nowrap;
+}
+
+.provider-troubleshoot code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 11px var(--font-code);
 }

@@ -94,10 +94,23 @@ const viewWorkbench = document.querySelector("#viewWorkbench");
 const viewProfiles = document.querySelector("#viewProfiles");
 const viewAgents = document.querySelector("#viewAgents");
 const viewMetrics = document.querySelector("#viewMetrics");
+const viewProviders = document.querySelector("#viewProviders");
 const viewWorkbenchButton = document.querySelector("#viewWorkbenchButton");
 const viewProfilesButton = document.querySelector("#viewProfilesButton");
 const viewAgentsButton = document.querySelector("#viewAgentsButton");
 const viewMetricsButton = document.querySelector("#viewMetricsButton");
+const viewProvidersButton = document.querySelector("#viewProvidersButton");
+const refreshProvidersButton = document.querySelector("#refreshProvidersButton");
+const newProviderButton = document.querySelector("#newProviderButton");
+const providerList = document.querySelector("#providerList");
+const providerEmptyState = document.querySelector("#providerEmptyState");
+const providerWarning = document.querySelector("#providerWarning");
+const providerNameInput = document.querySelector("#providerNameInput");
+const providerFormHint = document.querySelector("#providerFormHint");
+const saveProviderButton = document.querySelector("#saveProviderButton");
+const saveActivateProviderButton = document.querySelector("#saveActivateProviderButton");
+const testProviderButton = document.querySelector("#testProviderButton");
+const providerFieldInputs = document.querySelectorAll("[data-provider-field]");
 const reanalyzeCharactersButton = document.querySelector("#reanalyzeCharactersButton");
 const screenplayStatusText = document.querySelector("#screenplayStatusText");
 const backToWorkbenchButton = document.querySelector("#backToWorkbenchButton");
@@ -782,6 +795,7 @@ function setActiveView(view) {
     workbench: [viewWorkbenchButton, viewWorkbench],
     profiles: [viewProfilesButton, viewProfiles],
     agents: [viewAgentsButton, viewAgents],
+    providers: [viewProvidersButton, viewProviders],
     metrics: [viewMetricsButton, viewMetrics],
   };
   Object.entries(views).forEach(([name, [button, panel]]) => {
@@ -794,6 +808,11 @@ function setActiveView(view) {
   });
   if (view === "agents") {
     updateScreenplayStatus();
+  }
+  if (view === "providers") {
+    // 进来就拉一次：配置可能被别的标签页或直接编辑 .env 改过，
+    // 让用户手动点刷新才看到真实状态没有意义。
+    loadProviders();
   }
 }
 
@@ -1899,6 +1918,275 @@ async function refreshMetrics() {
   }
 }
 
+// ------------------------------------------------------------------ API 配置
+
+// 当前正在编辑的配置名。空串表示「新建」。
+let editingProviderName = "";
+let providerProfiles = [];
+
+function providerActionButtons() {
+  return [saveProviderButton, saveActivateProviderButton, testProviderButton];
+}
+
+function setProviderHint(text, isError = false) {
+  providerFormHint.textContent = text;
+  providerFormHint.classList.toggle("is-error", isError);
+}
+
+function renderProviderWarning(data) {
+  const notes = [];
+  if (data.dotenv_disabled) {
+    // 比单个字段被遮盖更彻底：写了文件但根本不会被读取。
+    notes.push(
+      "STORY2SCRIPT_DISABLE_DOTENV 已开启，.env 不会被读取：在这里切换配置不会生效。" +
+        "请取消该环境变量后重启服务。",
+    );
+  }
+  if ((data.shadowed_fields || []).length) {
+    // 进程环境优先级高于 .env，这些字段在界面上改了也不生效。
+    notes.push(
+      `以下字段已被进程环境变量覆盖，改这里不生效：${data.shadowed_fields.join("、")}。` +
+        "请在启动服务的终端里取消这些变量。",
+    );
+  }
+
+  providerWarning.innerHTML = "";
+  providerWarning.classList.toggle("hidden", notes.length === 0);
+  notes.forEach((note) => providerWarning.appendChild(createElement("p", null, note)));
+}
+
+function renderProviderList(data) {
+  providerProfiles = data.profiles || [];
+  providerList.innerHTML = "";
+  providerEmptyState.classList.toggle("hidden", providerProfiles.length > 0);
+
+  providerProfiles.forEach((profile) => {
+    const card = createElement("article", "provider-card");
+    if (profile.active) {
+      card.classList.add("is-active");
+    }
+    if (profile.name === editingProviderName) {
+      card.classList.add("is-editing");
+    }
+
+    const head = createElement("div", "provider-card-head");
+    head.appendChild(createElement("strong", null, profile.name));
+    if (profile.active) {
+      head.appendChild(createElement("span", "provider-badge", "生效中"));
+    }
+    if (profile.missing_fields.length) {
+      head.appendChild(
+        createElement("span", "provider-badge is-warn", `缺 ${profile.missing_fields.length} 项`),
+      );
+    }
+    card.appendChild(head);
+
+    const fields = profile.fields || {};
+    card.appendChild(
+      createElement("p", "provider-card-meta", `${fields.AI_MODEL || "（未填模型）"}`),
+    );
+    card.appendChild(
+      createElement("p", "provider-card-meta", fields.AI_BASE_URL || "（未填 Base URL）"),
+    );
+    card.appendChild(
+      createElement(
+        "p",
+        "provider-card-meta",
+        `密钥 ${fields.AI_API_KEY || "（未设置）"}`,
+      ),
+    );
+
+    const actions = createElement("div", "provider-card-actions");
+    const editButton = createElement("button", "ghost-button", "编辑");
+    editButton.type = "button";
+    editButton.addEventListener("click", () => selectProvider(profile.name));
+    actions.appendChild(editButton);
+
+    if (!profile.active) {
+      const useButton = createElement("button", "ghost-button", "启用");
+      useButton.type = "button";
+      useButton.addEventListener("click", () => activateProvider(profile.name));
+      actions.appendChild(useButton);
+    }
+
+    const deleteButton = createElement("button", "ghost-button", "删除");
+    deleteButton.type = "button";
+    deleteButton.addEventListener("click", () => deleteProvider(profile.name));
+    actions.appendChild(deleteButton);
+
+    card.appendChild(actions);
+    providerList.appendChild(card);
+  });
+}
+
+function clearProviderForm() {
+  editingProviderName = "";
+  providerNameInput.value = "";
+  providerFieldInputs.forEach((input) => {
+    input.value = "";
+    if (input.type === "password") {
+      input.placeholder = "必填：新配置需要填入密钥";
+    }
+  });
+  setProviderHint("填好后点「保存并启用」即可立即生效，无需重启。");
+}
+
+function selectProvider(name) {
+  const profile = providerProfiles.find((item) => item.name === name);
+  if (!profile) {
+    return;
+  }
+  editingProviderName = name;
+  providerNameInput.value = name;
+
+  const fields = profile.fields || {};
+  providerFieldInputs.forEach((input) => {
+    const key = input.dataset.providerField;
+    if (input.type === "password") {
+      // 关键：密钥框绝不回填遮罩值。回填了用户一保存就会把 "••••1234"
+      // 当成真密钥写进配置。留空 + 提示，后端把空值理解为「保持原密钥」。
+      input.value = "";
+      input.placeholder = profile.has_api_key
+        ? `已保存（${fields.AI_API_KEY}），留空则不修改`
+        : "必填：尚未设置密钥";
+      return;
+    }
+    input.value = fields[key] || "";
+  });
+
+  renderProviderList({ profiles: providerProfiles });
+  setProviderHint(`正在编辑「${name}」。密钥留空表示保持不变。`);
+}
+
+function collectProviderFields() {
+  // 白名单里的每个键都要提交，包括空值：后端把「提交了但为空」当作清空该项，
+  // 这样从推理模型换成非推理模型时旧的 AI_REASONING_EFFORT 不会残留。
+  const fields = {};
+  providerFieldInputs.forEach((input) => {
+    fields[input.dataset.providerField] = input.value.trim();
+  });
+  return fields;
+}
+
+function applyProviderData(data) {
+  renderProviderWarning(data);
+  renderProviderList(data);
+}
+
+async function providerRequest(url, payload, fallbackMessage) {
+  const response = await fetch(url, {
+    method: payload ? "POST" : "GET",
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(errorMessage(data, fallbackMessage));
+  }
+  return data;
+}
+
+async function loadProviders() {
+  refreshProvidersButton.disabled = true;
+  try {
+    applyProviderData(await providerRequest("/api/providers", null, "配置读取失败"));
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    refreshProvidersButton.disabled = false;
+  }
+}
+
+async function saveProvider(activate) {
+  const name = providerNameInput.value.trim();
+  if (!name) {
+    setProviderHint("请先填写配置名。", true);
+    return;
+  }
+
+  providerActionButtons().forEach((button) => {
+    button.disabled = true;
+  });
+  try {
+    const data = await providerRequest(
+      "/api/providers",
+      { name, fields: collectProviderFields(), activate },
+      "配置保存失败",
+    );
+    editingProviderName = name;
+    applyProviderData(data);
+    selectProvider(name);
+    setMessage(
+      activate
+        ? `已保存并启用「${name}」，下一个请求就用新配置（无需重启）。`
+        : `已保存「${name}」。`,
+    );
+  } catch (error) {
+    setProviderHint(error.message, true);
+    setMessage(error.message, true);
+  } finally {
+    providerActionButtons().forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
+async function activateProvider(name) {
+  try {
+    applyProviderData(
+      await providerRequest("/api/providers/activate", { name }, "配置切换失败"),
+    );
+    setMessage(`已切换到「${name}」，下一个请求就用新配置；正在跑的任务保持原配置。`);
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+}
+
+async function deleteProvider(name) {
+  // 删除会丢掉这套配置里的密钥，先确认。
+  if (!window.confirm(`删除配置「${name}」？其中保存的密钥会一并丢失。`)) {
+    return;
+  }
+  try {
+    const data = await providerRequest("/api/providers/delete", { name }, "配置删除失败");
+    if (editingProviderName === name) {
+      clearProviderForm();
+    }
+    applyProviderData(data);
+    setMessage(`已删除「${name}」。`);
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+}
+
+async function testProvider() {
+  const name = providerNameInput.value.trim();
+  const saved = providerProfiles.some((item) => item.name === name);
+  if (!saved) {
+    // 测试读的是已保存的配置，未保存的表单内容测不到。
+    setProviderHint("测试的是已保存的配置，请先点「保存」再测试。", true);
+    return;
+  }
+
+  providerActionButtons().forEach((button) => {
+    button.disabled = true;
+  });
+  setProviderHint(`正在用「${name}」发一次最小请求……`);
+  try {
+    const data = await providerRequest("/api/providers/test", { name }, "连接测试失败");
+    const detail = `${data.message}${data.model ? `（${data.model}，${data.duration_ms}ms）` : ""}`;
+    setProviderHint(detail, !data.ok);
+    setMessage(detail, !data.ok);
+  } catch (error) {
+    setProviderHint(error.message, true);
+    setMessage(error.message, true);
+  } finally {
+    providerActionButtons().forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
 document.querySelector("#loadExampleButton").addEventListener("click", () => {
   loadExample().catch((error) => setMessage(error.message, true));
 });
@@ -1934,10 +2222,17 @@ listAgentSessionsButton.addEventListener("click", listAgentSessions);
 runTeamButton.addEventListener("click", runTeam);
 listTeamSessionsButton.addEventListener("click", listTeamSessions);
 refreshMetricsButton.addEventListener("click", refreshMetrics);
+refreshProvidersButton.addEventListener("click", loadProviders);
+newProviderButton.addEventListener("click", clearProviderForm);
+saveProviderButton.addEventListener("click", () => saveProvider(false));
+saveActivateProviderButton.addEventListener("click", () => saveProvider(true));
+testProviderButton.addEventListener("click", testProvider);
 viewWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));
 viewProfilesButton.addEventListener("click", () => setActiveView("profiles"));
 viewAgentsButton.addEventListener("click", () => setActiveView("agents"));
+viewProvidersButton.addEventListener("click", () => setActiveView("providers"));
 viewMetricsButton.addEventListener("click", () => setActiveView("metrics"));
 backToWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));
 novelInput.addEventListener("input", updateChapterCount);
+clearProviderForm();
 

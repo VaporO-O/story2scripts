@@ -6,8 +6,9 @@ from queue import Empty
 from time import perf_counter
 
 import anyio
+import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api_models import ChapterPreviewItem
@@ -32,6 +33,10 @@ from .api_models import MetricsEventsResponse
 from .api_models import MetricsSummaryResponse
 from .api_models import NovelImportRequest
 from .api_models import NovelImportResponse
+from .api_models import ProviderListResponse
+from .api_models import ProviderNameRequest
+from .api_models import ProviderSaveRequest
+from .api_models import ProviderTestResponse
 from .api_models import ReviewReportMergeRequest
 from .api_models import ReviewReportMergeResponse
 from .api_models import RagQueryRequest
@@ -64,8 +69,15 @@ from .scene_review import review_and_improve
 from .scene_review import review_scenes_report
 from .scene_rewrite import rewrite_scene
 from .screenplay import screenplay_json_schema
+from . import provider_config
+from .llm_client import LLMClient
 from .scene_chat import parse_rewrite_intent
-from .security import API_TOKEN_ENV, screen_chat_message, screen_novel_text
+from .security import (
+    API_TOKEN_ENV,
+    redact_secrets,
+    screen_chat_message,
+    screen_novel_text,
+)
 from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
@@ -79,9 +91,32 @@ app = FastAPI(
     version="0.1.0",
     description="AI-assisted novel-to-screenplay workbench.",
 )
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """静态资源强制回源校验。
+
+    Starlette 默认只发 ETag / Last-Modified，不发 Cache-Control。缺了它，浏览器会
+    对子资源（<script src> / <link href>）启发式缓存、不回源，于是出现「新
+    index.html + 旧 app.js/styles.css」这种最难排查的中间态：新加的标签能看见，
+    但点击没反应（旧 JS 里没有那个监听），CSS 修复也不生效。
+
+    no-cache 是「先校验再用」而不是「不许存」：ETag 仍在，未改动就返回 304，
+    代价只有一个空响应。本项目是本地工作台，正确性远比省这点带宽重要。
+    （生产 CDN 场景应改用文件名指纹 + 长缓存，而不是每次校验。）
+    """
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=STATIC_DIR), name="static")
 
 _PUBLIC_PATHS = {"/", "/api/health", "/docs", "/redoc", "/openapi.json"}
+
+# 连通性探测只发一个极短提示词，不该按业务超时（默认 120s）等：配置写错时
+# 用户要的是立刻知道，而不是干等两分钟。
+_PROVIDER_TEST_TIMEOUT = 20.0
 
 
 @app.middleware("http")
@@ -110,7 +145,11 @@ async def require_api_token(request: Request, call_next):
 
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # 与 /static/* 同口径：index.html 是入口，它一旦被缓存，里面引用的
+    # app.js / styles.css 版本也跟着被钉死。
+    return FileResponse(
+        STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/api/health")
@@ -456,6 +495,94 @@ async def get_metrics_summary() -> MetricsSummaryResponse:
 @app.get("/api/metrics/events", response_model=MetricsEventsResponse)
 async def get_metrics_events(limit: int = 50) -> MetricsEventsResponse:
     return MetricsEventsResponse(events=metrics.recent_events(limit=limit))
+
+
+@app.get("/api/providers", response_model=ProviderListResponse)
+async def list_provider_profiles() -> ProviderListResponse:
+    """列出所有 API 配置。密钥只返回遮罩值。"""
+    return ProviderListResponse(**provider_config.list_profiles())
+
+
+@app.post("/api/providers", response_model=ProviderListResponse)
+async def save_provider_profile(request: ProviderSaveRequest) -> ProviderListResponse:
+    try:
+        data = provider_config.save_profile(
+            request.name, request.fields, activate=request.activate
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ProviderListResponse(**data)
+
+
+@app.post("/api/providers/activate", response_model=ProviderListResponse)
+async def activate_provider_profile(request: ProviderNameRequest) -> ProviderListResponse:
+    """切换生效配置。
+
+    无需重启：项目里没有模块级 LLMClient 单例，`get_converter()` 每次新建实例、
+    `LLMClient` 每次重读 .env，所以下一个请求就用新配置。已在跑的任务保持旧配置
+    （不该中途换供应商）。
+    """
+    try:
+        data = provider_config.activate_profile(request.name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"配置不存在：{request.name}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ProviderListResponse(**data)
+
+
+@app.post("/api/providers/delete", response_model=ProviderListResponse)
+async def delete_provider_profile(request: ProviderNameRequest) -> ProviderListResponse:
+    try:
+        data = provider_config.delete_profile(request.name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"配置不存在：{request.name}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ProviderListResponse(**data)
+
+
+@app.post("/api/providers/test", response_model=ProviderTestResponse)
+async def test_provider_profile(request: ProviderNameRequest) -> ProviderTestResponse:
+    """对指定配置做一次真实的最小调用，验证 base_url / key / model 是否可用。
+
+    不改变当前生效配置：用该套配置单独建一个 LLMClient，切换前就能先验证。
+    """
+    try:
+        fields = provider_config.profile_secret(request.name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"配置不存在：{request.name}") from exc
+
+    def _probe() -> tuple[bool, str, str, int]:
+        started = perf_counter()
+        # overrides 优先级高于进程环境：否则 shell 里残留的 AI_MODEL 会让
+        # "测试配置 B" 实际测成当前生效的那一套。load_dotenv=False 同理。
+        llm = LLMClient(
+            client=httpx.Client(timeout=_PROVIDER_TEST_TIMEOUT),
+            usage_label="AI provider test",
+            load_dotenv=False,
+            overrides=fields,
+        )
+        try:
+            # 连通性探测：绕过缓存，否则第二次测试拿到的是上次的结果。
+            llm.complete_json('只返回 {"ok": true}', use_cache=False)
+        # 探测失败是预期结果之一（配置写错就是要看到失败），不该让端点 500，
+        # 所以这里刻意捕获得比 ValueError 更宽。
+        except Exception as exc:
+            return False, redact_secrets(str(exc)), fields.get("AI_MODEL", ""), int(
+                (perf_counter() - started) * 1000
+            )
+        finally:
+            llm.client.close()
+        return (
+            True,
+            "连接成功，模型有响应。",
+            fields.get("AI_MODEL", ""),
+            int((perf_counter() - started) * 1000),
+        )
+
+    ok, message, model, duration_ms = await anyio.to_thread.run_sync(_probe)
+    return ProviderTestResponse(ok=ok, message=message, model=model, duration_ms=duration_ms)
 
 
 @app.post("/api/rag/query", response_model=RagQueryResponse)

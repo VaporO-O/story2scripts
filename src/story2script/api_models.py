@@ -145,6 +145,45 @@ class SceneChatResponse(BaseModel):
     refusal: str = ""
 
 
+class ProviderProfile(BaseModel):
+    name: str
+    active: bool
+    # 密钥只出遮罩值（••••1234）；明文只存磁盘，不经 API 返回。
+    fields: dict[str, str] = Field(default_factory=dict)
+    has_api_key: bool = False
+    missing_fields: list[str] = Field(default_factory=list)
+
+
+class ProviderListResponse(BaseModel):
+    active: str
+    profiles: list[ProviderProfile] = Field(default_factory=list)
+    # 当前真正生效的配置（进程环境优先，与 LLMClient 的解析口径一致）。
+    current: dict[str, str] = Field(default_factory=dict)
+    # 被进程环境变量遮盖的字段：这些键写 .env 不生效，必须让用户看到。
+    shadowed_fields: list[str] = Field(default_factory=list)
+    # STORY2SCRIPT_DISABLE_DOTENV=1 时 .env 完全不被读取，切换会「写了但没效果」。
+    dotenv_disabled: bool = False
+    env_path: str = ""
+
+
+class ProviderSaveRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    # 只有白名单内的 AI_* 键会被接受，其余静默丢弃（见 provider_config）。
+    fields: dict[str, str] = Field(default_factory=dict)
+    activate: bool = False
+
+
+class ProviderNameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class ProviderTestResponse(BaseModel):
+    ok: bool
+    message: str
+    model: str = ""
+    duration_ms: int = 0
+
+
 class ExampleNovelResponse(BaseModel):
     title: str
     genre: str
