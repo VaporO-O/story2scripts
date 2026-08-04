@@ -23,7 +23,7 @@ from pathlib import Path
 import anyio
 from mcp.server.fastmcp import Context, FastMCP
 
-from .agent import AdaptationAgent, AgentSessionStore
+from .agent import AdaptationAgent, AdaptationTeam, AgentSessionStore
 from .api_models import ConvertRequest
 from .character_profiles_ai import get_character_profiler
 from .conversion_jobs import conversion_jobs
@@ -33,6 +33,7 @@ from .metrics import metrics
 from .novel_import import MAX_IMPORT_BYTES, import_novel_content
 from .parser import parse_chapters
 from .rag import StoryKnowledgeBase, build_story_knowledge
+from .security import resolve_sandboxed_path, screen_agent_goal
 from .story_state import extract_global_story_state
 from .scene_review import (
     HumanVerdict,
@@ -54,6 +55,7 @@ _POLL_INTERVAL_SECONDS = 0.2
 _MAX_POLLS = 9000  # 30 分钟
 _PREVIEW_CHARS = 200
 _SCENE_SUMMARY_CHARS = 40
+_FINDING_PREVIEW_COUNT = 10
 
 
 @dataclass
@@ -238,8 +240,11 @@ def get_example_novel() -> dict:
 
 @mcp.tool()
 def import_novel_file(file_path: str) -> dict:
-    """从本地路径导入小说文件（TXT/Markdown/CSV/LOG/EPUB，≤25MB），存入工作区并返回 novel_id。"""
-    path = Path(file_path).expanduser()
+    """从本地路径导入小说文件（TXT/Markdown/CSV/LOG/EPUB，≤25MB），存入工作区并返回 novel_id。
+
+    仅允许读取沙箱目录内的文件（STORY2SCRIPT_FILE_ROOTS，默认当前工作目录）。
+    """
+    path = resolve_sandboxed_path(file_path, action="读取")
     if not path.is_file():
         raise ValueError(f"文件不存在：{file_path}")
     if path.stat().st_size > MAX_IMPORT_BYTES:
@@ -512,9 +517,12 @@ def get_screenplay_yaml(screenplay_id: str) -> str:
 
 @mcp.tool()
 def save_screenplay(screenplay_id: str, file_path: str, include_report: bool = False) -> dict:
-    """把剧本 YAML 写入本地文件；include_report 时在旁边写 <名称>.review.json 审校报告。"""
+    """把剧本 YAML 写入本地文件；include_report 时在旁边写 <名称>.review.json 审校报告。
+
+    仅允许写入沙箱目录内（STORY2SCRIPT_FILE_ROOTS，默认当前工作目录）。
+    """
     entry = workspace.get_screenplay(screenplay_id)
-    path = Path(file_path).expanduser()
+    path = resolve_sandboxed_path(file_path, action="写入")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(screenplay_to_yaml(entry.screenplay), encoding="utf-8")
     report_path: str | None = None
@@ -603,6 +611,7 @@ async def run_adaptation_agent(
     返回决策轨迹摘要与前后分数对比；save_session 时持久化会话（可用
     load_agent_session 恢复）。
     """
+    screen_agent_goal(goal)
     agent = AdaptationAgent(mode=mode, threshold=threshold, max_steps=max_steps)
     progress_lock = threading.Lock()
     progress_notes: list[tuple[int, int, str]] = []
@@ -666,6 +675,163 @@ async def run_adaptation_agent(
         entry.report = outcome.report
 
     return _agent_result_summary(screenplay_id, outcome.result)
+
+
+def _team_result_summary(screenplay_id: str, outcome) -> dict:
+    result = outcome.result
+    return {
+        "screenplay_id": screenplay_id,
+        "status": result.status,
+        "goal": result.goal,
+        "mode": result.mode,
+        "rounds_used": result.rounds_used,
+        "llm_calls": result.llm_calls,
+        "initial_summary": result.initial_summary,
+        "final_summary": result.final_summary,
+        "continuity_summary": result.continuity_summary,
+        "role_summaries": result.role_summaries,
+        "message": result.message,
+        "session_id": result.session_id,
+        "messages": [
+            {
+                "seq": item.seq,
+                "sender": item.sender,
+                "recipient": item.recipient,
+                "kind": item.kind,
+                "content": item.content,
+            }
+            for item in result.messages
+        ],
+        "trace": [
+            {
+                "step": step.step,
+                "role": step.role,
+                "thought": step.thought,
+                "action": step.action.model_dump() if step.action else None,
+                "error": step.error,
+            }
+            for step in result.trace
+        ],
+        "continuity_findings": [
+            {
+                "scene_id": item.scene_id,
+                "kind": item.kind,
+                "severity": item.severity,
+                "detail": item.detail,
+            }
+            for item in outcome.continuity_findings[:_FINDING_PREVIEW_COUNT]
+        ],
+    }
+
+
+@mcp.tool()
+async def run_adaptation_team(
+    screenplay_id: str,
+    goal: str = "",
+    mode: str = "demo",
+    threshold: float | None = None,
+    max_rounds: int | None = None,
+    max_steps_per_agent: int | None = None,
+    save_session: bool = False,
+    novel_id: str = "",
+    ctx: Context | None = None,
+) -> dict:
+    """让改编团队接管剧本：审校 / 一致性 / 改编三个专职代理由主管调度协作。
+
+    与 run_adaptation_agent 的差别是多了一致性校验角色与主管派单：审校找不达标
+    场景、一致性查跨章矛盾（人物出场、地点、时间线）、改编据此修复，主管按黑板
+    状态决定每一轮调谁。执行期间该剧本被锁定。
+    返回协作轨迹（含角色归属）、消息流、前后分数与一致性问题；save_session 时
+    持久化协作会话（可用 load_team_session 恢复）。
+    """
+    screen_agent_goal(goal)
+    team = AdaptationTeam(
+        mode=mode,
+        threshold=threshold,
+        max_rounds=max_rounds,
+        max_steps_per_agent=max_steps_per_agent,
+    )
+    progress_lock = threading.Lock()
+    progress_notes: list[tuple[int, int, str]] = []
+    finished = threading.Event()
+    box: dict = {}
+    novel = workspace.get_novel(novel_id) if novel_id else None
+
+    def progress_cb(round_no: int, max_rounds_total: int, note: str) -> None:
+        with progress_lock:
+            progress_notes.append((round_no, max_rounds_total, note))
+
+    session_store = AgentSessionStore() if save_session else None
+
+    with workspace.screenplay_transaction(screenplay_id) as entry:
+        screenplay = entry.screenplay
+
+        def _work() -> None:
+            try:
+                knowledge = None
+                if novel is not None:
+                    if novel.knowledge is None:
+                        novel.knowledge = _build_novel_knowledge(novel, mode)
+                    knowledge = novel.knowledge
+                box["outcome"] = team.run(
+                    screenplay,
+                    goal=goal,
+                    progress_cb=progress_cb,
+                    session_store=session_store,
+                    knowledge=knowledge,
+                )
+            except BaseException as exc:  # noqa: BLE001 - 错误经 box 转回事件循环
+                box["error"] = exc
+            finally:
+                finished.set()
+
+        async def _forward_progress() -> None:
+            sent = 0
+            while True:
+                with progress_lock:
+                    pending = progress_notes[sent:]
+                    sent = len(progress_notes)
+                if ctx is not None:
+                    for round_no, total, note in pending:
+                        await ctx.report_progress(round_no, total, note)
+                if finished.is_set() and sent == len(progress_notes):
+                    return
+                await anyio.sleep(_POLL_INTERVAL_SECONDS)
+
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(anyio.to_thread.run_sync, _work)
+            task_group.start_soon(_forward_progress)
+
+        if "error" in box:
+            error = box["error"]
+            if isinstance(error, ValueError):
+                raise error
+            raise ValueError(f"协作执行失败：{error}")
+
+        outcome = box["outcome"]
+        entry.screenplay = outcome.screenplay
+        entry.report = outcome.report
+
+    return _team_result_summary(screenplay_id, outcome)
+
+
+@mcp.tool()
+def load_team_session(session_id: str) -> dict:
+    """恢复一次已持久化的协作会话（mag-*）：剧本与审校报告载入工作区。"""
+    data = AgentSessionStore().load_team(session_id)
+    screenplay_id = workspace.add_screenplay(data["screenplay"], report=data["report"])
+    summary = _screenplay_summary(screenplay_id, workspace.get_screenplay(screenplay_id))
+    summary.update(
+        {
+            "session_id": data["session_id"],
+            "saved_at": data["saved_at"],
+            "goal": data["goal"],
+            "status": data["status"],
+            "rounds_used": data["result"].rounds_used,
+            "role_summaries": data["result"].role_summaries,
+        }
+    )
+    return summary
 
 
 @mcp.tool()
@@ -738,7 +904,10 @@ def screenplay_schema_resource() -> str:
 
 
 def _apply_env_file(path_text: str) -> None:
-    values = _load_env_file(Path(path_text).expanduser())
+    path = Path(path_text).expanduser().resolve()
+    if not path.is_file():
+        raise SystemExit(f"env 文件不存在：{path}")
+    values = _load_env_file(path)
     for key, value in values.items():
         os.environ.setdefault(key, value)
 

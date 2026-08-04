@@ -7,6 +7,10 @@ from .screenplay import AdaptationType
 from .screenplay import GlobalStoryState
 from .screenplay import Screenplay
 from .agent.models import AgentRunResult
+from .agent.models import TeamRunResult
+from .continuity import ContinuityFinding
+from .scene_chat import ChatTurn
+from .scene_chat import SceneChatMode
 from .scene_rewrite import SceneRewriteMode
 from .scene_rewrite import SceneRewriteOperation
 from .scene_review import HumanVerdict
@@ -65,6 +69,9 @@ class ConvertResponse(BaseModel):
     mode: str
     adaptation_type: AdaptationType
     review_report: ReviewReport | None = None
+    security_warnings: list[str] = []
+    # 非致命的转换告警，如"3/9 个片段失败已跳过"。剧本偏薄时用户需要知道原因。
+    conversion_warnings: list[str] = []
 
 
 ConvertJobStatus = Literal["queued", "running", "succeeded", "failed"]
@@ -105,6 +112,8 @@ class SceneRewriteRequest(BaseModel):
     mode: SceneRewriteMode = "demo"
     character_id: str = ""
     tone: str = "更克制"
+    # feedback 在库内已全线打通（agent/tools.py、mcp_server.py），REST 是唯一漏掉它的调用方。
+    feedback: str = ""
 
 
 class SceneRewriteResponse(BaseModel):
@@ -114,6 +123,65 @@ class SceneRewriteResponse(BaseModel):
     operation: SceneRewriteOperation
     mode: SceneRewriteMode
     message: str
+
+
+class SceneChatRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    # 无状态：历史由前端回传，与其它路由一致（项目里没有任何 REST 路由持有会话状态）。
+    history: list[ChatTurn] = Field(default_factory=list)
+    mode: SceneChatMode = "demo"
+    scene_id: str = ""
+
+
+class SceneChatResponse(BaseModel):
+    reply: str
+    mode: SceneChatMode
+    # 只回话不改剧本时（refusal 非空）后四项为空，前端据此决定是否刷新预览。
+    screenplay: Screenplay | None = None
+    yaml_text: str = ""
+    scene_id: str = ""
+    operation: SceneRewriteOperation | None = None
+    refusal: str = ""
+
+
+class ProviderProfile(BaseModel):
+    name: str
+    active: bool
+    # 密钥只出遮罩值（••••1234）；明文只存磁盘，不经 API 返回。
+    fields: dict[str, str] = Field(default_factory=dict)
+    has_api_key: bool = False
+    missing_fields: list[str] = Field(default_factory=list)
+
+
+class ProviderListResponse(BaseModel):
+    active: str
+    profiles: list[ProviderProfile] = Field(default_factory=list)
+    # 当前真正生效的配置（进程环境优先，与 LLMClient 的解析口径一致）。
+    current: dict[str, str] = Field(default_factory=dict)
+    # 被进程环境变量遮盖的字段：这些键写 .env 不生效，必须让用户看到。
+    shadowed_fields: list[str] = Field(default_factory=list)
+    # STORY2SCRIPT_DISABLE_DOTENV=1 时 .env 完全不被读取，切换会「写了但没效果」。
+    dotenv_disabled: bool = False
+    env_path: str = ""
+
+
+class ProviderSaveRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    # 只有白名单内的 AI_* 键会被接受，其余静默丢弃（见 provider_config）。
+    fields: dict[str, str] = Field(default_factory=dict)
+    activate: bool = False
+
+
+class ProviderNameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class ProviderTestResponse(BaseModel):
+    ok: bool
+    message: str
+    model: str = ""
+    duration_ms: int = 0
 
 
 class ExampleNovelResponse(BaseModel):
@@ -205,6 +273,43 @@ class AgentJobStatusResponse(BaseModel):
 
 class AgentSessionListResponse(BaseModel):
     sessions: list[dict]
+
+
+class TeamRunRequest(BaseModel):
+    yaml_text: str = Field(min_length=1)
+    goal: str = ""
+    mode: str = "demo"
+    threshold: float | None = None
+    max_rounds: int | None = None
+    max_steps_per_agent: int | None = None
+    save_session: bool = False
+    novel_text: str = ""
+
+
+class TeamRunResponse(BaseModel):
+    result: TeamRunResult
+    screenplay: Screenplay
+    yaml_text: str
+    report: ReviewReport | None = None
+    continuity_findings: list[ContinuityFinding] = []
+
+
+class TeamJobStartResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+
+
+class TeamJobStatusResponse(BaseModel):
+    job_id: str
+    status: ConvertJobStatus
+    progress: int
+    stage: str
+    message: str
+    result: TeamRunResponse | None = None
+    error: str = ""
 
 
 class AgentSessionDetailResponse(BaseModel):

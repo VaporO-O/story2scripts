@@ -7,6 +7,7 @@ from .converter import _normalize_screenplay_scene_data
 from .llm_client import LLMClient, loads_json_object
 from .metrics import metrics
 from .screenplay import Action, Dialogue, Scene, Screenplay
+from .security import DATA_FENCE_NOTICE
 
 
 SceneRewriteOperation = Literal[
@@ -318,6 +319,7 @@ class AISceneRewriter:
             "elements, camera_hints。\n"
             "本次局部操作："
             f"{OPERATION_PROMPTS[operation]}\n"
+            f"{DATA_FENCE_NOTICE}\n"
             + (f"审校意见（请重点修正以下问题）：{feedback}\n" if feedback else "")
             + f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"
         )

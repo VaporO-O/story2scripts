@@ -1,8 +1,7 @@
-
-from .agent import AdaptationAgent, AgentSessionStore
-from .api_models import AgentJobStatusResponse
-from .api_models import AgentRunRequest
-from .api_models import AgentRunResponse
+from .agent import AdaptationTeam, AgentSessionStore
+from .api_models import TeamJobStatusResponse
+from .api_models import TeamRunRequest
+from .api_models import TeamRunResponse
 from .job_store import DurableJobStore
 from .metrics import metrics
 from .parser import parse_chapters
@@ -12,18 +11,18 @@ from .story_state import extract_global_story_state
 from .yaml_export import screenplay_from_yaml, screenplay_to_yaml
 
 
-class AgentJobStore(DurableJobStore):
-    """Agent 运行任务队列：持久化、可恢复；与转换任务共用一个 SQLite 库，
-    但保持独立线程池，避免与转换任务互相阻塞。"""
+class TeamJobStore(DurableJobStore):
+    """多智能体协作任务队列：持久化、可恢复；独立线程池，
+    避免与单体 Agent、转换任务互相阻塞。"""
 
-    kind = "agent_run"
-    request_model = AgentRunRequest
-    result_model = AgentRunResponse
-    response_model = AgentJobStatusResponse
+    kind = "team_run"
+    request_model = TeamRunRequest
+    result_model = TeamRunResponse
+    response_model = TeamJobStatusResponse
     queued_stage = "等待执行"
-    queued_message = "Agent 任务已创建，等待后端开始处理。"
-    complete_stage = "执行完成"
-    fail_stage = "执行失败"
+    queued_message = "协作任务已创建，等待后端开始处理。"
+    complete_stage = "协作完成"
+    fail_stage = "协作失败"
 
     def _run(self, job_id: str) -> None:
         request = self._request_for(job_id)
@@ -41,20 +40,20 @@ class AgentJobStore(DurableJobStore):
             self._update(
                 job_id,
                 progress=15,
-                stage="Agent 启动",
-                message="正在初始化改编代理并执行首轮审校。",
+                stage="团队启动",
+                message="正在组建审校 / 一致性 / 改编三个专职代理。",
             )
-            agent = AdaptationAgent(
+            team = AdaptationTeam(
                 mode=request.mode,
-                max_steps=request.max_steps,
+                max_rounds=request.max_rounds,
                 threshold=request.threshold,
+                max_steps_per_agent=request.max_steps_per_agent,
             )
 
-            def progress_cb(step: int, max_steps: int, note: str) -> None:
-                progress = 15 + int(75 * step / max(1, max_steps))
-                self._update(job_id, progress=progress, stage="Agent 执行中", message=note)
+            def progress_cb(round_no: int, max_rounds: int, note: str) -> None:
+                progress = 15 + int(75 * round_no / max(1, max_rounds))
+                self._update(job_id, progress=progress, stage="协作进行中", message=note)
 
-            session_store = AgentSessionStore() if request.save_session else None
             knowledge = None
             if request.novel_text.strip():
                 try:
@@ -66,8 +65,10 @@ class AgentJobStore(DurableJobStore):
                     )
                 except ValueError as exc:
                     raise ValueError(f"小说前文知识库构建失败：{exc}") from exc
+
+            session_store = AgentSessionStore() if request.save_session else None
             reached_run = True
-            outcome = agent.run(
+            outcome = team.run(
                 screenplay,
                 goal=request.goal,
                 progress_cb=progress_cb,
@@ -75,12 +76,13 @@ class AgentJobStore(DurableJobStore):
                 knowledge=knowledge,
             )
 
-            self._update(job_id, progress=95, stage="导出结果", message="正在导出剧本与轨迹。")
-            result = AgentRunResponse(
+            self._update(job_id, progress=95, stage="导出结果", message="正在导出剧本与协作轨迹。")
+            result = TeamRunResponse(
                 result=outcome.result,
                 screenplay=outcome.screenplay,
                 yaml_text=screenplay_to_yaml(outcome.screenplay),
                 report=outcome.report,
+                continuity_findings=outcome.continuity_findings,
             )
             self._complete(job_id, result)
         except ValueError as exc:
@@ -88,19 +90,19 @@ class AgentJobStore(DurableJobStore):
             if not reached_run:
                 self._record_pre_run_failure(request.mode, str(exc))
         except Exception as exc:
-            self._fail(job_id, f"Agent 任务失败：{exc}")
+            self._fail(job_id, f"协作任务失败：{exc}")
             if not reached_run:
-                self._record_pre_run_failure(request.mode, f"Agent 任务失败：{exc}")
+                self._record_pre_run_failure(request.mode, f"协作任务失败：{exc}")
 
-    def _complete_message(self, result: AgentRunResponse) -> str:
-        return result.result.message or "Agent 执行完成。"
+    def _complete_message(self, result: TeamRunResponse) -> str:
+        return result.result.message or "协作完成。"
 
     @staticmethod
     def _record_pre_run_failure(mode: str, error: str) -> None:
-        # Agent 循环内的成败（含异常）由 AdaptationAgent.run 记录；这里只补
-        # 没进入循环就失败的任务（YAML 解析失败、模式非法），避免漏计。
+        # 协作循环内的成败由 AdaptationTeam.run 记录；这里只补没进入循环就失败的
+        # 任务（目标被安全拦截、YAML 解析失败、知识库构建失败），避免漏计。
         metrics.record_task(
-            "agent_run",
+            "team_run",
             mode=mode,
             ok=False,
             error=error,
@@ -108,4 +110,4 @@ class AgentJobStore(DurableJobStore):
         )
 
 
-agent_jobs = AgentJobStore()
+team_jobs = TeamJobStore()

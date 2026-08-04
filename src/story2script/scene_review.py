@@ -10,6 +10,7 @@ from .llm_client import LLMClient, _default_env_path, _load_env_file, loads_json
 from .metrics import metrics
 from .scene_rewrite import OPERATION_PROMPTS, rewrite_scene
 from .screenplay import Dialogue, Scene, Screenplay
+from .security import DATA_FENCE_NOTICE
 
 REVIEW_CRITERIA = (
     "dramatization",
@@ -94,8 +95,10 @@ def _finalize_result(
     feedback: str = "",
 ) -> SceneReviewResult:
     total = round(sum(scores.values()) / len(scores), 2) if scores else 0.0
-    if verdict not in ("pass", "fail"):
-        verdict = "pass" if total >= threshold else "fail"
+    # verdict 一律按"平均分 vs 阈值"裁决，不采信模型自报的结论：这与提示词里
+    # 给模型的规则和对外文档口径一致，也避免界面出现"7.25 分 · 通过"而阈值是
+    # 9.5 的自相矛盾展示。模型的定性判断保留在 issues / feedback 中。
+    verdict = "pass" if total >= threshold else "fail"
     lowest = min(scores, key=lambda key: scores[key]) if scores else "dramatization"
     if suggested_operation not in OPERATION_PROMPTS:
         suggested_operation = CRITERIA_OPERATIONS.get(lowest, "reduce_narration")
@@ -107,7 +110,9 @@ def _finalize_result(
         total=total,
         verdict=verdict,  # type: ignore[arg-type]
         issues=issues,
-        suggested_operation=suggested_operation if verdict == "fail" else suggested_operation,
+        # 通过的场景也保留建议操作：它指向四项里最弱的一环，是"已达标但仍可
+        # 优化"的方向，界面据 verdict 区分措辞（建议修正 / 可选优化）。
+        suggested_operation=suggested_operation,
         feedback=feedback,
     )
 
@@ -247,6 +252,7 @@ class AISceneReviewer:
             '"suggested_operation": "allowed_operations 之一", "feedback": "给重写者的一句修正意见"}\n'
             f"verdict 规则：四项平均分低于 {threshold} 判 fail，否则 pass。\n"
             "suggested_operation 必须从 allowed_operations 中选择最能修复主要问题的一项。\n"
+            f"{DATA_FENCE_NOTICE}\n"
             f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"
         )
 

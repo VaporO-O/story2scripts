@@ -18,7 +18,10 @@ class AgentAction(BaseModel):
 
 
 class AgentStep(BaseModel):
-    """决策轨迹中的一步：思考、动作、观察值与耗时。"""
+    """决策轨迹中的一步：思考、动作、观察值与耗时。
+
+    role 用于多智能体协作时标注这一步出自哪个角色；单体运行留空。
+    """
 
     step: int
     thought: str = ""
@@ -26,6 +29,7 @@ class AgentStep(BaseModel):
     observation: dict = {}
     error: str = ""
     duration_ms: int = 0
+    role: str = ""
 
 
 class AgentRunResult(BaseModel):
@@ -39,5 +43,35 @@ class AgentRunResult(BaseModel):
     initial_summary: dict = {}
     final_summary: dict = {}
     trace: list[AgentStep] = []
+    message: str = ""
+    session_id: str = ""
+    role: str = ""
+
+
+class AgentMessage(BaseModel):
+    """协作消息：主管派单与专职回报都走这一条通道。"""
+
+    seq: int
+    sender: str
+    recipient: str
+    kind: str = "report"  # dispatch | report
+    content: str = ""
+    at: str = ""
+
+
+class TeamRunResult(BaseModel):
+    """一次多智能体协作的完整结果（剧本与报告另行传递）。"""
+
+    status: AgentRunStatus
+    goal: str = ""
+    mode: str = "demo"
+    rounds_used: int = 0
+    llm_calls: int = 0
+    initial_summary: dict = {}
+    final_summary: dict = {}
+    continuity_summary: dict = {}
+    role_summaries: dict = {}
+    trace: list[AgentStep] = []
+    messages: list[AgentMessage] = []
     message: str = ""
     session_id: str = ""

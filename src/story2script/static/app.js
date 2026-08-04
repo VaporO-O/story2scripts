@@ -22,17 +22,29 @@ let currentScriptView = "preview";
 let currentNovelView = "edit";
 let latestScreenplay = null;
 let latestReviewReport = null;
+// 场景 ID 从输入框变成内部状态：点剧本里的 SCENE 徽章切换，chip 显示当前值。
+let currentSceneId = "scene-1";
+// 流式渲染状态：已追加的场景数、人物 id→名字映射（来自 meta 事件）、
+// 以及表头里那个"N 场"标签的引用（逐场就地更新，不重画表头）。
+let streamedSceneCount = 0;
+let streamedNames = new Map();
+let sceneCountTag = null;
+// 有场景流进来后，预览里已经有内容可看，即使 yaml_text 还没到。
+let hasStreamedContent = false;
+// 对话历史由前端持有并随请求回传（服务端无状态），照 renderTeamMessages 的风格全量重渲染。
+const chatMessages = [];
 const conversionPollIntervalMs = 1000;
 const conversionMaxPolls = 720;
 const convertButton = document.querySelector("#convertButton");
 const analyzeCharactersButton = document.querySelector("#analyzeCharactersButton");
 const importNovelFileButton = document.querySelector("#importNovelFileButton");
 const novelFileInput = document.querySelector("#novelFileInput");
-const sceneIdInput = document.querySelector("#sceneIdInput");
-const rewriteModeInput = document.querySelector("#rewriteModeInput");
-const rewriteCharacterInput = document.querySelector("#rewriteCharacterInput");
-const rewriteToneInput = document.querySelector("#rewriteToneInput");
-const rewriteButtons = document.querySelectorAll("[data-rewrite-operation]");
+const chatModeInput = document.querySelector("#chatModeInput");
+const chatModeHint = document.querySelector("#chatModeHint");
+const chatInput = document.querySelector("#chatInput");
+const chatSendButton = document.querySelector("#chatSendButton");
+const chatLog = document.querySelector("#chatLog");
+const chatSceneChip = document.querySelector("#chatSceneChip");
 const enableReviewInput = document.querySelector("#enableReviewInput");
 const reviewModeInput = document.querySelector("#reviewModeInput");
 const reviewThresholdInput = document.querySelector("#reviewThresholdInput");
@@ -57,9 +69,51 @@ const agentEmptyState = document.querySelector("#agentEmptyState");
 const agentSummary = document.querySelector("#agentSummary");
 const agentTrace = document.querySelector("#agentTrace");
 const agentSessions = document.querySelector("#agentSessions");
+const teamGoalInput = document.querySelector("#teamGoalInput");
+const teamModeInput = document.querySelector("#teamModeInput");
+const teamThresholdInput = document.querySelector("#teamThresholdInput");
+const teamMaxRoundsInput = document.querySelector("#teamMaxRoundsInput");
+const teamSaveSessionInput = document.querySelector("#teamSaveSessionInput");
+const runTeamButton = document.querySelector("#runTeamButton");
+const listTeamSessionsButton = document.querySelector("#listTeamSessionsButton");
+const teamProgress = document.querySelector("#teamProgress");
+const teamProgressStage = document.querySelector("#teamProgressStage");
+const teamProgressPercent = document.querySelector("#teamProgressPercent");
+const teamProgressBar = document.querySelector("#teamProgressBar");
+const teamProgressMessage = document.querySelector("#teamProgressMessage");
+const teamEmptyState = document.querySelector("#teamEmptyState");
+const teamSummary = document.querySelector("#teamSummary");
+const teamFindings = document.querySelector("#teamFindings");
+const teamTrace = document.querySelector("#teamTrace");
+const teamMessages = document.querySelector("#teamMessages");
+const teamSessions = document.querySelector("#teamSessions");
 const refreshMetricsButton = document.querySelector("#refreshMetricsButton");
 const metricsEmptyState = document.querySelector("#metricsEmptyState");
 const metricsContent = document.querySelector("#metricsContent");
+const viewWorkbench = document.querySelector("#viewWorkbench");
+const viewProfiles = document.querySelector("#viewProfiles");
+const viewAgents = document.querySelector("#viewAgents");
+const viewMetrics = document.querySelector("#viewMetrics");
+const viewProviders = document.querySelector("#viewProviders");
+const viewWorkbenchButton = document.querySelector("#viewWorkbenchButton");
+const viewProfilesButton = document.querySelector("#viewProfilesButton");
+const viewAgentsButton = document.querySelector("#viewAgentsButton");
+const viewMetricsButton = document.querySelector("#viewMetricsButton");
+const viewProvidersButton = document.querySelector("#viewProvidersButton");
+const refreshProvidersButton = document.querySelector("#refreshProvidersButton");
+const newProviderButton = document.querySelector("#newProviderButton");
+const providerList = document.querySelector("#providerList");
+const providerEmptyState = document.querySelector("#providerEmptyState");
+const providerWarning = document.querySelector("#providerWarning");
+const providerNameInput = document.querySelector("#providerNameInput");
+const providerFormHint = document.querySelector("#providerFormHint");
+const saveProviderButton = document.querySelector("#saveProviderButton");
+const saveActivateProviderButton = document.querySelector("#saveActivateProviderButton");
+const testProviderButton = document.querySelector("#testProviderButton");
+const providerFieldInputs = document.querySelectorAll("[data-provider-field]");
+const reanalyzeCharactersButton = document.querySelector("#reanalyzeCharactersButton");
+const screenplayStatusText = document.querySelector("#screenplayStatusText");
+const backToWorkbenchButton = document.querySelector("#backToWorkbenchButton");
 const agentPollIntervalMs = 1000;
 const agentMaxPolls = 720;
 const supportedTextNovelFileExtensions = [".txt", ".text", ".md", ".markdown", ".csv", ".log"];
@@ -324,11 +378,22 @@ function renderDecisions(scene) {
   return details;
 }
 
+// 与后端 scene_review.CRITERIA_LABELS 保持一致：此前这里是三个简称，
+// 和报告里的字段名对不上，用户核对分数时会困惑。
 const CRITERIA_LABELS = {
-  dramatization: "戏剧化",
-  dialogue_conflict: "对白冲突",
+  dramatization: "戏剧化程度",
+  dialogue_conflict: "对白推动冲突",
   residual_narration: "残留旁白",
-  character_voice: "人物语气",
+  character_voice: "人物语气一致性",
+};
+
+const OPERATION_LABELS = {
+  rewrite_dialogue: "重新生成本场对白",
+  strengthen_conflict: "加强戏剧冲突",
+  short_drama_pace: "改成短剧节奏",
+  add_camera_hints: "增加镜头提示",
+  reduce_narration: "减少旁白",
+  adjust_character_voice: "调整人物语气",
 };
 
 function emptyReviewReport() {
@@ -368,6 +433,63 @@ function renderReviewBadge(sceneId) {
   const issues = (result.issues || []).join("\n");
   badge.title = issues ? `${details}\n问题：\n${issues}` : details;
   return badge;
+}
+
+// 原生 title 提示触屏和键盘都不可达，评分明细另给一个可展开区域：四项得分、
+// 判定依据（均分 vs 阈值）、问题清单与建议操作都摊开，用户不必猜分数怎么来的。
+function renderReviewDetail(sceneId) {
+  const result = latestReviewReport && latestReviewReport.machine[sceneId];
+  if (!result) {
+    return null;
+  }
+  const passed = result.verdict === "pass";
+  const threshold = latestReviewReport.threshold ?? 7;
+  const wrap = createElement("details", "review-detail");
+  wrap.appendChild(
+    createElement("summary", "review-detail-summary", `评分明细（均分 ${result.total}）`),
+  );
+
+  const grid = createElement("div", "review-detail-grid");
+  Object.entries(result.scores || {}).forEach(([key, value]) => {
+    const item = createElement("span", "review-detail-item");
+    item.append(
+      createElement("span", "review-detail-label", CRITERIA_LABELS[key] || key),
+      createElement("strong", "review-detail-score", String(value)),
+    );
+    grid.appendChild(item);
+  });
+  wrap.appendChild(grid);
+
+  wrap.appendChild(
+    createElement(
+      "p",
+      "review-detail-rule",
+      `判定：四项等权平均 ${result.total} ${passed ? "≥" : "<"} 达标线 ${threshold} → ${
+        passed ? "通过" : "未通过"
+      }。`,
+    ),
+  );
+
+  if ((result.issues || []).length) {
+    const list = createElement("ul", "review-detail-issues");
+    result.issues.forEach((issue) => {
+      list.appendChild(createElement("li", "", issue));
+    });
+    wrap.appendChild(list);
+  }
+
+  if (result.suggested_operation) {
+    const operation = OPERATION_LABELS[result.suggested_operation] || result.suggested_operation;
+    // 通过的场景也带建议操作，它指向四项里最弱的一环，措辞上区分开避免误解。
+    wrap.appendChild(
+      createElement(
+        "p",
+        "review-detail-operation",
+        `${passed ? "可选优化方向" : "建议修正操作"}：${operation}`,
+      ),
+    );
+  }
+  return wrap;
 }
 
 function renderHumanReviewControls(sceneId) {
@@ -481,10 +603,10 @@ function renderScene(scene, index, names) {
   const slug = createElement("div", "scene-slug");
   const number = createElement("button", "scene-no", `SCENE ${index + 1}`);
   number.type = "button";
-  number.title = "点击把此场景填入重写工具";
+  number.title = "点击把此场景设为对话改写的当前场景";
   number.addEventListener("click", () => {
-    sceneIdInput.value = scene.id;
-    setMessage(`已选择 ${scene.id} 进行局部重写。`);
+    setCurrentScene(scene.id);
+    setMessage(`已选择 ${scene.id}，接下来的改写要求默认作用在这一场。`);
   });
   slug.append(
     number,
@@ -525,8 +647,35 @@ function renderScene(scene, index, names) {
   if (decisions) {
     article.appendChild(decisions);
   }
+  const reviewDetail = renderReviewDetail(scene.id);
+  if (reviewDetail) {
+    article.appendChild(reviewDetail);
+  }
   article.appendChild(renderHumanReviewControls(scene.id));
   return article;
+}
+
+// 表头与场景列表拆开：流式转换要能先画表头、再逐场追加，而原来的实现开头就
+// innerHTML = "" 全量重绘，追加一场就得把已显示的全部重画一遍。
+function renderScreenplayHeader(meta, sceneCount) {
+  scriptPreview.innerHTML = "";
+  const header = createElement("header", "script-meta");
+  header.appendChild(createElement("h3", "script-title", meta.title));
+  if (meta.logline) {
+    header.appendChild(createElement("p", "script-logline", meta.logline));
+  }
+  const tags = createElement("div", "script-tags");
+  if (meta.genre) {
+    tags.appendChild(createElement("span", "tag", meta.genre));
+  }
+  if (meta.adaptation_type) {
+    tags.appendChild(createElement("span", "tag tag-accent", meta.adaptation_type));
+  }
+  // 场景数在流式过程中一直增长：留住这个节点的引用，逐场就地更新。
+  sceneCountTag = createElement("span", "tag", `${sceneCount} 场`);
+  tags.appendChild(sceneCountTag);
+  header.appendChild(tags);
+  scriptPreview.appendChild(header);
 }
 
 function renderScreenplay(screenplay) {
@@ -535,26 +684,44 @@ function renderScreenplay(screenplay) {
     return;
   }
   const names = characterNameMap(screenplay);
+  const scenes = screenplay.scenes || [];
+  renderScreenplayHeader(screenplay, scenes.length);
 
-  const header = createElement("header", "script-meta");
-  header.appendChild(createElement("h3", "script-title", screenplay.title));
-  if (screenplay.logline) {
-    header.appendChild(createElement("p", "script-logline", screenplay.logline));
-  }
-  const tags = createElement("div", "script-tags");
-  if (screenplay.genre) {
-    tags.appendChild(createElement("span", "tag", screenplay.genre));
-  }
-  if (screenplay.adaptation_type) {
-    tags.appendChild(createElement("span", "tag tag-accent", screenplay.adaptation_type));
-  }
-  tags.appendChild(createElement("span", "tag", `${(screenplay.scenes || []).length} 场`));
-  header.appendChild(tags);
-  scriptPreview.appendChild(header);
-
-  (screenplay.scenes || []).forEach((scene, index) => {
+  scenes.forEach((scene, index) => {
     scriptPreview.appendChild(renderScene(scene, index, names));
   });
+}
+
+// ------------------------------------------------------------------ 流式渲染
+
+function resetSceneStream() {
+  streamedSceneCount = 0;
+  streamedNames = new Map();
+  sceneCountTag = null;
+  hasStreamedContent = false;
+}
+
+function beginSceneStream(meta) {
+  streamedNames = new Map();
+  (meta.characters || []).forEach((character) => {
+    streamedNames.set(character.id, character.name || character.id);
+  });
+  streamedSceneCount = 0;
+  renderScreenplayHeader(meta, 0);
+  // 流式是预览侧的能力：此刻 yaml_text 还没到，停在"源码"视图只会看到空文本域。
+  setScriptView("preview");
+}
+
+function appendStreamedScene(scene) {
+  if (!sceneCountTag) {
+    // 没收到 meta 就先来了场景（理论上不会发生）：补一个最小表头，不丢内容。
+    beginSceneStream({ title: titleInput.value || "未命名改编", characters: [] });
+  }
+  scriptPreview.appendChild(renderScene(scene, streamedSceneCount, streamedNames));
+  streamedSceneCount += 1;
+  sceneCountTag.textContent = `${streamedSceneCount} 场`;
+  hasStreamedContent = true;
+  setScriptView(currentScriptView);
 }
 
 function setScriptView(view) {
@@ -562,7 +729,9 @@ function setScriptView(view) {
   previewViewButton.classList.toggle("is-active", view === "preview");
   sourceViewButton.classList.toggle("is-active", view === "source");
 
-  if (!yamlOutput.value) {
+  // 门禁放宽：yaml_text 只在转换完成时才有，而流式场景在那之前就该可见。
+  // 仍以 yamlOutput.value 为准会把已流出的场景渲染进隐藏面板。
+  if (!yamlOutput.value && !hasStreamedContent) {
     emptyState.classList.remove("hidden");
     scriptPreview.classList.add("hidden");
     yamlOutput.classList.add("hidden");
@@ -570,30 +739,81 @@ function setScriptView(view) {
   }
 
   emptyState.classList.add("hidden");
-  scriptPreview.classList.toggle("hidden", view !== "preview");
-  yamlOutput.classList.toggle("hidden", view !== "source");
+  // 流式过程中源码还是空的：即使停在"源码"视图也先显示预览，否则用户对着
+  // 空文本域，看不到正在生成的内容。
+  const showPreview = view !== "source" || !yamlOutput.value;
+  scriptPreview.classList.toggle("hidden", !showPreview);
+  yamlOutput.classList.toggle("hidden", showPreview);
 }
 
-function populateCharacterOptions(screenplay) {
-  // 重写工具按角色“名字”选择，内部仍提交稳定的 character id，用户无需知道 id。
-  const previous = rewriteCharacterInput.value;
-  rewriteCharacterInput.innerHTML = "";
-  rewriteCharacterInput.appendChild(createElement("option", null, "（自动选择）"));
-  (screenplay.characters || []).forEach((character) => {
-    const option = createElement("option", null, character.name || character.id);
-    option.value = character.id;
-    rewriteCharacterInput.appendChild(option);
-  });
-  const stillExists = (screenplay.characters || []).some((character) => character.id === previous);
-  rewriteCharacterInput.value = stillExists ? previous : "";
+// 角色不再由下拉框选择：用户在对话里直接写名字，服务端按 name 精确匹配回 id
+// （匹配不上就交给重写层自动挑人），所以前端不必再维护一份角色清单。
+function setCurrentScene(sceneId) {
+  currentSceneId = sceneId;
+  if (chatSceneChip) {
+    chatSceneChip.textContent = `当前场景：${sceneId}`;
+  }
 }
 
 function showScreenplay(screenplay, yamlText) {
   latestScreenplay = screenplay;
   yamlOutput.value = yamlText;
   renderScreenplay(screenplay);
-  populateCharacterOptions(screenplay);
+  const scenes = screenplay.scenes || [];
+  // 剧本换了以后旧的 currentSceneId 可能已不存在，回落到第一场。
+  if (scenes.length && !scenes.some((scene) => scene.id === currentSceneId)) {
+    setCurrentScene(scenes[0].id);
+  }
   setScriptView(currentScriptView);
+  updateScreenplayStatus();
+}
+
+// 「智能改编」视图里看不到剧本面板，用一行摘要说明当前拿什么在跑，
+// 免得代理跑完了却不知道结果去哪看。
+function updateScreenplayStatus() {
+  if (!screenplayStatusText) {
+    return;
+  }
+  if (!latestScreenplay || !yamlOutput.value) {
+    screenplayStatusText.textContent =
+      "还没有剧本：请先在「工作台」生成，或粘贴 YAML 后校验。";
+    return;
+  }
+  const sceneCount = (latestScreenplay.scenes || []).length;
+  const summary = latestReviewReport && latestReviewReport.summary;
+  const scorePart =
+    summary && summary.avg_score !== undefined
+      ? `，机审均分 ${summary.avg_score}（${summary.pass_count || 0} 通过 / ${
+          summary.fail_count || 0
+        } 未通过）`
+      : "，尚未机审";
+  screenplayStatusText.textContent = `当前剧本《${latestScreenplay.title}》：${sceneCount} 个场景${scorePart}。`;
+}
+
+function setActiveView(view) {
+  const views = {
+    workbench: [viewWorkbenchButton, viewWorkbench],
+    profiles: [viewProfilesButton, viewProfiles],
+    agents: [viewAgentsButton, viewAgents],
+    providers: [viewProvidersButton, viewProviders],
+    metrics: [viewMetricsButton, viewMetrics],
+  };
+  Object.entries(views).forEach(([name, [button, panel]]) => {
+    if (button) {
+      button.classList.toggle("is-active", name === view);
+    }
+    if (panel) {
+      panel.classList.toggle("hidden", name !== view);
+    }
+  });
+  if (view === "agents") {
+    updateScreenplayStatus();
+  }
+  if (view === "providers") {
+    // 进来就拉一次：配置可能被别的标签页或直接编辑 .env 改过，
+    // 让用户手动点刷新才看到真实状态没有意义。
+    loadProviders();
+  }
 }
 
 function renderProfiles(profiles) {
@@ -741,17 +961,116 @@ async function waitForConversionJob(jobId) {
   throw new Error("转换任务等待超时，请稍后重试。");
 }
 
+function handleConversionEvent(event) {
+  if (event.type === "meta") {
+    beginSceneStream(event.meta || {});
+    return false;
+  }
+  if (event.type === "scene") {
+    if (event.scene) {
+      appendStreamedScene(event.scene);
+    }
+    return false;
+  }
+  if (event.type === "progress") {
+    setConversionProgress(event, event.status === "failed");
+    return false;
+  }
+  // done：终态。结果本身不在事件里（可能是一整篇剧本），由 snapshot 取回。
+  setConversionProgress(event, event.status === "failed");
+  return true;
+}
+
+// 手写 SSE 解析而不用 EventSource：EventSource 无法设置请求头，而鉴权中间件
+// 要求 Authorization: Bearer，用它就只能 401。
+// 返回 true 表示流已读到终态；返回 false 表示这条通道不可用，调用方回退轮询。
+async function streamConversionJob(jobId) {
+  let response;
+  try {
+    response = await fetch(`/api/convert/jobs/${jobId}/events`, {
+      headers: { Accept: "text/event-stream" },
+    });
+  } catch {
+    return false;
+  }
+  if (!response.ok || !response.body || typeof response.body.getReader !== "function") {
+    return false;
+  }
+
+  const reader = response.body.getReader();
+  // stream: true 让跨 chunk 切断的多字节字符正确拼接——中文剧本必然踩到。
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        // 流提前结束（代理断开等）而没有 done 事件：交给轮询收尾。
+        return false;
+      }
+      buffer += decoder.decode(value, { stream: true });
+
+      let separator = buffer.indexOf("\n\n");
+      while (separator >= 0) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        separator = buffer.indexOf("\n\n");
+
+        const payload = frame
+          .split("\n")
+          // 以 : 开头的是注释（保活），没有 data: 前缀的行一律忽略。
+          .filter((line) => line.startsWith("data: "))
+          .map((line) => line.slice(6))
+          .join("\n");
+        if (!payload) {
+          continue;
+        }
+
+        let event;
+        try {
+          event = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (handleConversionEvent(event)) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    // 读流中途出错：已显示的场景留着，剩下的交给轮询。
+    return false;
+  } finally {
+    // 主动取消，让服务端的订阅者立刻被移除，不等超时。
+    try {
+      await reader.cancel();
+    } catch {
+      /* 已关闭 */
+    }
+  }
+}
+
 async function convertNovel() {
   convertButton.disabled = true;
+  // 进度条和结果都在工作台，转换时切回来，避免在别的分区干等。
+  setActiveView("workbench");
   const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
   setMessage(`正在使用${modeName}模式生成 YAML 剧本……`);
   resetConversionProgress();
+  // 上一轮流出来的场景不能留到这一轮：计数和名册都要归零。
+  resetSceneStream();
   // 重新转换会重排 scene id，旧的审校报告随之失效。
   latestReviewReport = null;
 
   try {
     const jobId = await startConversionJob();
-    const snapshot = await waitForConversionJob(jobId);
+    // 先走 SSE 看剧本逐场长出来；这条通道不可用就退回 1Hz 轮询，
+    // 转换本身不受影响（服务端不依赖有没有订阅者）。
+    const streamedToEnd = await streamConversionJob(jobId);
+    const snapshot = streamedToEnd
+      ? await fetchConversionJob(jobId)
+      : await waitForConversionJob(jobId);
 
     if (snapshot.status === "failed") {
       setConversionProgress(snapshot, true);
@@ -765,14 +1084,28 @@ async function convertNovel() {
     if (data.review_report) {
       latestReviewReport = data.review_report;
     }
+    // 完成时必须整篇重渲染，不能沿用流式追加的 DOM：机审在转换之后运行且会
+    // 改写场景内容，而 yaml_text / review_report / conversion_warnings 也都
+    // 只在这一刻才到齐。
+    const rewritten = streamedSceneCount > 0 && data.review_report;
     showScreenplay(data.screenplay, data.yaml_text);
+    const securityWarnings = data.security_warnings || [];
+    const conversionWarnings = data.conversion_warnings || [];
     setMessage(
       `已生成 ${data.screenplay.scenes.length} 个场景，改编类型：${data.adaptation_type}，当前模式：${data.mode}。` +
         (data.review_report
           ? `机审：${data.review_report.summary.pass_count || 0} 个通过，${
               data.review_report.summary.fail_count || 0
             } 个未通过。`
-          : ""),
+          : "") +
+        (securityWarnings.length
+          ? `安全提示：原文含 ${securityWarnings.length} 处疑似提示注入内容（已按数据处理，未影响转换）。`
+          : "") +
+        // 机审会改写已经流出来的场景：不说明的话，用户会以为自己看错了。
+        (rewritten ? "（机审已修正部分场景，上方内容为最终版本。）" : "") +
+        // 片段被跳过意味着剧本不完整，必须显式告知，否则用户只会觉得"效果不好"。
+        (conversionWarnings.length ? ` ${conversionWarnings.join(" ")}` : ""),
+      conversionWarnings.length > 0,
     );
   } catch (error) {
     setMessage(error.message, true);
@@ -783,7 +1116,19 @@ async function convertNovel() {
 }
 
 async function analyzeCharacters() {
-  analyzeCharactersButton.disabled = true;
+  // 触发按钮在「工作台」，结果渲染在「人物小传」视图：两处都要置灰，
+  // 否则切过去还能再点一次，产生并发请求。
+  const triggers = [analyzeCharactersButton, reanalyzeCharactersButton].filter(Boolean);
+
+  if (!novelInput.value.trim()) {
+    setMessage("请先在「工作台」粘贴或导入小说正文，再分析人物。", true);
+    setActiveView("workbench");
+    return;
+  }
+
+  triggers.forEach((button) => {
+    button.disabled = true;
+  });
   const modeName = convertModeInput.value === "ai" ? "AI" : "本地";
   setMessage(`正在使用${modeName}模式分析人物小传……`);
 
@@ -800,11 +1145,15 @@ async function analyzeCharacters() {
     }
 
     renderProfiles(data.profiles);
+    // 结果不在当前视图里，照 convertNovel 的做法直接把用户带过去。
+    setActiveView("profiles");
     setMessage(`已提取 ${data.profiles.length} 个人物小传，当前模式：${data.mode}。`);
   } catch (error) {
     setMessage(error.message, true);
   } finally {
-    analyzeCharactersButton.disabled = false;
+    triggers.forEach((button) => {
+      button.disabled = false;
+    });
   }
 }
 
@@ -834,44 +1183,106 @@ async function validateYaml() {
   setMessage(data.message);
 }
 
-async function rewriteScene(operation) {
+function renderChatMessages() {
+  // 全量重渲染：对话条数是人工输入量级，简单胜过增量维护。
+  chatLog.innerHTML = "";
+  chatLog.classList.toggle("hidden", chatMessages.length === 0);
+
+  chatMessages.forEach((turn) => {
+    const item = createElement(
+      "div",
+      turn.role === "user" ? "chat-message chat-message-user" : "chat-message",
+    );
+    item.appendChild(
+      createElement("span", "chat-message-role", turn.role === "user" ? "你" : "改写助手"),
+    );
+    item.appendChild(createElement("p", "chat-message-body", turn.content));
+    if (turn.operation) {
+      // 让用户看清模型把这句话理解成了哪个操作，误解时能立刻换个说法。
+      item.appendChild(
+        createElement(
+          "span",
+          "chat-message-op",
+          `${OPERATION_LABELS[turn.operation] || turn.operation}（${turn.sceneId || ""}）`,
+        ),
+      );
+    }
+    chatLog.appendChild(item);
+  });
+
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function appendChatMessage(role, content, extra = {}) {
+  chatMessages.push({ role, content, ...extra });
+  renderChatMessages();
+}
+
+function updateChatModeHint() {
+  if (!chatModeHint) {
+    return;
+  }
+  chatModeHint.textContent =
+    chatModeInput.value === "ai"
+      ? "AI 模式：你的原话会作为改写要求一起交给模型，语气、指名角色这类细节都会生效。"
+      : "本地模式按关键词识别操作（对白 / 冲突 / 节奏 / 镜头 / 旁白 / 语气），不会理解原话里的细微差别；切到 AI 模式后，你的原话会作为改写要求一起交给模型。";
+}
+
+async function sendChatMessage() {
+  const text = chatInput.value.trim();
+  if (!text) {
+    setMessage("请先输入改写要求。", true);
+    return;
+  }
   if (!yamlOutput.value) {
     setMessage("请先生成或输入 YAML 剧本。", true);
     return;
   }
 
-  rewriteButtons.forEach((button) => {
-    button.disabled = true;
-  });
-  setMessage("正在局部重写场景……");
+  // 历史只回传本轮之前的对话：本轮消息由 message 字段单独携带。
+  const history = chatMessages.map((turn) => ({ role: turn.role, content: turn.content }));
+  appendChatMessage("user", text);
+  chatInput.value = "";
+  chatSendButton.disabled = true;
+  setMessage("正在理解改写要求……");
 
   try {
-    const response = await fetch("/api/scenes/rewrite", {
+    const response = await fetch("/api/scenes/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         yaml_text: yamlOutput.value,
-        scene_id: sceneIdInput.value,
-        operation,
-        mode: rewriteModeInput.value,
-        character_id: rewriteCharacterInput.value,
-        tone: rewriteToneInput.value,
+        message: text,
+        history,
+        mode: chatModeInput.value,
+        scene_id: currentSceneId,
       }),
     });
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(errorMessage(data, "局部重写失败"));
+      throw new Error(errorMessage(data, "对话改写失败"));
+    }
+
+    appendChatMessage("assistant", data.reply, {
+      operation: data.operation || "",
+      sceneId: data.scene_id || "",
+    });
+
+    if (data.refusal) {
+      // 只回话不改剧本：例如"改到白天"这类局部重写改不了的字段。
+      setMessage(data.refusal, true);
+      return;
     }
 
     showScreenplay(data.screenplay, data.yaml_text);
-    setMessage(`${data.message} 已更新 ${data.scene_id}，模式：${data.mode}。`);
+    setCurrentScene(data.scene_id);
+    setMessage(`已按你的要求更新 ${data.scene_id}，模式：${data.mode}。`);
   } catch (error) {
+    appendChatMessage("assistant", error.message);
     setMessage(error.message, true);
   } finally {
-    rewriteButtons.forEach((button) => {
-      button.disabled = false;
-    });
+    chatSendButton.disabled = false;
   }
 }
 
@@ -894,6 +1305,15 @@ const AGENT_STATUS_LABELS = {
   budget_exhausted: "步数耗尽",
   failed: "已失败",
 };
+
+const ROLE_LABELS = {
+  supervisor: "主管",
+  reviewer: "审校",
+  continuity: "一致性",
+  adapter: "改编",
+};
+
+const SEVERITY_LABELS = { high: "严重", medium: "中等", low: "轻微" };
 
 function setAgentProgress(snapshot, isError = false) {
   const progress = Math.max(0, Math.min(100, snapshot.progress || 0));
@@ -955,14 +1375,24 @@ function renderAgentSummary(result) {
   }
 }
 
-function renderAgentTrace(trace) {
-  agentTrace.classList.remove("hidden");
-  agentTrace.innerHTML = "";
+// container 参数让多智能体面板复用同一套步骤渲染；step.role 存在时额外标注角色。
+function renderAgentTrace(trace, container = agentTrace) {
+  container.classList.remove("hidden");
+  container.innerHTML = "";
   (trace || []).forEach((step) => {
-    const item = createElement("li", `agent-step${step.error ? " agent-step-error" : ""}`);
+    const roleClass = step.role ? ` agent-step-role-${step.role}` : "";
+    const item = createElement(
+      "li",
+      `agent-step${step.error ? " agent-step-error" : ""}${roleClass}`,
+    );
     const head = createElement("div", "agent-step-head");
+    head.append(createElement("span", "agent-step-no", `第 ${step.step} 步`));
+    if (step.role) {
+      head.appendChild(
+        createElement("span", "agent-step-role", ROLE_LABELS[step.role] || step.role),
+      );
+    }
     head.append(
-      createElement("span", "agent-step-no", `第 ${step.step} 步`),
       createElement(
         "span",
         "agent-step-action",
@@ -984,7 +1414,7 @@ function renderAgentTrace(trace) {
     } else if (step.observation && step.observation.message) {
       item.appendChild(createElement("p", "agent-step-observation", step.observation.message));
     }
-    agentTrace.appendChild(item);
+    container.appendChild(item);
   });
 }
 
@@ -1145,11 +1575,273 @@ async function listAgentSessions() {
   }
 }
 
+function setTeamProgress(snapshot, isError = false) {
+  const progress = Math.max(0, Math.min(100, snapshot.progress || 0));
+  teamProgress.classList.remove("hidden");
+  teamProgress.classList.toggle("is-error", isError || snapshot.status === "failed");
+  teamProgressStage.textContent = snapshot.stage || "协作中";
+  teamProgressPercent.textContent = `${progress}%`;
+  teamProgressBar.style.width = `${progress}%`;
+  teamProgressMessage.textContent = snapshot.message || snapshot.error || "协作任务正在处理。";
+}
+
+function resetTeamProgress() {
+  setTeamProgress({
+    status: "queued",
+    progress: 0,
+    stage: "等待执行",
+    message: "协作任务已准备启动。",
+  });
+}
+
+function renderTeamSummary(result) {
+  teamEmptyState.classList.add("hidden");
+  teamSummary.classList.remove("hidden");
+  teamSummary.innerHTML = "";
+
+  const heading = createElement("div", "agent-summary-heading");
+  heading.append(
+    createElement(
+      "span",
+      `agent-status agent-status-${result.status}`,
+      AGENT_STATUS_LABELS[result.status] || result.status,
+    ),
+    createElement("span", "agent-goal-text", result.goal || "（未指定协作目标）"),
+  );
+  teamSummary.appendChild(heading);
+
+  const initial = result.initial_summary || {};
+  const final = result.final_summary || {};
+  const continuity = result.continuity_summary || {};
+  const metrics = createElement("div", "agent-metrics");
+  metrics.append(
+    agentMetric("均分", `${initial.avg_score ?? "-"} → ${final.avg_score ?? "-"}`),
+    agentMetric("通过场景", `${final.pass_count ?? 0} / ${final.scene_count ?? 0}`),
+    agentMetric("一致性问题", `${continuity.total ?? 0}（严重 ${continuity.high ?? 0}）`),
+    agentMetric("协作轮次", result.rounds_used),
+    agentMetric("参与角色", Object.keys(result.role_summaries || {}).length),
+  );
+  if (result.llm_calls) {
+    metrics.appendChild(agentMetric("LLM 调用", result.llm_calls));
+  }
+  if (result.session_id) {
+    metrics.appendChild(agentMetric("会话", result.session_id));
+  }
+  teamSummary.appendChild(metrics);
+
+  if (result.message) {
+    teamSummary.appendChild(createElement("p", "agent-summary-message", result.message));
+  }
+}
+
+function renderTeamFindings(findings) {
+  teamFindings.innerHTML = "";
+  if (!findings || !findings.length) {
+    teamFindings.classList.add("hidden");
+    return;
+  }
+  teamFindings.classList.remove("hidden");
+  teamFindings.appendChild(
+    createElement("h4", "metrics-section-title", `一致性问题（${findings.length}）`),
+  );
+  findings.forEach((finding) => {
+    const row = createElement("div", `team-finding team-finding-${finding.severity}`);
+    row.append(
+      createElement(
+        "span",
+        "team-finding-tag",
+        `${SEVERITY_LABELS[finding.severity] || finding.severity} · ${finding.kind}`,
+      ),
+      createElement(
+        "span",
+        "team-finding-detail",
+        `${finding.scene_id ? `${finding.scene_id}：` : ""}${finding.detail}`,
+      ),
+    );
+    if (finding.suggestion) {
+      row.appendChild(createElement("p", "team-finding-suggestion", finding.suggestion));
+    }
+    teamFindings.appendChild(row);
+  });
+}
+
+function renderTeamMessages(messages) {
+  teamMessages.innerHTML = "";
+  if (!messages || !messages.length) {
+    teamMessages.classList.add("hidden");
+    return;
+  }
+  teamMessages.classList.remove("hidden");
+  teamMessages.appendChild(
+    createElement("h4", "metrics-section-title", `协作消息流（${messages.length}）`),
+  );
+  messages.forEach((message) => {
+    const row = createElement("div", `team-message team-message-${message.kind}`);
+    row.append(
+      createElement(
+        "span",
+        "team-message-route",
+        `${ROLE_LABELS[message.sender] || message.sender} → ${ROLE_LABELS[message.recipient] || message.recipient}`,
+      ),
+      createElement("span", "team-message-content", message.content),
+    );
+    teamMessages.appendChild(row);
+  });
+}
+
+function applyTeamRunResponse(data) {
+  const previousHuman = latestReviewReport ? latestReviewReport.human : {};
+  if (data.report) {
+    latestReviewReport = data.report;
+    latestReviewReport.human = { ...previousHuman, ...latestReviewReport.human };
+  }
+  showScreenplay(data.screenplay, data.yaml_text);
+  renderTeamSummary(data.result);
+  renderTeamFindings(data.continuity_findings);
+  renderAgentTrace(data.result.trace, teamTrace);
+  renderTeamMessages(data.result.messages);
+}
+
+function teamRunPayload() {
+  return {
+    yaml_text: yamlOutput.value,
+    goal: teamGoalInput.value.trim(),
+    mode: teamModeInput.value,
+    threshold: Number(teamThresholdInput.value) || null,
+    max_rounds: Number(teamMaxRoundsInput.value) || null,
+    save_session: teamSaveSessionInput.checked,
+    novel_text: novelInput.value.trim(),
+  };
+}
+
+async function startTeamRun() {
+  const response = await fetch("/api/agent/teams/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(teamRunPayload()),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "协作任务创建失败"));
+  }
+  setTeamProgress(data);
+  return data.job_id;
+}
+
+async function fetchTeamRun(jobId) {
+  const response = await fetch(`/api/agent/teams/runs/${jobId}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(errorMessage(data, "协作进度查询失败"));
+  }
+  setTeamProgress(data);
+  return data;
+}
+
+async function waitForTeamRun(jobId) {
+  for (let attempt = 0; attempt < agentMaxPolls; attempt += 1) {
+    await sleep(agentPollIntervalMs);
+    const snapshot = await fetchTeamRun(jobId);
+    if (snapshot.status === "succeeded" || snapshot.status === "failed") {
+      return snapshot;
+    }
+  }
+
+  throw new Error("协作任务等待超时，请稍后重试。");
+}
+
+async function runTeam() {
+  if (!yamlOutput.value) {
+    setMessage("请先生成或输入 YAML 剧本。", true);
+    return;
+  }
+
+  runTeamButton.disabled = true;
+  teamSessions.classList.add("hidden");
+  resetTeamProgress();
+  setMessage("多智能体协作已启动，主管正在派单……");
+
+  try {
+    const jobId = await startTeamRun();
+    const snapshot = await waitForTeamRun(jobId);
+
+    if (snapshot.status === "failed") {
+      setTeamProgress(snapshot, true);
+      throw new Error(snapshot.error || snapshot.message || "协作失败");
+    }
+    if (!snapshot.result) {
+      throw new Error("协作任务完成但缺少结果。");
+    }
+
+    applyTeamRunResponse(snapshot.result);
+    const result = snapshot.result.result;
+    const continuity = result.continuity_summary || {};
+    setMessage(
+      `协作${AGENT_STATUS_LABELS[result.status] || result.status}：` +
+        `${result.rounds_used} 轮、${Object.keys(result.role_summaries || {}).length} 个角色参与，` +
+        `均分 ${result.initial_summary?.avg_score ?? "-"} → ${result.final_summary?.avg_score ?? "-"}，` +
+        `一致性问题 ${continuity.total ?? 0} 个。`,
+    );
+  } catch (error) {
+    setMessage(error.message, true);
+    teamProgress.classList.add("is-error");
+  } finally {
+    runTeamButton.disabled = false;
+  }
+}
+
+async function listTeamSessions() {
+  listTeamSessionsButton.disabled = true;
+  try {
+    const response = await fetch("/api/agent/teams/sessions");
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(errorMessage(data, "协作会话列表查询失败"));
+    }
+
+    teamSessions.classList.remove("hidden");
+    teamSessions.innerHTML = "";
+    if (!data.sessions.length) {
+      teamSessions.appendChild(
+        createElement(
+          "p",
+          "agent-sessions-empty",
+          "还没有已保存的协作会话；勾选“保存会话”后启动协作即可留档。",
+        ),
+      );
+      return;
+    }
+    data.sessions.forEach((session) => {
+      const row = createElement("div", "agent-session-row");
+      const info = createElement("div", "agent-session-info");
+      info.append(
+        createElement("strong", "agent-session-id", session.session_id),
+        createElement(
+          "span",
+          "agent-session-meta",
+          `${session.goal || "（无目标）"} · ${AGENT_STATUS_LABELS[session.status] || session.status} · ${session.saved_at}`,
+        ),
+      );
+      row.appendChild(info);
+      teamSessions.appendChild(row);
+    });
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    listTeamSessionsButton.disabled = false;
+  }
+}
+
 const TASK_KIND_LABELS = {
   convert: "全文转换",
   scene_review: "机审",
   scene_rewrite: "局部重写",
   agent_run: "Agent 运行",
+  team_run: "多智能体协作",
+  continuity_check: "一致性检查",
 };
 
 function formatSuccessRate(row) {
@@ -1226,6 +1918,275 @@ async function refreshMetrics() {
   }
 }
 
+// ------------------------------------------------------------------ API 配置
+
+// 当前正在编辑的配置名。空串表示「新建」。
+let editingProviderName = "";
+let providerProfiles = [];
+
+function providerActionButtons() {
+  return [saveProviderButton, saveActivateProviderButton, testProviderButton];
+}
+
+function setProviderHint(text, isError = false) {
+  providerFormHint.textContent = text;
+  providerFormHint.classList.toggle("is-error", isError);
+}
+
+function renderProviderWarning(data) {
+  const notes = [];
+  if (data.dotenv_disabled) {
+    // 比单个字段被遮盖更彻底：写了文件但根本不会被读取。
+    notes.push(
+      "STORY2SCRIPT_DISABLE_DOTENV 已开启，.env 不会被读取：在这里切换配置不会生效。" +
+        "请取消该环境变量后重启服务。",
+    );
+  }
+  if ((data.shadowed_fields || []).length) {
+    // 进程环境优先级高于 .env，这些字段在界面上改了也不生效。
+    notes.push(
+      `以下字段已被进程环境变量覆盖，改这里不生效：${data.shadowed_fields.join("、")}。` +
+        "请在启动服务的终端里取消这些变量。",
+    );
+  }
+
+  providerWarning.innerHTML = "";
+  providerWarning.classList.toggle("hidden", notes.length === 0);
+  notes.forEach((note) => providerWarning.appendChild(createElement("p", null, note)));
+}
+
+function renderProviderList(data) {
+  providerProfiles = data.profiles || [];
+  providerList.innerHTML = "";
+  providerEmptyState.classList.toggle("hidden", providerProfiles.length > 0);
+
+  providerProfiles.forEach((profile) => {
+    const card = createElement("article", "provider-card");
+    if (profile.active) {
+      card.classList.add("is-active");
+    }
+    if (profile.name === editingProviderName) {
+      card.classList.add("is-editing");
+    }
+
+    const head = createElement("div", "provider-card-head");
+    head.appendChild(createElement("strong", null, profile.name));
+    if (profile.active) {
+      head.appendChild(createElement("span", "provider-badge", "生效中"));
+    }
+    if (profile.missing_fields.length) {
+      head.appendChild(
+        createElement("span", "provider-badge is-warn", `缺 ${profile.missing_fields.length} 项`),
+      );
+    }
+    card.appendChild(head);
+
+    const fields = profile.fields || {};
+    card.appendChild(
+      createElement("p", "provider-card-meta", `${fields.AI_MODEL || "（未填模型）"}`),
+    );
+    card.appendChild(
+      createElement("p", "provider-card-meta", fields.AI_BASE_URL || "（未填 Base URL）"),
+    );
+    card.appendChild(
+      createElement(
+        "p",
+        "provider-card-meta",
+        `密钥 ${fields.AI_API_KEY || "（未设置）"}`,
+      ),
+    );
+
+    const actions = createElement("div", "provider-card-actions");
+    const editButton = createElement("button", "ghost-button", "编辑");
+    editButton.type = "button";
+    editButton.addEventListener("click", () => selectProvider(profile.name));
+    actions.appendChild(editButton);
+
+    if (!profile.active) {
+      const useButton = createElement("button", "ghost-button", "启用");
+      useButton.type = "button";
+      useButton.addEventListener("click", () => activateProvider(profile.name));
+      actions.appendChild(useButton);
+    }
+
+    const deleteButton = createElement("button", "ghost-button", "删除");
+    deleteButton.type = "button";
+    deleteButton.addEventListener("click", () => deleteProvider(profile.name));
+    actions.appendChild(deleteButton);
+
+    card.appendChild(actions);
+    providerList.appendChild(card);
+  });
+}
+
+function clearProviderForm() {
+  editingProviderName = "";
+  providerNameInput.value = "";
+  providerFieldInputs.forEach((input) => {
+    input.value = "";
+    if (input.type === "password") {
+      input.placeholder = "必填：新配置需要填入密钥";
+    }
+  });
+  setProviderHint("填好后点「保存并启用」即可立即生效，无需重启。");
+}
+
+function selectProvider(name) {
+  const profile = providerProfiles.find((item) => item.name === name);
+  if (!profile) {
+    return;
+  }
+  editingProviderName = name;
+  providerNameInput.value = name;
+
+  const fields = profile.fields || {};
+  providerFieldInputs.forEach((input) => {
+    const key = input.dataset.providerField;
+    if (input.type === "password") {
+      // 关键：密钥框绝不回填遮罩值。回填了用户一保存就会把 "••••1234"
+      // 当成真密钥写进配置。留空 + 提示，后端把空值理解为「保持原密钥」。
+      input.value = "";
+      input.placeholder = profile.has_api_key
+        ? `已保存（${fields.AI_API_KEY}），留空则不修改`
+        : "必填：尚未设置密钥";
+      return;
+    }
+    input.value = fields[key] || "";
+  });
+
+  renderProviderList({ profiles: providerProfiles });
+  setProviderHint(`正在编辑「${name}」。密钥留空表示保持不变。`);
+}
+
+function collectProviderFields() {
+  // 白名单里的每个键都要提交，包括空值：后端把「提交了但为空」当作清空该项，
+  // 这样从推理模型换成非推理模型时旧的 AI_REASONING_EFFORT 不会残留。
+  const fields = {};
+  providerFieldInputs.forEach((input) => {
+    fields[input.dataset.providerField] = input.value.trim();
+  });
+  return fields;
+}
+
+function applyProviderData(data) {
+  renderProviderWarning(data);
+  renderProviderList(data);
+}
+
+async function providerRequest(url, payload, fallbackMessage) {
+  const response = await fetch(url, {
+    method: payload ? "POST" : "GET",
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(errorMessage(data, fallbackMessage));
+  }
+  return data;
+}
+
+async function loadProviders() {
+  refreshProvidersButton.disabled = true;
+  try {
+    applyProviderData(await providerRequest("/api/providers", null, "配置读取失败"));
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    refreshProvidersButton.disabled = false;
+  }
+}
+
+async function saveProvider(activate) {
+  const name = providerNameInput.value.trim();
+  if (!name) {
+    setProviderHint("请先填写配置名。", true);
+    return;
+  }
+
+  providerActionButtons().forEach((button) => {
+    button.disabled = true;
+  });
+  try {
+    const data = await providerRequest(
+      "/api/providers",
+      { name, fields: collectProviderFields(), activate },
+      "配置保存失败",
+    );
+    editingProviderName = name;
+    applyProviderData(data);
+    selectProvider(name);
+    setMessage(
+      activate
+        ? `已保存并启用「${name}」，下一个请求就用新配置（无需重启）。`
+        : `已保存「${name}」。`,
+    );
+  } catch (error) {
+    setProviderHint(error.message, true);
+    setMessage(error.message, true);
+  } finally {
+    providerActionButtons().forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
+async function activateProvider(name) {
+  try {
+    applyProviderData(
+      await providerRequest("/api/providers/activate", { name }, "配置切换失败"),
+    );
+    setMessage(`已切换到「${name}」，下一个请求就用新配置；正在跑的任务保持原配置。`);
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+}
+
+async function deleteProvider(name) {
+  // 删除会丢掉这套配置里的密钥，先确认。
+  if (!window.confirm(`删除配置「${name}」？其中保存的密钥会一并丢失。`)) {
+    return;
+  }
+  try {
+    const data = await providerRequest("/api/providers/delete", { name }, "配置删除失败");
+    if (editingProviderName === name) {
+      clearProviderForm();
+    }
+    applyProviderData(data);
+    setMessage(`已删除「${name}」。`);
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+}
+
+async function testProvider() {
+  const name = providerNameInput.value.trim();
+  const saved = providerProfiles.some((item) => item.name === name);
+  if (!saved) {
+    // 测试读的是已保存的配置，未保存的表单内容测不到。
+    setProviderHint("测试的是已保存的配置，请先点「保存」再测试。", true);
+    return;
+  }
+
+  providerActionButtons().forEach((button) => {
+    button.disabled = true;
+  });
+  setProviderHint(`正在用「${name}」发一次最小请求……`);
+  try {
+    const data = await providerRequest("/api/providers/test", { name }, "连接测试失败");
+    const detail = `${data.message}${data.model ? `（${data.model}，${data.duration_ms}ms）` : ""}`;
+    setProviderHint(detail, !data.ok);
+    setMessage(detail, !data.ok);
+  } catch (error) {
+    setProviderHint(error.message, true);
+    setMessage(error.message, true);
+  } finally {
+    providerActionButtons().forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
 document.querySelector("#loadExampleButton").addEventListener("click", () => {
   loadExample().catch((error) => setMessage(error.message, true));
 });
@@ -1238,19 +2199,40 @@ novelFileInput.addEventListener("change", () => {
 });
 document.querySelector("#convertButton").addEventListener("click", convertNovel);
 document.querySelector("#analyzeCharactersButton").addEventListener("click", analyzeCharacters);
+reanalyzeCharactersButton.addEventListener("click", analyzeCharacters);
 document.querySelector("#validateButton").addEventListener("click", validateYaml);
 document.querySelector("#downloadButton").addEventListener("click", downloadYaml);
 previewViewButton.addEventListener("click", () => setScriptView("preview"));
 sourceViewButton.addEventListener("click", () => setScriptView("source"));
 novelEditViewButton.addEventListener("click", () => setNovelView("edit"));
 novelChapterViewButton.addEventListener("click", () => setNovelView("chapter"));
-rewriteButtons.forEach((button) => {
-  button.addEventListener("click", () => rewriteScene(button.dataset.rewriteOperation));
+chatSendButton.addEventListener("click", sendChatMessage);
+chatInput.addEventListener("keydown", (event) => {
+  // Enter 发送、Shift+Enter 换行：多行改写要求仍可手动折行。
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendChatMessage();
+  }
 });
+chatModeInput.addEventListener("change", updateChatModeHint);
 runReviewButton.addEventListener("click", runMachineReview);
 downloadReviewReportButton.addEventListener("click", downloadReviewReport);
 runAgentButton.addEventListener("click", runAgent);
 listAgentSessionsButton.addEventListener("click", listAgentSessions);
+runTeamButton.addEventListener("click", runTeam);
+listTeamSessionsButton.addEventListener("click", listTeamSessions);
 refreshMetricsButton.addEventListener("click", refreshMetrics);
+refreshProvidersButton.addEventListener("click", loadProviders);
+newProviderButton.addEventListener("click", clearProviderForm);
+saveProviderButton.addEventListener("click", () => saveProvider(false));
+saveActivateProviderButton.addEventListener("click", () => saveProvider(true));
+testProviderButton.addEventListener("click", testProvider);
+viewWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));
+viewProfilesButton.addEventListener("click", () => setActiveView("profiles"));
+viewAgentsButton.addEventListener("click", () => setActiveView("agents"));
+viewProvidersButton.addEventListener("click", () => setActiveView("providers"));
+viewMetricsButton.addEventListener("click", () => setActiveView("metrics"));
+backToWorkbenchButton.addEventListener("click", () => setActiveView("workbench"));
 novelInput.addEventListener("input", updateChapterCount);
+clearProviderForm();
 

@@ -89,7 +89,8 @@ main {
 
 .workspace {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* 小说原文只需够读，剧本是主角：把宽度让给右侧。 */
+  grid-template-columns: minmax(360px, 5fr) 7fr;
   gap: 16px;
   padding-bottom: 18px;
 }
@@ -160,6 +161,18 @@ select {
 
 select {
   min-height: 38px;
+}
+
+/* 左右两栏同高（grid 默认 stretch），右栏现在跟着视口长高，
+   左栏若维持固定高度就会在页脚下方留出一块死白。 */
+.workspace > .panel:not(.script-panel) {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace > .panel:not(.script-panel) > textarea,
+.workspace > .panel:not(.script-panel) > .chapter-view {
+  flex: 1 1 auto;
 }
 
 textarea {
@@ -257,13 +270,30 @@ textarea {
 
 .script-panel {
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
-.rewrite-tools {
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
+/* 预览 / 空状态 / YAML 源码共用同一套伸缩规则。三者是互斥显示的同一块区域，
+   任一处单独改高度都会让切换视图时面板跳动，所以合并成一条而不是各写一遍。 */
+.script-panel > .script-preview,
+.script-panel > .empty-state,
+.script-panel > textarea {
+  flex: 1 1 auto;
+  min-height: 420px;
+  /* 让滚动发生在预览内部的关键，是给它一个**确定的上限**：
+     内容超过上限就出现自己的滚动条，而不是把面板越撑越高、把滚动条推给页面。
+
+     刻意不写 calc(100vh - 面板上方各块高度)：那需要把 topbar / hero / 导航 /
+     状态栏的高度手算成一个魔法数字（实测约 385px，此前误写 150px 就导致面板
+     溢出视口、页面照样滚动），而且状态栏文案换行、导航增减标签都会让它失准。
+     max-height 只依赖视口本身，没有这种耦合。 */
+  max-height: min(760px, 62vh);
+  overflow-y: auto;
 }
 
+/* 六个重写按钮已被对话式改写取代，.rewrite-tools 容器随之删除；
+   但 .rewrite-fields / .rewrite-actions 仍被 .review-tools 复用，不能一起删。 */
 .rewrite-fields {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -330,14 +360,12 @@ textarea {
 }
 
 .script-panel textarea {
-  height: 354px;
   background: #0f172a;
   color: #e5edf7;
   font: 13px/1.65 var(--font-code);
 }
 
 .empty-state {
-  height: 354px;
   display: grid;
   place-content: center;
   text-align: center;
@@ -369,15 +397,151 @@ textarea {
   font-size: 12px;
 }
 
-.message {
-  position: absolute;
-  bottom: 0;
-  width: 100%;
-  padding: 13px 20px;
-  border-top: 1px solid var(--line);
+/* 状态栏从剧本面板底部（原 .message，绝对定位）提到全局常规流：
+   切换分区后所有状态提示仍然可见——约 40 处调用都写这里。 */
+.status-bar {
+  margin-bottom: 16px;
+  padding: 11px 18px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
   background: var(--panel);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.view-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.view-nav-button {
+  padding: 9px 20px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.view-nav-button:hover {
+  color: var(--ink);
+}
+
+.view-nav-button.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.screenplay-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+/* 评分明细：原生 title 提示触屏和键盘都不可达，这里做成可展开区域 */
+.review-detail {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 12px;
+}
+
+.review-detail-summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.review-detail-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.review-detail-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.review-detail-label {
+  color: var(--muted);
+}
+
+.review-detail-rule,
+.review-detail-operation {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.review-detail-issues {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.review-rules {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.review-rules summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.review-rules table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+}
+
+.review-rules th,
+.review-rules td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.6;
+}
+
+.review-rules th {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.review-rules p {
+  margin: 10px 0 0;
+  line-height: 1.7;
 }
 
 .hidden {
@@ -390,6 +554,13 @@ textarea {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 5px;
+}
+
+.profile-hint {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .section-heading {
@@ -483,7 +654,6 @@ textarea {
 }
 
 .script-preview {
-  height: 354px;
   overflow-y: auto;
   padding: 22px;
   background:
@@ -788,13 +958,24 @@ textarea {
   .convert-controls {
     justify-content: flex-start;
   }
+
+  /* 窄屏上两个面板上下堆叠，且可视高度本就紧张：嵌套滚动比页面滚动更难用
+     （手指要精确落在预览区内才滚得动）。这里解除上限，让内容自然撑开、由页面
+     滚动——与宽屏的「预览内部滚动」是有意的差异。 */
+  .script-panel > .script-preview,
+  .script-panel > .empty-state,
+  .script-panel > textarea {
+    min-height: 360px;
+    max-height: none;
+  }
 }
 
 
 /* 场景质量审校 */
 .review-tools {
   padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
+  /* 审校是对预览内容的操作，现在排在预览下方：分隔线跟着挪到上边。 */
+  border-top: 1px solid var(--line);
 }
 
 .review-tools .rewrite-fields {
@@ -1151,4 +1332,452 @@ textarea {
 
 .metrics-row .agent-metrics {
   padding-top: 0;
+}
+
+/* ---------------------------------------------- 多智能体协作面板 */
+
+.team-panel .section-heading p {
+  max-width: 620px;
+}
+
+.agent-step-role {
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--muted);
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.agent-step-role-supervisor {
+  border-left-color: #7c3aed;
+}
+
+.agent-step-role-supervisor .agent-step-role {
+  color: #5b21b6;
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.agent-step-role-reviewer {
+  border-left-color: #0f766e;
+}
+
+.agent-step-role-reviewer .agent-step-role {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.12);
+}
+
+.agent-step-role-continuity {
+  border-left-color: #b45309;
+}
+
+.agent-step-role-continuity .agent-step-role {
+  color: #92400e;
+  background: rgba(180, 83, 9, 0.12);
+}
+
+.agent-step-role-adapter {
+  border-left-color: var(--accent);
+}
+
+.agent-step-role-adapter .agent-step-role {
+  color: var(--accent-strong);
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.team-findings,
+.team-messages {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.team-finding {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.team-finding-high {
+  border-left-color: var(--danger);
+}
+
+.team-finding-medium {
+  border-left-color: #b45309;
+}
+
+.team-finding-low {
+  border-left-color: var(--muted);
+}
+
+.team-finding-tag {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.team-finding-detail {
+  color: var(--ink);
+}
+
+.team-finding-suggestion {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.team-message {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 13px;
+}
+
+.team-message-dispatch {
+  background: rgba(124, 58, 237, 0.06);
+}
+
+.team-message-route {
+  min-width: 132px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.team-message-content {
+  color: var(--ink);
+}
+
+
+/* 对话式改写 */
+.scene-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.scene-chat-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scene-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.scene-chat-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* 对话不该和剧本抢空间：超出就自己滚动，面板高度不受影响。 */
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.chat-message {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.chat-message-user {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.chat-message-role {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chat-message-body {
+  margin: 4px 0 0;
+  color: var(--ink);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.chat-message-op {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scene-chat-input {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* 覆盖两条会打到这里的既有规则：全局 textarea 的 425px 固定高度，
+   以及 .script-panel textarea 给 YAML 编辑器用的深色主题。 */
+.scene-chat-input textarea {
+  flex: 1;
+  height: auto;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 13px/1.6 var(--font-sans);
+  resize: vertical;
+}
+
+.scene-chat-input button {
+  align-self: stretch;
+  padding: 0 20px;
+  white-space: nowrap;
+}
+
+
+/* API 配置 */
+.provider-panel {
+  margin-bottom: 42px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.provider-hint {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.provider-hint code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--panel-soft);
+  font: 12px var(--font-code);
+}
+
+/* 静默失效的警告（进程环境遮盖 / dotenv 被禁用）必须显眼：
+   否则用户会以为切换成功了，实际毫无效果。 */
+.provider-warning {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: rgba(194, 65, 58, 0.06);
+}
+
+.provider-warning p {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.provider-warning p + p {
+  margin-top: 8px;
+}
+
+.provider-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) 3fr;
+  gap: 22px;
+  padding-top: 18px;
+}
+
+.provider-subhead {
+  margin: 0 0 12px;
+  font: 800 14px/1.2 var(--font-sans);
+}
+
+.provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.provider-card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+
+.provider-card.is-active {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.provider-card.is-editing {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.provider-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.provider-badge.is-warn {
+  background: var(--danger);
+}
+
+.provider-card-meta {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font: 12px/1.5 var(--font-code);
+  overflow-wrap: anywhere;
+}
+
+.provider-card-actions {
+  display: flex;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.provider-form {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.provider-field {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.provider-required {
+  margin-left: 6px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+  padding-top: 12px;
+}
+
+.provider-advanced {
+  margin: 6px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+
+.provider-advanced summary {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.provider-advanced-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.provider-advanced-hint.is-error {
+  color: var(--danger);
+}
+
+.provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.provider-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+@media (max-width: 900px) {
+  .provider-layout,
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 504 / 超时 / 限流的对照排错表：照 .review-rules 的表格样式，保持一致观感。 */
+.provider-troubleshoot {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.provider-troubleshoot th,
+.provider-troubleshoot td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.7;
+}
+
+.provider-troubleshoot th {
+  white-space: nowrap;
+}
+
+.provider-troubleshoot code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 11px var(--font-code);
 }

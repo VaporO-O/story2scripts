@@ -8,6 +8,7 @@ from .job_store import DurableJobStore
 from .metrics import metrics
 from .parser import parse_chapters
 from .scene_review import review_and_improve
+from .security import screen_novel_text
 from .yaml_export import screenplay_to_yaml
 
 
@@ -38,7 +39,10 @@ class ConversionJobStore(DurableJobStore):
             )
 
         try:
-            self._update(job_id, status="running", progress=10, stage="解析章节")
+            self._update(job_id, status="running", progress=5, stage="安全检查")
+            security_warnings = screen_novel_text(request.novel_text)
+
+            self._update(job_id, progress=10, stage="解析章节")
             chapters = parse_chapters(request.novel_text)
 
             self._update(
@@ -55,11 +59,38 @@ class ConversionJobStore(DurableJobStore):
                 stage="生成剧本",
                 message=_generation_message(converter.mode),
             )
+
+            # 转换是整条链路里最慢的一段（AI 模式下藏着建索引、逐段检索、
+            # 分块调用与人物小传共约 20 次网络往返），把它的内部进度铺开到
+            # 45→68（开启机审时给后续阶段留出区间）或 45→88。
+            span = 23 if request.enable_review else 43
+
+            def progress_cb(done: int, total: int, note: str) -> None:
+                progress = 45 + int(span * done / max(1, total))
+                self._update(job_id, progress=progress, stage="生成剧本", message=note)
+
+            scene_count = 0
+
+            def meta_cb(meta: dict) -> None:
+                # 先于第一个场景到达：流式场景里的说话人是 character id，
+                # 前端要靠这份名册才能显示人名而不是 character-1。
+                self.publish(job_id, {"type": "meta", "meta": meta})
+
+            def scene_cb(scene: dict) -> None:
+                # 场景定稿即推送，让用户看到剧本逐场长出来。编号在转换器的水位
+                # 刷新时就已定终值，所以这里推出去的 id 不会再变动。
+                nonlocal scene_count
+                scene_count += 1
+                self.publish(job_id, {"type": "scene", "index": scene_count, "scene": scene})
+
             screenplay = converter.convert(
                 chapters=chapters,
                 title=request.title,
                 genre=request.genre,
                 adaptation_type=request.adaptation_type,
+                progress_cb=progress_cb,
+                scene_cb=scene_cb,
+                meta_cb=meta_cb,
             )
 
             review_report = None
@@ -90,6 +121,8 @@ class ConversionJobStore(DurableJobStore):
                 mode=converter.mode,
                 adaptation_type=request.adaptation_type,
                 review_report=review_report,
+                security_warnings=security_warnings,
+                conversion_warnings=list(getattr(converter, "last_run_warnings", [])),
             )
             self._complete(job_id, result)
             record(ok=True, scene_count=len(result.screenplay.scenes))

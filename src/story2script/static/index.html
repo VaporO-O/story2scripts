@@ -21,6 +21,19 @@
         <p>将您的小说转为剧本</p>
       </section>
 
+      <nav class="view-nav" aria-label="功能分区">
+        <button id="viewWorkbenchButton" class="view-nav-button is-active" type="button">
+          工作台
+        </button>
+        <button id="viewProfilesButton" class="view-nav-button" type="button">人物小传</button>
+        <button id="viewAgentsButton" class="view-nav-button" type="button">智能改编</button>
+        <button id="viewProvidersButton" class="view-nav-button" type="button">API 配置</button>
+        <button id="viewMetricsButton" class="view-nav-button" type="button">运行指标</button>
+      </nav>
+
+      <div id="message" class="status-bar">准备就绪</div>
+
+      <div id="viewWorkbench" class="view">
       <section class="workspace">
         <section class="panel">
           <div class="panel-heading">
@@ -98,43 +111,59 @@
             </div>
           </div>
 
-          <div class="rewrite-tools">
-            <div class="rewrite-fields">
-              <label>场景 ID<input id="sceneIdInput" value="scene-1" /></label>
-              <label>
-                重写模式
-                <select id="rewriteModeInput">
+          <div id="conversionProgress" class="conversion-progress hidden">
+            <!-- 细粒度进度会让消息每秒变化多次：只朗读阶段与百分比，
+                 分块明细留在下方非 live 区域，避免读屏软件刷屏。 -->
+            <div class="progress-meta" aria-live="polite">
+              <span id="conversionProgressStage">等待转换</span>
+              <span id="conversionProgressPercent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="conversionProgressBar" class="progress-bar"></div>
+            </div>
+            <p id="conversionProgressMessage">转换任务尚未开始。</p>
+          </div>
+
+          <div id="emptyState" class="empty-state">
+            <div class="script-card">SCENE<br /><strong>01</strong></div>
+            <h3>等待故事开场</h3>
+            <p>生成后的剧本会以分场预览显示，可切换到“源码”直接编辑 YAML 再校验。</p>
+          </div>
+
+          <div id="scriptPreview" class="script-preview hidden"></div>
+          <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
+
+          <div class="scene-chat">
+            <div class="scene-chat-bar">
+              <span id="chatSceneChip" class="scene-chip" title="点剧本里的 SCENE 徽章可切换当前场景">
+                当前场景：scene-1
+              </span>
+              <label class="mode-select">
+                改写模式
+                <select id="chatModeInput">
                   <option value="demo" selected>本地</option>
                   <option value="ai">AI</option>
                 </select>
               </label>
-              <label>
-                角色
-                <select id="rewriteCharacterInput">
-                  <option value="">（自动选择）</option>
-                </select>
-              </label>
-              <label>语气<input id="rewriteToneInput" value="更克制" /></label>
             </div>
-            <div class="rewrite-actions">
-              <button class="ghost-button" data-rewrite-operation="rewrite_dialogue">
-                重新生成本场对白
-              </button>
-              <button class="ghost-button" data-rewrite-operation="strengthen_conflict">
-                加强戏剧冲突
-              </button>
-              <button class="ghost-button" data-rewrite-operation="short_drama_pace">
-                改成短剧节奏
-              </button>
-              <button class="ghost-button" data-rewrite-operation="add_camera_hints">
-                增加镜头提示
-              </button>
-              <button class="ghost-button" data-rewrite-operation="reduce_narration">
-                减少旁白
-              </button>
-              <button class="ghost-button" data-rewrite-operation="adjust_character_voice">
-                调整人物语气
-              </button>
+
+            <!-- 本地模式按关键词匹配操作、且六个本地改写函数都不接 feedback：
+                 用户的原话在本地模式下只用于选操作，细微差别要 AI 模式才生效。
+                 工作台默认本地，所以必须写明，不能让用户以为对话没起作用。 -->
+            <p id="chatModeHint" class="scene-chat-hint">
+              本地模式按关键词识别操作（对白 / 冲突 / 节奏 / 镜头 / 旁白 / 语气），不会理解原话里的细微差别；切到
+              AI 模式后，你的原话会作为改写要求一起交给模型。
+            </p>
+
+            <div id="chatLog" class="chat-log" aria-live="polite"></div>
+
+            <div class="scene-chat-input">
+              <textarea
+                id="chatInput"
+                rows="2"
+                placeholder="直接说要改什么，例如：第三场对白太软，让林夏更强硬一点"
+              ></textarea>
+              <button id="chatSendButton" class="primary-button" type="button">发送</button>
             </div>
           </div>
 
@@ -157,41 +186,75 @@
               <button id="runReviewButton" class="ghost-button">机审全部场景</button>
               <button id="downloadReviewReportButton" class="ghost-button">下载审校报告</button>
             </div>
-          </div>
 
-          <div id="conversionProgress" class="conversion-progress hidden" aria-live="polite">
-            <div class="progress-meta">
-              <span id="conversionProgressStage">等待转换</span>
-              <span id="conversionProgressPercent">0%</span>
-            </div>
-            <div class="progress-track">
-              <div id="conversionProgressBar" class="progress-bar"></div>
-            </div>
-            <p id="conversionProgressMessage">转换任务尚未开始。</p>
+            <details class="review-rules">
+              <summary>评分规则</summary>
+              <p>
+                四项标准各 0-10 分，<strong>等权算术平均</strong>后保留 2
+                位小数得到本场得分；得分不低于「达标分数」即判通过（等于也算通过）。
+              </p>
+              <table>
+                <tr>
+                  <th>戏剧化程度</th>
+                  <td>动作与对白都有 = 8 分，只有一类 = 6 分；有镜头提示 +1；戏剧化决策 ≥2 条 +1。</td>
+                </tr>
+                <tr>
+                  <th>对白推动冲突</th>
+                  <td>
+                    无对白 = 3 分；否则 6 + 对白条数（最多计 2）+ 含对抗信号再 +2。对抗信号指对白里出现
+                    ？、！、不、别、冲突、必须、凭什么。
+                  </td>
+                </tr>
+                <tr>
+                  <th>残留旁白</th>
+                  <td>从 10 分起，每有一段超过 60 字的动作描述扣 3 分，最低 0 分。</td>
+                </tr>
+                <tr>
+                  <th>人物语气一致性</th>
+                  <td>
+                    无对白 = 6 分；否则 8 ×（说话人在本场人物表中的对白比例）+ 2 ×（标注了语气或情绪的对白比例）。
+                  </td>
+                </tr>
+              </table>
+              <p>
+                以上是<strong>本地模式</strong>的确定性算法，同一剧本反复审校结果一致。<strong>AI
+                模式</strong>只把四项标准的定义交给大模型评判，不含上述数值细则，因此
+                <strong>两种模式的分数不可直接比较</strong>；判定通过与否仍统一按"均分 vs
+                达标分数"裁决。
+              </p>
+              <p>
+                达标分数与自动修正轮次也可用环境变量 <code>AI_REVIEW_THRESHOLD</code>、<code>AI_REVIEW_MAX_ROUNDS</code>
+                配置（默认 7.0 与 2）。
+              </p>
+            </details>
           </div>
-
-          <div id="emptyState" class="empty-state">
-            <div class="script-card">SCENE<br /><strong>01</strong></div>
-            <h3>等待故事开场</h3>
-            <p>生成后的剧本会以分场预览显示，可切换到“源码”直接编辑 YAML 再校验。</p>
-          </div>
-
-          <div id="scriptPreview" class="script-preview hidden"></div>
-          <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
-          <div id="message" class="message">准备就绪</div>
         </section>
       </section>
+      </div>
 
+      <div id="viewProfiles" class="view hidden">
       <section class="profile-panel">
         <div class="section-heading">
           <div>
             <h2>人物小传</h2>
           </div>
-          <p>从小说中自动提取角色定位、性格、目标、关系、出场章节和关键变化。</p>
+          <div class="button-row">
+            <button id="reanalyzeCharactersButton" class="ghost-button">重新分析</button>
+          </div>
         </div>
+        <p class="profile-hint">
+          人物小传只依赖小说原文：在「工作台」粘贴或导入正文后，点这里的「重新分析」即可提取角色定位、性格、目标、关系、出场章节和关键变化。
+        </p>
         <div id="profileEmptyState" class="profile-empty">点击“分析人物”后，将在这里生成人物小传表。</div>
         <div id="profileGrid" class="profile-grid"></div>
       </section>
+      </div>
+
+      <div id="viewAgents" class="view hidden">
+      <div class="screenplay-status">
+        <span id="screenplayStatusText">还没有剧本：请先在「工作台」生成，或粘贴 YAML 后校验。</span>
+        <button id="backToWorkbenchButton" class="ghost-button">前往工作台</button>
+      </div>
 
       <section class="agent-panel">
         <div class="section-heading">
@@ -243,6 +306,216 @@
         <div id="agentSessions" class="agent-sessions hidden"></div>
       </section>
 
+      <section class="agent-panel team-panel">
+        <div class="section-heading">
+          <div>
+            <h2>多智能体协作</h2>
+          </div>
+          <p>审校、一致性、改编三个专职代理共享黑板，由主管按状态派单：谁先上、交什么任务、何时收工。</p>
+        </div>
+
+        <div class="agent-controls">
+          <label class="agent-goal">
+            协作目标<input id="teamGoalInput" placeholder="例如：全场景达标且无跨章矛盾" />
+          </label>
+          <label>
+            模式
+            <select id="teamModeInput">
+              <option value="demo" selected>本地</option>
+              <option value="ai">AI</option>
+            </select>
+          </label>
+          <label>达标分数<input id="teamThresholdInput" type="number" min="0" max="10" step="0.5" value="7" /></label>
+          <label>轮次上限<input id="teamMaxRoundsInput" type="number" min="1" max="20" step="1" value="6" /></label>
+          <label class="review-toggle">
+            <input id="teamSaveSessionInput" type="checkbox" />
+            保存会话
+          </label>
+          <div class="button-row">
+            <button id="listTeamSessionsButton" class="ghost-button">历史会话</button>
+            <button id="runTeamButton" class="primary-button">启动协作</button>
+          </div>
+        </div>
+
+        <div id="teamProgress" class="conversion-progress hidden" aria-live="polite">
+          <div class="progress-meta">
+            <span id="teamProgressStage">等待执行</span>
+            <span id="teamProgressPercent">0%</span>
+          </div>
+          <div class="progress-track">
+            <div id="teamProgressBar" class="progress-bar"></div>
+          </div>
+          <p id="teamProgressMessage">协作任务尚未开始。</p>
+        </div>
+
+        <div id="teamEmptyState" class="profile-empty">
+          生成剧本后，在这里启动多智能体协作；分角色的协作时间线、消息流与一致性问题会显示在下方。
+        </div>
+        <div id="teamSummary" class="agent-summary hidden"></div>
+        <div id="teamFindings" class="team-findings hidden"></div>
+        <ol id="teamTrace" class="agent-trace hidden"></ol>
+        <div id="teamMessages" class="team-messages hidden"></div>
+        <div id="teamSessions" class="agent-sessions hidden"></div>
+      </section>
+      </div>
+
+      <div id="viewProviders" class="view hidden">
+      <section class="provider-panel">
+        <div class="section-heading">
+          <div>
+            <h2>API 配置</h2>
+          </div>
+          <div class="button-row">
+            <button id="refreshProvidersButton" class="ghost-button">刷新</button>
+            <button id="newProviderButton" class="ghost-button">新建配置</button>
+          </div>
+        </div>
+
+        <p class="provider-hint">
+          保存多套供应商配置并随时切换。切换<strong>无需重启</strong>：下一个请求就用新配置，
+          正在跑的任务保持原配置不变。密钥只存在本机
+          <code>.story2script/providers.json</code> 与 <code>.env</code>，界面上一律显示为
+          <code>••••1234</code>。
+        </p>
+
+        <!-- 静默失效必须可见：进程环境变量优先级高于 .env，被遮盖的字段改了不生效。 -->
+        <div id="providerWarning" class="provider-warning hidden"></div>
+
+        <div class="provider-layout">
+          <div>
+            <h3 class="provider-subhead">已保存的配置</h3>
+            <div id="providerEmptyState" class="profile-empty">
+              还没有配置。点「新建配置」填入 Base URL、模型和密钥后保存。
+            </div>
+            <div id="providerList" class="provider-list"></div>
+          </div>
+
+          <form id="providerForm" class="provider-form" autocomplete="off">
+            <h3 class="provider-subhead">配置详情</h3>
+
+            <label class="provider-field">
+              配置名
+              <input id="providerNameInput" placeholder="例如：deepseek / kimi / 本地代理" />
+            </label>
+
+            <label class="provider-field">
+              Base URL<span class="provider-required">必填</span>
+              <input data-provider-field="AI_BASE_URL" placeholder="https://api.deepseek.com/v1" />
+            </label>
+
+            <label class="provider-field">
+              模型<span class="provider-required">必填</span>
+              <input data-provider-field="AI_MODEL" placeholder="deepseek-chat" />
+            </label>
+
+            <label class="provider-field">
+              API Key<span class="provider-required">必填</span>
+              <input
+                data-provider-field="AI_API_KEY"
+                type="password"
+                placeholder="留空表示保持原密钥不变"
+              />
+            </label>
+
+            <label class="provider-field">
+              接口协议
+              <select data-provider-field="AI_WIRE_API">
+                <option value="">chat_completions（默认）</option>
+                <option value="chat_completions">chat_completions</option>
+                <option value="responses">responses</option>
+              </select>
+            </label>
+
+            <details class="provider-advanced">
+              <summary>高级：超时、并发与分块（504 报错时调这里）</summary>
+
+              <p class="provider-advanced-hint">
+                <strong>先看错误信息里的那句英文，它决定该调哪个旋钮：</strong>
+              </p>
+              <table class="provider-troubleshoot">
+                <tr>
+                  <th><code>HTTP 504</code></th>
+                  <td>
+                    网关等不到模型、<strong>自己先放弃了</strong>。这时调大「超时秒数」没有用——我们的超时
+                    根本没触发；降并发通常也不对症。要让<strong>单次请求</strong>变快，按这个顺序试：
+                    <br />1. <strong>推理强度</strong>降一档（<code>high</code> →
+                    <code>medium</code> → <code>low</code> 或留空）。推理模型会在看不见的地方
+                    烧掉大量思考 token，这一项往往就是 504 的真正原因。
+                    <br />2. <strong>分块字符数</strong>调小（1800 → 1200 → 900）。
+                    <br />3. 压低<strong>最大输出 token</strong>。
+                  </td>
+                </tr>
+                <tr>
+                  <th><code>request timed out</code></th>
+                  <td>是<strong>我们</strong>先放弃的（默认 120s）。这种情况才该调大「超时秒数」。</td>
+                </tr>
+                <tr>
+                  <th><code>HTTP 429</code></th>
+                  <td>
+                    限流。<strong>这才是该降「并发数」的场合</strong>（4 → 2），也可把「重试退避」
+                    拉长（如 <code>2,5</code>）。
+                  </td>
+                </tr>
+              </table>
+              <p class="provider-advanced-hint">
+                失败片段会退避重试 3 次，仍失败就跳过、并在转换结果里明确告知跳了几个，
+                不会让整篇前功尽弃。
+              </p>
+
+              <div class="provider-grid">
+                <label class="provider-field">
+                  超时秒数
+                  <input data-provider-field="AI_TIMEOUT_SECONDS" placeholder="120" />
+                </label>
+                <label class="provider-field">
+                  并发数
+                  <input data-provider-field="AI_MAX_CONCURRENCY" placeholder="4" />
+                </label>
+                <label class="provider-field">
+                  分块字符数
+                  <input data-provider-field="AI_CHAPTER_CHUNK_CHARS" placeholder="1800" />
+                </label>
+                <label class="provider-field">
+                  重试退避（秒）
+                  <input data-provider-field="AI_RETRY_BACKOFF_SECONDS" placeholder="1,3" />
+                </label>
+                <label class="provider-field">
+                  最大输出 token
+                  <input data-provider-field="AI_MAX_TOKENS" placeholder="留空用供应商默认" />
+                </label>
+                <label class="provider-field">
+                  推理强度
+                  <input data-provider-field="AI_REASONING_EFFORT" placeholder="仅推理模型需要" />
+                </label>
+                <label class="provider-field">
+                  Embedding 模型
+                  <input data-provider-field="AI_EMBED_MODEL" placeholder="留空则用关键词检索" />
+                </label>
+                <label class="provider-field">
+                  禁用响应留存
+                  <select data-provider-field="AI_DISABLE_RESPONSE_STORAGE">
+                    <option value="">默认（false）</option>
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+
+            <div class="provider-actions">
+              <button id="saveProviderButton" class="ghost-button" type="button">保存</button>
+              <button id="saveActivateProviderButton" class="primary-button" type="button">
+                保存并启用
+              </button>
+              <button id="testProviderButton" class="ghost-button" type="button">测试连接</button>
+            </div>
+            <p id="providerFormHint" class="provider-advanced-hint"></p>
+          </form>
+        </div>
+      </section>
+      </div>
+
+      <div id="viewMetrics" class="view hidden">
       <section class="metrics-panel">
         <div class="section-heading">
           <div>
@@ -257,6 +530,7 @@
         </div>
         <div id="metricsContent" class="metrics-content hidden"></div>
       </section>
+      </div>
     </main>
 
     <script src="/static/app.js"></script>

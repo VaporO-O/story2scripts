@@ -8,5 +8,9 @@ __pycache__/
 .ruff_cache/
 .venv/
 .env
+# 备份与按环境分文件（.env.local / .env.backup-*）同样含密钥，
+# 原来的 `.env` 单条不匹配这些名字。保留 .env.example 以便将来提交模板。
+.env.*
+!.env.example
 show/
 study1xi.pytest-tmp/

@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from story2script.llm_client import LLMClient, loads_json_object
+from story2script.metrics import metrics
 
 
 def test_loads_json_object_handles_plain_object() -> None:
@@ -76,12 +77,18 @@ def configure_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AI_API_KEY", "test-key")
     monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("AI_MODEL", "test-model")
+    monkeypatch.setenv("AI_WIRE_API", "chat_completions")
+    monkeypatch.delenv("AI_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("AI_DISABLE_RESPONSE_STORAGE", raising=False)
 
 
 def clear_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AI_API_KEY", raising=False)
     monkeypatch.delenv("AI_BASE_URL", raising=False)
     monkeypatch.delenv("AI_MODEL", raising=False)
+    monkeypatch.delenv("AI_WIRE_API", raising=False)
+    monkeypatch.delenv("AI_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("AI_DISABLE_RESPONSE_STORAGE", raising=False)
     monkeypatch.delenv("AI_TIMEOUT_SECONDS", raising=False)
 
 
@@ -119,6 +126,88 @@ def test_llm_client_calls_openai_compatible_chat_api(monkeypatch: pytest.MonkeyP
     assert captured["payload"]["model"] == "test-model"
     assert captured["payload"]["messages"] == [{"role": "user", "content": "把小说改成剧本"}]
     assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+def test_llm_client_calls_responses_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ai(monkeypatch)
+    monkeypatch.setenv("AI_WIRE_API", "responses")
+    monkeypatch.setenv("AI_REASONING_EFFORT", "xhigh")
+    monkeypatch.setenv("AI_DISABLE_RESPONSE_STORAGE", "true")
+    monkeypatch.setenv("AI_MAX_TOKENS", "8192")
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers["authorization"]
+        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "output": [
+                    {"type": "reasoning", "summary": []},
+                    {
+                        "type": "message",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": '{"ok": true}', "annotations": []}
+                        ],
+                    },
+                ],
+                "usage": {"input_tokens": 12, "output_tokens": 34},
+            },
+        )
+
+    client = LLMClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    content = client.complete_json("把小说改成剧本")
+
+    assert content == '{"ok": true}'
+    assert captured["url"] == "https://example.test/v1/responses"
+    assert captured["authorization"] == "Bearer test-key"
+    assert captured["payload"] == {
+        "model": "test-model",
+        "input": [{"role": "user", "content": "把小说改成剧本"}],
+        "text": {"format": {"type": "json_object"}},
+        "reasoning": {"effort": "xhigh"},
+        "store": False,
+        "max_output_tokens": 8192,
+    }
+    row = metrics.summary()["llm"]["AI mode"]
+    assert row["prompt_tokens"] == 12
+    assert row["completion_tokens"] == 34
+
+
+def test_llm_client_handles_incomplete_responses_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_ai(monkeypatch)
+    monkeypatch.setenv("AI_WIRE_API", "responses")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "output": [],
+            },
+        )
+
+    client = LLMClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    with pytest.raises(ValueError, match="输出被截断"):
+        client.complete_json("prompt")
+
+
+def test_llm_client_rejects_unknown_wire_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ai(monkeypatch)
+    monkeypatch.setenv("AI_WIRE_API", "unknown")
+    client = LLMClient(client=httpx.Client(transport=httpx.MockTransport(lambda request: None)))
+
+    with pytest.raises(ValueError, match="AI_WIRE_API"):
+        client.complete_json("prompt")
 
 
 def test_llm_client_reads_dotenv_file(
