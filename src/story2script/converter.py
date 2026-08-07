@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from .character_profiles_ai import PROFILE_PLACEHOLDERS, AICharacterProfiler
 from .llm_client import LLMClient, is_fatal_error, loads_json_object
 from .parser import Chapter
+from .prompt_catalog import CONVERSION_CHUNK_PROMPT
 from .rag import build_story_knowledge, rag_top_k
 from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import Action
@@ -1691,7 +1692,11 @@ class AIConverter:
                 if delay:
                     time.sleep(delay)
             try:
-                content = self.llm_client.complete_json(prompt, use_cache=(_attempt == 0))
+                content = self.llm_client.complete_json(
+                    prompt,
+                    use_cache=(_attempt == 0),
+                    prompt_id=CONVERSION_CHUNK_PROMPT,
+                )
                 data = loads_json_object(content)
             except ValueError as exc:
                 last_error = str(exc)

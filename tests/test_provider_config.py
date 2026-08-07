@@ -58,6 +58,12 @@ def test_non_whitelisted_keys_are_dropped() -> None:
     assert cleaned == {"AI_MODEL": "m"}
 
 
+def test_temperature_is_a_supported_provider_field() -> None:
+    assert provider_config.sanitize_fields({"AI_TEMPERATURE": "0.3"}) == {
+        "AI_TEMPERATURE": "0.3"
+    }
+
+
 # ---------------------------------------------------------------- 保存与切换
 
 

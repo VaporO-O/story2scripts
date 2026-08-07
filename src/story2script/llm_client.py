@@ -251,6 +251,17 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} requires integer AI_MAX_TOKENS.") from exc
 
     @property
+    def temperature(self) -> float:
+        raw_value = self._config_value("AI_TEMPERATURE", "0.3")
+        try:
+            value = float(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{self.usage_label} requires numeric AI_TEMPERATURE.") from exc
+        if not 0.0 <= value <= 2.0:
+            raise ValueError(f"{self.usage_label} requires AI_TEMPERATURE between 0 and 2.")
+        return value
+
+    @property
     def max_concurrency(self) -> int:
         """How many chunk requests may run in parallel (AI_MAX_CONCURRENCY, default 4)."""
         raw_value = self._config_value("AI_MAX_CONCURRENCY", "4")
@@ -273,14 +284,24 @@ class LLMClient:
             raise ValueError(f"{self.usage_label} requires integer AI_EMBED_BATCH_SIZE.") from exc
         return max(1, value)
 
-    def complete_json(self, prompt: str, temperature: float = 0.3, use_cache: bool = True) -> str:
+    def complete_json(
+        self,
+        prompt: str,
+        temperature: float | None = None,
+        use_cache: bool = True,
+        *,
+        prompt_id: str = "",
+    ) -> str:
         """Return the model's JSON text response for a single user prompt.
 
         use_cache=False 用于"重新生成"语义的调用（场景重写）与分块转换的
         重试路径：同请求需要不同结果时不得复用缓存。
         """
         self._ensure_configured()
-        request_url, body = self._generation_request(prompt, temperature)
+        resolved_temperature = self.temperature if temperature is None else temperature
+        if not 0.0 <= resolved_temperature <= 2.0:
+            raise ValueError("temperature must be between 0 and 2.")
+        request_url, body = self._generation_request(prompt, resolved_temperature)
         key = cache_key(
             "generate",
             self.wire_api,
@@ -289,7 +310,7 @@ class LLMClient:
             self.reasoning_effort,
             self.disable_response_storage,
             self.max_tokens,
-            temperature,
+            resolved_temperature,
             prompt,
         )
         if use_cache:
@@ -298,6 +319,7 @@ class LLMClient:
                 metrics.record_llm_call(
                     label=self.usage_label,
                     model=self.model,
+                    prompt_id=prompt_id,
                     duration_ms=0,
                     ok=True,
                     prompt_chars=len(prompt),
@@ -398,6 +420,7 @@ class LLMClient:
             metrics.record_llm_call(
                 label=self.usage_label,
                 model=self.model,
+                prompt_id=prompt_id,
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 ok=False,
                 error_kind=error_kind or "unknown",
@@ -408,6 +431,7 @@ class LLMClient:
         metrics.record_llm_call(
             label=self.usage_label,
             model=self.model,
+            prompt_id=prompt_id,
             duration_ms=int((time.perf_counter() - started) * 1000),
             ok=True,
             prompt_tokens=usage.get("prompt_tokens") or usage.get("input_tokens") or 0,

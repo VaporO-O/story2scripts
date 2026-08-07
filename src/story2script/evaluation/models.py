@@ -6,7 +6,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..screenplay import AdaptationType, DEFAULT_ADAPTATION_TYPE
+from ..screenplay import AdaptationType, DEFAULT_ADAPTATION_TYPE, Screenplay
 
 
 class EvalModel(BaseModel):
@@ -108,9 +108,16 @@ class BehaviorMetrics(EvalModel):
     circuit_breaker_triggered: bool = False
 
 
+class TokenPricing(EvalModel):
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    input_per_million: float = Field(ge=0)
+    output_per_million: float = Field(ge=0)
+
+
 class VariantMetrics(EvalModel):
     variant: Literal["fixed_pipeline", "single_agent", "multi_agent"]
     status: str
+    error: str = ""
     goal_achieved: bool
     duration_ms: int
     schema_valid: bool
@@ -125,21 +132,37 @@ class VariantMetrics(EvalModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cache_hits: int = 0
     estimated_cost: float | None = None
     behavior: BehaviorMetrics
     output: OutputMetrics
+    screenplay: Screenplay | None = Field(default=None, exclude=True, repr=False)
 
 
 class CaseReport(EvalModel):
     case_id: str
     title: str
     split: str
+    sample_index: int = Field(default=1, ge=1)
     conversion_duration_ms: int
+    conversion_llm_calls: int = 0
     conversion_prompt_tokens: int = 0
     conversion_completion_tokens: int = 0
+    conversion_total_tokens: int = 0
+    conversion_estimated_cost: float | None = None
     conversion_warnings: list[str] = Field(default_factory=list)
     source: SourceMetrics
     variants: dict[str, VariantMetrics]
+    source_text: str = Field(default="", exclude=True, repr=False)
+
+
+class EvalFailure(EvalModel):
+    case_id: str
+    title: str
+    split: str
+    sample_index: int
+    stage: str
+    error: str
 
 
 class GateResult(EvalModel):
@@ -152,18 +175,26 @@ class GateResult(EvalModel):
 
 
 class EvalReport(EvalModel):
-    report_version: str = "1"
+    report_version: str = "2"
     generated_at: str
     git_commit: str = ""
     dataset_versions: list[str]
     splits: list[str]
     mode: Literal["demo", "ai"]
     model: str = ""
+    provider: str = ""
+    wire_api: str = ""
+    temperature: float | None = None
+    reasoning_effort: str = ""
+    repeats: int = Field(default=1, ge=1)
+    cache_enabled: bool = True
+    pricing: TokenPricing | None = None
     threshold: float
     max_steps: int
     max_rounds: int
     prompt_versions: dict[str, str] = Field(default_factory=dict)
     cases: list[CaseReport]
+    failures: list[EvalFailure] = Field(default_factory=list)
     summary: dict
     gates: list[GateResult] = Field(default_factory=list)
 

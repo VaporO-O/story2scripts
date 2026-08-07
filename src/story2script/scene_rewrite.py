@@ -6,6 +6,7 @@ from typing import Literal
 from .converter import _normalize_screenplay_scene_data
 from .llm_client import LLMClient, loads_json_object
 from .metrics import metrics
+from .prompt_catalog import SCENE_REWRITE_PROMPT
 from .screenplay import Action, Dialogue, Scene, Screenplay
 from .security import DATA_FENCE_NOTICE
 
@@ -239,7 +240,9 @@ class AISceneRewriter:
 
         prompt = self._build_prompt(screenplay, target_scene, operation, character_id, tone, feedback)
         # "重新生成"语义要求同请求可以产出不同结果，读写都绕过响应缓存。
-        content = self.llm_client.complete_json(prompt, use_cache=False)
+        content = self.llm_client.complete_json(
+            prompt, use_cache=False, prompt_id=SCENE_REWRITE_PROMPT
+        )
         try:
             raw_scene = loads_json_object(content)
         except ValueError as exc:

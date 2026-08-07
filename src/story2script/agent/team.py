@@ -12,15 +12,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 
 from ..continuity import ContinuityFinding
 from ..llm_client import LLMClient, loads_json_object
 from ..metrics import metrics
+from ..prompt_catalog import TEAM_SUPERVISOR_PROMPT
 from ..scene_review import ReviewReport, _review_threshold
 from ..screenplay import Screenplay
-from ..security import DATA_FENCE_NOTICE
+from ..security import DATA_FENCE_NOTICE, redact_secrets
 from .blackboard import Blackboard, SpecialistTask
 from .memory import AgentSessionStore
 from .models import AgentAction, AgentStep, TeamRunResult
@@ -44,6 +46,8 @@ _MAX_CONSECUTIVE_ERRORS = 3
 # 主管决策历史发给 planner 的条数上限：既让自我修正看得见上一轮的错误，
 # 也保证提示词不随协作轮次无界膨胀。
 _HISTORY_LIMIT = 6
+_SCENE_ID_PARTS = re.compile(r"[\s,，、;；]+")
+_SCENE_ORDINAL = re.compile(r"^(?:scene[-_ ]?|场景)?([0-9]+)$", re.IGNORECASE)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -156,7 +160,6 @@ class AdaptationTeam:
                     break
                 continue
 
-            consecutive_errors = 0
             rounds_used = round_no
 
             if dispatch.role == FINISH_ROLE:
@@ -191,7 +194,11 @@ class AdaptationTeam:
                     thought=thought,
                     action=AgentAction(
                         tool="dispatch",
-                        params={"role": dispatch.role, "instruction": dispatch.instruction},
+                        params={
+                            "role": dispatch.role,
+                            "instruction": dispatch.instruction,
+                            "scene_ids": dispatch.scene_ids,
+                        },
                     ),
                     observation={"role": dispatch.role},
                     duration_ms=int((time.perf_counter() - started) * 1000),
@@ -205,7 +212,26 @@ class AdaptationTeam:
                 f"第 {round_no} 轮：派给 {dispatch.role}"
                 f"（{dispatch.instruction or '无附加说明'}）"
             )
-            report = specialists[dispatch.role].run(blackboard, dispatch)
+            try:
+                report = specialists[dispatch.role].run(blackboard, dispatch)
+            except Exception as exc:
+                error = (
+                    f"{label} Agent 执行失败："
+                    f"{redact_secrets(str(exc))[:300] or type(exc).__name__}"
+                )
+                trace.append(
+                    AgentStep(step=round_no, thought="", error=error, role=dispatch.role)
+                )
+                blackboard.post(dispatch.role, SUPERVISOR, error, kind="report")
+                supervisor_history.append(f"第 {round_no} 轮：{error}")
+                consecutive_errors += 1
+                if consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                    status = "failed"
+                    message = f"连续 {_MAX_CONSECUTIVE_ERRORS} 次执行失败，已终止。"
+                    break
+                continue
+
+            consecutive_errors = 0
             trace.extend(report.steps)
             blackboard.post(dispatch.role, SUPERVISOR, report.summary, kind="report")
             self._llm_calls += report.llm_calls
@@ -321,7 +347,7 @@ class AdaptationTeam:
         self, blackboard: Blackboard, goal: str, history: list[str]
     ) -> tuple[str, SpecialistTask | None, str]:
         prompt = self._build_supervisor_prompt(blackboard, goal, history)
-        content = self._llm.complete_json(prompt)
+        content = self._llm.complete_json(prompt, prompt_id=TEAM_SUPERVISOR_PROMPT)
         self._llm_calls += 1
         try:
             data = loads_json_object(content)
@@ -340,13 +366,17 @@ class AdaptationTeam:
         if role not in allowed:
             return thought, None, f"不支持的角色：{role}。可选：{'、'.join(sorted(allowed))}"
 
-        scene_ids = dispatch.get("scene_ids")
+        scene_ids, scene_ids_error = self._resolve_scene_ids(
+            blackboard, dispatch.get("scene_ids")
+        )
+        if scene_ids_error:
+            return thought, None, scene_ids_error
         return (
             thought,
             SpecialistTask(
                 role=role,
                 instruction=str(dispatch.get("instruction", "")).strip(),
-                scene_ids=[str(item) for item in scene_ids] if isinstance(scene_ids, list) else [],
+                scene_ids=scene_ids,
             ),
             "",
         )
@@ -381,10 +411,56 @@ class AdaptationTeam:
             "2. 改编会让评分过期，改完要再派审校复评。\n"
             "3. 同类问题反复改仍无改进时结束，不要空转。\n"
             "4. 只能派上面列出的角色。\n"
+            "5. 全量处理时 scene_ids 必须是 []；局部处理时只能填写黑板中出现的完整 "
+            'scene_id（例如 ["scene-1"]），不能写成 ["1"] 或自然语言。\n'
             "只返回一个 JSON 对象，格式："
             '{"thought": "简短思考", "dispatch": {"role": "角色名", '
             '"instruction": "交给它的任务", "scene_ids": []}}'
         )
+
+    @staticmethod
+    def _resolve_scene_ids(
+        blackboard: Blackboard, raw_scene_ids
+    ) -> tuple[list[str], str]:
+        """Validate planner targets and tolerate unambiguous scene ordinals."""
+        if raw_scene_ids is None:
+            return [], ""
+        if not isinstance(raw_scene_ids, list):
+            return [], "dispatch.scene_ids 必须是 JSON 数组。"
+
+        known = [scene.id for scene in blackboard.screenplay.scenes]
+        known_set = set(known)
+        resolved: list[str] = []
+        unknown: list[str] = []
+        for item in raw_scene_ids:
+            if not isinstance(item, (str, int)) or isinstance(item, bool):
+                unknown.append(str(item))
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            # Some providers return one item such as "1、2、3" despite the JSON-array
+            # contract. Splitting it is safe because screenplay scene ids contain none
+            # of these separators.
+            parts = [part for part in _SCENE_ID_PARTS.split(text) if part]
+            for part in parts:
+                scene_id = part if part in known_set else ""
+                if not scene_id:
+                    match = _SCENE_ORDINAL.fullmatch(part)
+                    index = int(match.group(1)) - 1 if match else -1
+                    if 0 <= index < len(known):
+                        scene_id = known[index]
+                if not scene_id:
+                    unknown.append(part)
+                elif scene_id not in resolved:
+                    resolved.append(scene_id)
+
+        if unknown:
+            return [], (
+                f"dispatch.scene_ids 包含未知场景：{'、'.join(unknown)}。"
+                "请使用黑板中的完整 scene_id，或用 [] 表示全部场景。"
+            )
+        return resolved, ""
 
     # ------------------------------------------------------------------ 辅助
 

@@ -4,6 +4,7 @@ from typing import Protocol
 from .character_profiles import extract_character_profiles
 from .llm_client import LLMClient, loads_json_object
 from .parser import Chapter
+from .prompt_catalog import CHARACTER_PROFILE_PROMPT
 from .security import DATA_FENCE_NOTICE
 
 PROFILE_PLACEHOLDERS = {"待作者进一步补充", "待作者进一步补充。", "", "暂无", "无"}
@@ -64,7 +65,9 @@ class AICharacterProfiler:
             return base_profiles
 
         prompt = self._build_prompt(chapters, base_profiles)
-        content = self.llm_client.complete_json(prompt)
+        content = self.llm_client.complete_json(
+            prompt, prompt_id=CHARACTER_PROFILE_PROMPT
+        )
         try:
             payload = loads_json_object(content)
         except ValueError as exc:

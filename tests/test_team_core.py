@@ -255,6 +255,79 @@ def test_ai_supervisor_dispatch_sequence(monkeypatch: pytest.MonkeyPatch):
     assert ROLE_ADAPTER in supervisor_prompts[0]
 
 
+def test_ai_supervisor_resolves_ordinal_scene_ids(monkeypatch: pytest.MonkeyPatch):
+    """Providers may emit 1/2/3 even though the contract requires scene-1/2/3."""
+    configure_ai(monkeypatch)
+    supervisor_calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if TEAM_PROMPT_MARKER in prompt:
+            supervisor_calls["count"] += 1
+            if supervisor_calls["count"] == 1:
+                return ai_response(
+                    {
+                        "thought": "先全量审校",
+                        "dispatch": {
+                            "role": ROLE_REVIEWER,
+                            "instruction": "检查全部场景",
+                            "scene_ids": ["1、2、3"],
+                        },
+                    }
+                )
+            return ai_response(
+                {"thought": "收工", "dispatch": {"role": "finish", "scene_ids": []}}
+            )
+        if REVIEW_PROMPT_MARKER in prompt:
+            return ai_response(review_payload(3.0, "fail"))
+        raise AssertionError(f"未预期的请求：{prompt[:60]}")
+
+    result = AdaptationTeam(
+        mode="ai",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        threshold=7.0,
+        max_rounds=3,
+    ).run(sample_screenplay()).result
+
+    dispatch = next(step for step in result.trace if step.action is not None)
+    assert dispatch.action.params["scene_ids"] == ["scene-1", "scene-2", "scene-3"]
+    assert result.status == "completed"
+
+
+def test_ai_supervisor_self_corrects_unknown_scene_id(monkeypatch: pytest.MonkeyPatch):
+    configure_ai(monkeypatch)
+    decisions = [
+        {
+            "thought": "错误目标",
+            "dispatch": {"role": ROLE_REVIEWER, "scene_ids": ["scene-99"]},
+        },
+        {"thought": "改为全量", "dispatch": {"role": ROLE_REVIEWER, "scene_ids": []}},
+        {"thought": "收工", "dispatch": {"role": "finish", "scene_ids": []}},
+    ]
+    supervisor_calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        prompt = json.loads(request.content.decode("utf-8"))["messages"][0]["content"]
+        if TEAM_PROMPT_MARKER in prompt:
+            index = supervisor_calls["count"]
+            supervisor_calls["count"] += 1
+            return ai_response(decisions[index])
+        if REVIEW_PROMPT_MARKER in prompt:
+            return ai_response(review_payload(3.0, "fail"))
+        raise AssertionError(f"未预期的请求：{prompt[:60]}")
+
+    result = AdaptationTeam(
+        mode="ai",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        threshold=7.0,
+        max_rounds=4,
+    ).run(sample_screenplay()).result
+
+    assert any("未知场景" in step.error for step in result.trace)
+    assert dispatched_roles(result) == [ROLE_REVIEWER]
+    assert result.status == "completed"
+
+
 def test_ai_supervisor_self_corrects_invalid_role(monkeypatch: pytest.MonkeyPatch):
     configure_ai(monkeypatch)
     supervisor_prompts: list[str] = []
