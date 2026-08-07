@@ -484,6 +484,17 @@
                   <input data-provider-field="AI_MAX_TOKENS" placeholder="留空用供应商默认" />
                 </label>
                 <label class="provider-field">
+                  采样温度
+                  <input
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    data-provider-field="AI_TEMPERATURE"
+                    placeholder="0.3"
+                  />
+                </label>
+                <label class="provider-field">
                   推理强度
                   <input data-provider-field="AI_REASONING_EFFORT" placeholder="仅推理模型需要" />
                 </label>

@@ -2,6 +2,7 @@
 
 from .baseline import apply_baseline, load_baseline
 from .dataset import load_dataset, load_datasets
+from .pairwise import score_blind_reviews, write_blind_review_files
 from .reporting import render_markdown, write_reports
 from .runner import evaluate_datasets
 
@@ -12,5 +13,7 @@ __all__ = [
     "load_dataset",
     "load_datasets",
     "render_markdown",
+    "score_blind_reviews",
+    "write_blind_review_files",
     "write_reports",
 ]

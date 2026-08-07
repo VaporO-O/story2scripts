@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from .llm_client import LLMClient, loads_json_object
 from .metrics import metrics
+from .prompt_catalog import SCENE_CHAT_PROMPT
 from .scene_rewrite import (
     OPERATION_MESSAGES,
     OPERATION_PROMPTS,
@@ -300,7 +301,7 @@ def _parse_intent_ai(
 
     llm = LLMClient(client=client, usage_label="AI scene chat")
     prompt = build_intent_prompt(screenplay, message, history, current_scene_id)
-    content = llm.complete_json(prompt)
+    content = llm.complete_json(prompt, prompt_id=SCENE_CHAT_PROMPT)
     try:
         data = loads_json_object(content)
     except ValueError as exc:

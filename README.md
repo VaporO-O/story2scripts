@@ -106,6 +106,7 @@ AI_API_KEY=your-api-key
 AI_BASE_URL=https://your-provider.example/v1
 AI_MODEL=your-model-name
 AI_WIRE_API=chat_completions
+AI_TEMPERATURE=0.3
 AI_REASONING_EFFORT=
 AI_DISABLE_RESPONSE_STORAGE=false
 AI_TIMEOUT_SECONDS=120
@@ -125,6 +126,7 @@ RAG_TOP_K=3
 - `.env` 已被 git 忽略，不要提交真实 API Key。
 - 系统环境变量优先级高于 `.env`。
 - `AI_WIRE_API` 可选值为 `chat_completions`（默认）或 `responses`；系统会分别在 `AI_BASE_URL` 后拼接 `/chat/completions` 或 `/responses`。
+- `AI_TEMPERATURE` 控制非推理请求的采样温度，默认 `0.3`，可选范围 `0-2`。
 - `AI_REASONING_EFFORT` 用于 Responses reasoning 配置，例如 `xhigh`；启用 reasoning 时不发送 `temperature`。
 - `AI_DISABLE_RESPONSE_STORAGE=true` 时，Responses 请求会发送 `store: false`。
 - `AI_MAX_TOKENS` 可选；当模型输出被截断时可以调高，例如 `16384`。
@@ -504,7 +506,7 @@ characters: []
 scenes: []
 ```
 
-## 离线评测
+## 质量评测
 
 项目内置了版权安全的合成评测集，用于复现固定管线、单 Agent 和多 Agent 在同一批输入上的结果。`dev` 与 `holdout` 共 10 条三章样本，覆盖场景边界、人物、对白归属、Schema、一致性故障探针和 Agent 工具行为。
 
@@ -519,9 +521,46 @@ story2script-eval run \
 
 也可以使用 `python -m story2script.evaluation run` 代替 `story2script-eval run`。命令会在 `evals/reports/` 生成 JSON 与 Markdown 报告；报告不提交到 Git，CI 会将它们作为 artifact 保留。
 
-`demo` 模式完全离线、结果可复现，适合 CI 回归门禁，但只验证本地规则和编排行为，不能代表真实模型的生成质量。`ai` 模式用于真实模型评测，应单独记录模型、Prompt 版本、Token 和成本，不与 Demo 分数直接比较。
+`demo` 模式完全离线、结果可复现，适合 CI 回归门禁，但只验证本地规则和编排行为，不能代表真实模型的生成质量。`ai` 模式会记录供应商、模型、温度、推理配置、Prompt 内容指纹、Token、延迟分位数、95% 置信区间和可选成本；Demo 与 AI 分数不直接比较。
 
 当前 Demo 基线下，单 Agent 与多 Agent 都能把目标达成率从固定管线的 `0%` 提升到 `100%`，平均分均从 `8.641` 提升到 `9.065`。多 Agent 没有带来额外质量提升，本机耗时约为单 Agent 的 `2.02x`；耗时受机器环境影响，因此不作为 CI 门禁。
+
+真实模型对照评测默认关闭 LLM 响应缓存，避免重复采样复用同一响应。下面的价格只是命令示例，请替换为当前模型每百万 Token 的实际价格：
+
+```bash
+story2script-eval run \
+  --dataset evals/datasets/v1/dev.json \
+  --dataset evals/datasets/v1/holdout.json \
+  --mode ai \
+  --temperature 0.3 \
+  --repeats 3 \
+  --input-cost-per-million 1.00 \
+  --output-cost-per-million 2.00 \
+  --write-blind-review \
+  --checkpoint evals/reports/ai-comparison.checkpoint.json \
+  --report-prefix ai-comparison
+```
+
+长时间评测可通过 `--checkpoint` 在每个 case 完成后原子保存进度。运行被中断后，使用完全相同的参数并追加 `--resume` 即可从最后一个已完成 case 继续；数据集、模型、Prompt 指纹、采样次数或评测参数不一致时会拒绝恢复，避免把不同实验的数据混在一起。Checkpoint 包含评测源文本与候选剧本，仅应保存在受控环境中，`evals/reports/` 默认不会提交到 Git。
+
+2026-08-08 使用 `gpt-5.6-sol`、Responses API、`high` 推理配置在 `dev` 集完成了 5 个 case × 3 次重复采样，LLM 缓存关闭。未提供价格配置，因此只统计 Token：
+
+| 方案 | 工作流完成率 | 目标达成率 | 最终分（95% CI） | p50 / p95 延迟 | 总 Tokens |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 固定管线 | 100.0% | 0.0% | 6.905（6.717–7.094） | 15.8s / 19.5s | 264,469 |
+| 单 Agent | 66.7% | 66.7% | 8.889（8.732–9.047） | 313.7s / 772.2s | 1,838,061 |
+| 多 Agent | 86.7% | 80.0% | 9.045（8.957–9.132） | 386.2s / 925.1s | 3,105,013 |
+
+在这组样本上，多 Agent 相比单 Agent 的平均最终分高 `0.1554`、目标达成率高 `13.33` 个百分点，但平均延迟为 `1.4757x`、Token 为 `1.6893x`、LLM 调用为 `1.7230x`。两者的质量置信区间仍有重叠，且多 Agent 的对白归属准确率低于单 Agent（`65.6%` vs `74.4%`），因此不能仅凭自动评分认定其整体质量更好；最终偏好需要结合人工盲测结果判断。
+
+盲测会生成候选来源已随机隐藏的 `*-blind-review.json`、可填写的 `*-blind-responses.json` 和独立的 `*-blind-key.json`。评审者只接收前两者；填写 `A`、`B` 或 `TIE` 后再用密钥汇总：
+
+```bash
+story2script-eval score-pairwise \
+  --responses evals/reports/ai-comparison-blind-responses.json \
+  --key evals/reports/ai-comparison-blind-key.json \
+  --output evals/reports/ai-comparison-preference.json
+```
 
 ## 测试
 

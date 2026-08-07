@@ -20,6 +20,10 @@ from .models import (
 )
 
 
+class EvaluationDataError(ValueError):
+    """Raised when gold annotations cannot be applied to their source case."""
+
+
 def _ratio(numerator: int, denominator: int, empty: float = 1.0) -> float:
     if denominator == 0:
         return empty
@@ -60,7 +64,7 @@ def score_scene_boundaries(
         units = _text_units(chapter.content)
         for boundary in expected_by_chapter.get(chapter.title, []):
             if boundary >= len(units):
-                raise ValueError(
+                raise EvaluationDataError(
                     f"{chapter.title} 的标注边界 {boundary} 超出文本单元范围（{len(units)}）。"
                 )
             expected.add((chapter.title, boundary))
@@ -148,7 +152,7 @@ def _inject_faults(
     for fault in faults:
         scenes = payload["scenes"]
         if fault.scene_index >= len(scenes):
-            raise ValueError(
+            raise EvaluationDataError(
                 f"一致性故障的 scene_index={fault.scene_index} 超出场景数 {len(scenes)}。"
             )
         scene = scenes[fault.scene_index]
@@ -160,7 +164,7 @@ def _inject_faults(
                 None,
             )
             if dialogue is None:
-                raise ValueError(f"{scene_id} 没有对白，无法注入 speaker_absent。")
+                raise EvaluationDataError(f"{scene_id} 没有对白，无法注入 speaker_absent。")
             speaker = dialogue["character"]
             scene["characters_present"] = [
                 item for item in scene["characters_present"] if item != speaker
@@ -173,7 +177,7 @@ def _inject_faults(
             expected.add(("unknown_location", scene_id))
         elif fault.kind == "character_absent":
             if not scene["characters"]:
-                raise ValueError(f"{scene_id} 没有人物，无法注入 character_absent。")
+                raise EvaluationDataError(f"{scene_id} 没有人物，无法注入 character_absent。")
             character_id = scene["characters"][0]
             state = next(
                 item for item in payload["global_state"]["characters"] if item["id"] == character_id

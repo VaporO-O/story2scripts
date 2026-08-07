@@ -73,6 +73,27 @@ def test_complete_json_omits_max_tokens_by_default(monkeypatch: pytest.MonkeyPat
     assert "max_tokens" not in captured["body"]
 
 
+def test_complete_json_uses_configured_temperature_and_tracks_prompt_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    monkeypatch.setenv("AI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("AI_MODEL", "test-model")
+    monkeypatch.setenv("AI_TEMPERATURE", "0.7")
+    client = LLMClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    client.complete_json("prompt", prompt_id="evaluation.test")
+
+    assert captured["body"]["temperature"] == 0.7
+    assert metrics.recent_events(1)[0]["prompt_id"] == "evaluation.test"
+
+
 def configure_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AI_API_KEY", "test-key")
     monkeypatch.setenv("AI_BASE_URL", "https://example.test/v1")

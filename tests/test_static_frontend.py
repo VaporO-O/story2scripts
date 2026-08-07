@@ -334,6 +334,7 @@ def test_workbench_exposes_provider_view() -> None:
     assert 'data-provider-field="AI_TIMEOUT_SECONDS"' in html
     assert 'data-provider-field="AI_MAX_CONCURRENCY"' in html
     assert 'data-provider-field="AI_CHAPTER_CHUNK_CHARS"' in html
+    assert 'data-provider-field="AI_TEMPERATURE"' in html
 
 
 def test_provider_view_never_prefills_secret() -> None:

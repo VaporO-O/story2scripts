@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from .llm_client import LLMClient, loads_json_object
 from .metrics import metrics
+from .prompt_catalog import CONTINUITY_REVIEW_PROMPT
 from .screenplay import Dialogue, GlobalStoryState, Screenplay
 from .security import DATA_FENCE_NOTICE
 
@@ -212,7 +213,10 @@ def _check_arc_drift_with_ai(
 ) -> list[ContinuityFinding]:
     llm = LLMClient(client=client, usage_label="AI continuity check")
     try:
-        content = llm.complete_json(_build_ai_prompt(screenplay, global_state))
+        content = llm.complete_json(
+            _build_ai_prompt(screenplay, global_state),
+            prompt_id=CONTINUITY_REVIEW_PROMPT,
+        )
         data = loads_json_object(content)
     except ValueError:
         # 复核失败不影响本地规则的结论。

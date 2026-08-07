@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .llm_client import LLMClient, _default_env_path, _load_env_file, loads_json_object
 from .metrics import metrics
+from .prompt_catalog import SCENE_REVIEW_PROMPT
 from .scene_rewrite import OPERATION_PROMPTS, rewrite_scene
 from .screenplay import Dialogue, Scene, Screenplay
 from .security import DATA_FENCE_NOTICE
@@ -193,7 +194,7 @@ class AISceneReviewer:
         self, screenplay: Screenplay, scene: Scene, threshold: float
     ) -> SceneReviewResult:
         prompt = self._build_prompt(screenplay, scene, threshold)
-        content = self.llm_client.complete_json(prompt)
+        content = self.llm_client.complete_json(prompt, prompt_id=SCENE_REVIEW_PROMPT)
         try:
             payload = loads_json_object(content)
         except ValueError as exc:

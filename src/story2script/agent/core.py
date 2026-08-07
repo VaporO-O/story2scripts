@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from ..llm_client import LLMClient, loads_json_object
 from ..metrics import metrics
+from ..prompt_catalog import AGENT_PLANNER_PROMPT
 from ..scene_review import ReviewReport, _review_threshold, review_scenes_report
 from ..screenplay import Screenplay
 from ..security import DATA_FENCE_NOTICE
@@ -266,7 +267,7 @@ class AdaptationAgent:
         scratchpad: Scratchpad,
     ) -> tuple[str, AgentAction | None, str]:
         prompt = self._build_planner_prompt(ctx, goal, toolbox, scratchpad)
-        content = self._llm.complete_json(prompt)
+        content = self._llm.complete_json(prompt, prompt_id=AGENT_PLANNER_PROMPT)
         self._llm_calls += 1
         try:
             data = loads_json_object(content)
