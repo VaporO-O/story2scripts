@@ -1,0 +1,132 @@
+{
+  "version": "story2script-eval-v1",
+  "split": "holdout",
+  "description": "不用于规则和 Prompt 日常调试的原创合成保留集。",
+  "cases": [
+    {
+      "id": "library_clock",
+      "title": "停摆的钟",
+      "genre": "悬疑",
+      "adaptation_type": "影视剧",
+      "novel_text": "第一章 阅览室\n在图书馆，赵衡说：“墙上的钟慢了十三分钟。”突然，沈知说：“失踪记录也少了十三页。”\n第二章 钟楼\n在钟楼，沈知说：“齿轮里夹着一张照片。”然而，赵衡说：“照片上的日期不可能是真的。”\n第三章 地库\n在地下室，赵衡说：“电源线通向旧档案柜。”这时，沈知说：“有人正在楼上重新上弦。”",
+      "expected": {
+        "chapter_titles": ["第一章 阅览室", "第二章 钟楼", "第三章 地库"],
+        "character_names": ["赵衡", "沈知"],
+        "dialogue_attributions": [
+          {"quote": "墙上的钟慢了十三分钟", "speaker": "赵衡"},
+          {"quote": "失踪记录也少了十三页", "speaker": "沈知"},
+          {"quote": "齿轮里夹着一张照片", "speaker": "沈知"},
+          {"quote": "照片上的日期不可能是真的", "speaker": "赵衡"},
+          {"quote": "电源线通向旧档案柜", "speaker": "赵衡"},
+          {"quote": "有人正在楼上重新上弦", "speaker": "沈知"}
+        ],
+        "scene_boundaries": {
+          "第一章 阅览室": [1],
+          "第二章 钟楼": [1],
+          "第三章 地库": [1]
+        },
+        "continuity_faults": [{"kind": "character_absent", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "seed_vault",
+      "title": "种子库",
+      "genre": "科幻",
+      "adaptation_type": "短剧",
+      "novel_text": "第一章 温室\n在温室，孙禾说：“这批幼苗不属于我们的编号。”突然，吴越说：“地下库昨夜自动开启。”\n第二章 冷库\n在冷库，吴越说：“最后一盒种子已经解冻。”然而，孙禾说：“我拒绝销毁样本。”\n第三章 屋顶\n在楼顶，孙禾说：“太阳出来前必须完成播种。”这时，吴越说：“无人机已经找到安全土壤。”",
+      "expected": {
+        "chapter_titles": ["第一章 温室", "第二章 冷库", "第三章 屋顶"],
+        "character_names": ["孙禾", "吴越"],
+        "dialogue_attributions": [
+          {"quote": "这批幼苗不属于我们的编号", "speaker": "孙禾"},
+          {"quote": "地下库昨夜自动开启", "speaker": "吴越"},
+          {"quote": "最后一盒种子已经解冻", "speaker": "吴越"},
+          {"quote": "我拒绝销毁样本", "speaker": "孙禾"},
+          {"quote": "太阳出来前必须完成播种", "speaker": "孙禾"},
+          {"quote": "无人机已经找到安全土壤", "speaker": "吴越"}
+        ],
+        "scene_boundaries": {
+          "第一章 温室": [1],
+          "第二章 冷库": [1],
+          "第三章 屋顶": [1]
+        },
+        "continuity_faults": [{"kind": "speaker_absent", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "bridge_camera",
+      "title": "桥下盲区",
+      "genre": "犯罪",
+      "adaptation_type": "分镜脚本",
+      "novel_text": "第一章 监控室\n在监控室，罗川说：“桥下摄像头重复了同一帧。”突然，白露说：“有人替换了昨夜的硬盘。”\n第二章 大桥\n在石桥，白露说：“护栏上没有刹车痕迹。”然而，罗川说：“司机不是从这里消失的。”\n第三章 修理厂\n在修理厂，罗川说：“车牌藏在升降台下面。”这时，白露说：“老板已经从后门离开。”",
+      "expected": {
+        "chapter_titles": ["第一章 监控室", "第二章 大桥", "第三章 修理厂"],
+        "character_names": ["罗川", "白露"],
+        "dialogue_attributions": [
+          {"quote": "桥下摄像头重复了同一帧", "speaker": "罗川"},
+          {"quote": "有人替换了昨夜的硬盘", "speaker": "白露"},
+          {"quote": "护栏上没有刹车痕迹", "speaker": "白露"},
+          {"quote": "司机不是从这里消失的", "speaker": "罗川"},
+          {"quote": "车牌藏在升降台下面", "speaker": "罗川"},
+          {"quote": "老板已经从后门离开", "speaker": "白露"}
+        ],
+        "scene_boundaries": {
+          "第一章 监控室": [1],
+          "第二章 大桥": [1],
+          "第三章 修理厂": [1]
+        },
+        "continuity_faults": [{"kind": "unknown_location", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "school_broadcast",
+      "title": "广播室留言",
+      "genre": "青春",
+      "adaptation_type": "广播剧",
+      "novel_text": "第一章 教室\n在学校教室，郭启说：“毕业留言少了最后一句。”突然，韩秋说：“广播室还留着原始录音。”\n第二章 广播室\n在广播室，韩秋说：“录音里有操场的钟声。”然而，郭启说：“那天学校根本没有上课。”\n第三章 操场\n在操场，郭启说：“留言是在停电后录下的。”这时，韩秋说：“保安室保存着备用电池。”",
+      "expected": {
+        "chapter_titles": ["第一章 教室", "第二章 广播室", "第三章 操场"],
+        "character_names": ["郭启", "韩秋"],
+        "dialogue_attributions": [
+          {"quote": "毕业留言少了最后一句", "speaker": "郭启"},
+          {"quote": "广播室还留着原始录音", "speaker": "韩秋"},
+          {"quote": "录音里有操场的钟声", "speaker": "韩秋"},
+          {"quote": "那天学校根本没有上课", "speaker": "郭启"},
+          {"quote": "留言是在停电后录下的", "speaker": "郭启"},
+          {"quote": "保安室保存着备用电池", "speaker": "韩秋"}
+        ],
+        "scene_boundaries": {
+          "第一章 教室": [1],
+          "第二章 广播室": [1],
+          "第三章 操场": [1]
+        },
+        "continuity_faults": [{"kind": "character_absent", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "mountain_weather",
+      "title": "失真的气象图",
+      "genre": "冒险",
+      "adaptation_type": "舞台剧",
+      "novel_text": "第一章 气象站\n在气象站，高岚说：“山谷气压正在异常下降。”突然，孟舟说：“雷达图被覆盖了两小时。”\n第二章 山路\n在山路，高岚说：“路标指向已经封闭的隧道。”然而，孟舟说：“救援队只能从这里上山。”\n第三章 营地\n在营地，孟舟说：“旧地图标着另一条河谷。”这时，高岚说：“风向改变前我们还有半小时。”",
+      "expected": {
+        "chapter_titles": ["第一章 气象站", "第二章 山路", "第三章 营地"],
+        "character_names": ["高岚", "孟舟"],
+        "dialogue_attributions": [
+          {"quote": "山谷气压正在异常下降", "speaker": "高岚"},
+          {"quote": "雷达图被覆盖了两小时", "speaker": "孟舟"},
+          {"quote": "路标指向已经封闭的隧道", "speaker": "高岚"},
+          {"quote": "救援队只能从这里上山", "speaker": "孟舟"},
+          {"quote": "旧地图标着另一条河谷", "speaker": "孟舟"},
+          {"quote": "风向改变前我们还有半小时", "speaker": "高岚"}
+        ],
+        "scene_boundaries": {
+          "第一章 气象站": [1],
+          "第二章 山路": [1],
+          "第三章 营地": [1]
+        },
+        "continuity_faults": [{"kind": "speaker_absent", "scene_index": 0}]
+      }
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "version": "story2script-eval-v1",
+  "split": "dev",
+  "description": "原创合成的中文三章短篇，用于确定性评测开发与调试。",
+  "cases": [
+    {
+      "id": "night_station_letter",
+      "title": "夜站来信",
+      "genre": "悬疑",
+      "adaptation_type": "影视剧",
+      "novel_text": "第一章 夜站\n在旧车站，林夏说：“我会等到末班车。”突然，周宁说：“你看见那封信了吗？”\n第二章 旧信\n在档案室，周宁说：“信里写着仓库地址。”然而，林夏说：“钥匙不能交给你。”\n第三章 清晨\n在河边，林夏说：“盒子昨夜被人换过。”这时，周宁说：“真相还在车站。”",
+      "expected": {
+        "chapter_titles": ["第一章 夜站", "第二章 旧信", "第三章 清晨"],
+        "character_names": ["林夏", "周宁"],
+        "dialogue_attributions": [
+          {"quote": "我会等到末班车", "speaker": "林夏"},
+          {"quote": "你看见那封信了吗", "speaker": "周宁"},
+          {"quote": "信里写着仓库地址", "speaker": "周宁"},
+          {"quote": "钥匙不能交给你", "speaker": "林夏"},
+          {"quote": "盒子昨夜被人换过", "speaker": "林夏"},
+          {"quote": "真相还在车站", "speaker": "周宁"}
+        ],
+        "scene_boundaries": {
+          "第一章 夜站": [1],
+          "第二章 旧信": [1],
+          "第三章 清晨": [1]
+        },
+        "continuity_faults": [{"kind": "speaker_absent", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "missing_medical_record",
+      "title": "缺页病历",
+      "genre": "悬疑",
+      "adaptation_type": "短剧",
+      "novel_text": "第一章 病房\n在医院病房，陈默说：“病历少了一页。”这时，许安说：“昨晚有人进来过。”\n第二章 档案\n在档案室，许安说：“监控在午夜中断。”突然，陈默说：“地上有一张车票。”\n第三章 码头\n在码头，陈默说：“那艘船没有离港。”然而，许安说：“我拒绝在记录上签字。”",
+      "expected": {
+        "chapter_titles": ["第一章 病房", "第二章 档案", "第三章 码头"],
+        "character_names": ["陈默", "许安"],
+        "dialogue_attributions": [
+          {"quote": "病历少了一页", "speaker": "陈默"},
+          {"quote": "昨晚有人进来过", "speaker": "许安"},
+          {"quote": "监控在午夜中断", "speaker": "许安"},
+          {"quote": "地上有一张车票", "speaker": "陈默"},
+          {"quote": "那艘船没有离港", "speaker": "陈默"},
+          {"quote": "我拒绝在记录上签字", "speaker": "许安"}
+        ],
+        "scene_boundaries": {
+          "第一章 病房": [1],
+          "第二章 档案": [1],
+          "第三章 码头": [1]
+        },
+        "continuity_faults": [{"kind": "unknown_location", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "gallery_forgery",
+      "title": "画室赝品",
+      "genre": "剧情",
+      "adaptation_type": "舞台剧",
+      "novel_text": "第一章 画室\n在画室，苏晴说：“这幅画不是父亲留下的。”突然，顾远说：“颜料来自今年的新厂。”\n第二章 展馆\n在展览馆，顾远说：“鉴定书的日期被改过。”然而，苏晴说：“我不会取消展览。”\n第三章 仓库\n在仓库，苏晴说：“原作藏在木箱下面。”这时，顾远说：“门外有人来了。”",
+      "expected": {
+        "chapter_titles": ["第一章 画室", "第二章 展馆", "第三章 仓库"],
+        "character_names": ["苏晴", "顾远"],
+        "dialogue_attributions": [
+          {"quote": "这幅画不是父亲留下的", "speaker": "苏晴"},
+          {"quote": "颜料来自今年的新厂", "speaker": "顾远"},
+          {"quote": "鉴定书的日期被改过", "speaker": "顾远"},
+          {"quote": "我不会取消展览", "speaker": "苏晴"},
+          {"quote": "原作藏在木箱下面", "speaker": "苏晴"},
+          {"quote": "门外有人来了", "speaker": "顾远"}
+        ],
+        "scene_boundaries": {
+          "第一章 画室": [1],
+          "第二章 展馆": [1],
+          "第三章 仓库": [1]
+        },
+        "continuity_faults": [{"kind": "character_absent", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "radio_blackout",
+      "title": "停播之前",
+      "genre": "职场",
+      "adaptation_type": "广播剧",
+      "novel_text": "第一章 直播间\n在广播站，方舟说：“今晚的节目不能停。”突然，叶青说：“主控台收到匿名指令。”\n第二章 机房\n在机房，叶青说：“备用线路被人为切断。”然而，方舟说：“我会继续直播。”\n第三章 天台\n在楼顶，方舟说：“发射器还能工作十分钟。”这时，叶青说：“听众已经把录音传开了。”",
+      "expected": {
+        "chapter_titles": ["第一章 直播间", "第二章 机房", "第三章 天台"],
+        "character_names": ["方舟", "叶青"],
+        "dialogue_attributions": [
+          {"quote": "今晚的节目不能停", "speaker": "方舟"},
+          {"quote": "主控台收到匿名指令", "speaker": "叶青"},
+          {"quote": "备用线路被人为切断", "speaker": "叶青"},
+          {"quote": "我会继续直播", "speaker": "方舟"},
+          {"quote": "发射器还能工作十分钟", "speaker": "方舟"},
+          {"quote": "听众已经把录音传开了", "speaker": "叶青"}
+        ],
+        "scene_boundaries": {
+          "第一章 直播间": [1],
+          "第二章 机房": [1],
+          "第三章 天台": [1]
+        },
+        "continuity_faults": [{"kind": "speaker_absent", "scene_index": 0}]
+      }
+    },
+    {
+      "id": "floodgate_signal",
+      "title": "闸门信号",
+      "genre": "灾难",
+      "adaptation_type": "分镜脚本",
+      "novel_text": "第一章 控制室\n在水库控制室，唐宁说：“水位还在上升。”突然，江澜说：“上游传感器全部失联。”\n第二章 大坝\n在大坝，江澜说：“三号闸门卡住了。”然而，唐宁说：“手动通道仍然可用。”\n第三章 河岸\n在河边，唐宁说：“警报已经传到下游。”这时，江澜说：“最后一组居民正在撤离。”",
+      "expected": {
+        "chapter_titles": ["第一章 控制室", "第二章 大坝", "第三章 河岸"],
+        "character_names": ["唐宁", "江澜"],
+        "dialogue_attributions": [
+          {"quote": "水位还在上升", "speaker": "唐宁"},
+          {"quote": "上游传感器全部失联", "speaker": "江澜"},
+          {"quote": "三号闸门卡住了", "speaker": "江澜"},
+          {"quote": "手动通道仍然可用", "speaker": "唐宁"},
+          {"quote": "警报已经传到下游", "speaker": "唐宁"},
+          {"quote": "最后一组居民正在撤离", "speaker": "江澜"}
+        ],
+        "scene_boundaries": {
+          "第一章 控制室": [1],
+          "第二章 大坝": [1],
+          "第三章 河岸": [1]
+        },
+        "continuity_faults": [{"kind": "unknown_location", "scene_index": 0}]
+      }
+    }
+  ]
+}

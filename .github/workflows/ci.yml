@@ -16,3 +16,29 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check . --output-format=github
       - run: pytest
+
+  deterministic-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Run offline regression evaluation
+        run: >-
+          story2script-eval run
+          --dataset evals/datasets/v1/dev.json
+          --dataset evals/datasets/v1/holdout.json
+          --baseline evals/baselines/demo-v1.json
+          --output-dir evals/reports
+          --report-prefix demo-v1
+          --fail-on-regression
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story2script-demo-eval
+          path: evals/reports/demo-v1.*
+          if-no-files-found: error
