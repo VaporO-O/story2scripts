@@ -1,0 +1,104 @@
+{
+  "version": "demo-v1",
+  "dataset_versions": [
+    "story2script-eval-v1"
+  ],
+  "mode": "demo",
+  "gates": [
+    {
+      "name": "review threshold",
+      "path": "threshold",
+      "equals": 8.9
+    },
+    {
+      "name": "single Agent step budget",
+      "path": "max_steps",
+      "equals": 12
+    },
+    {
+      "name": "multi Agent round budget",
+      "path": "max_rounds",
+      "equals": 6
+    },
+    {
+      "name": "all v1 cases executed",
+      "path": "summary.case_count",
+      "minimum": 10
+    },
+    {
+      "name": "scene boundary F1",
+      "path": "summary.source.boundary_f1",
+      "minimum": 1.0
+    },
+    {
+      "name": "continuity probe F1",
+      "path": "summary.source.continuity_f1",
+      "minimum": 1.0
+    },
+    {
+      "name": "fixed pipeline schema validity",
+      "path": "summary.variants.fixed_pipeline.schema_valid_rate",
+      "minimum": 1.0
+    },
+    {
+      "name": "fixed pipeline character F1",
+      "path": "summary.variants.fixed_pipeline.character_f1",
+      "minimum": 1.0
+    },
+    {
+      "name": "fixed pipeline dialogue attribution",
+      "path": "summary.variants.fixed_pipeline.dialogue_accuracy",
+      "minimum": 1.0
+    },
+    {
+      "name": "single Agent goal achievement",
+      "path": "summary.variants.single_agent.goal_achieved_rate",
+      "minimum": 1.0
+    },
+    {
+      "name": "single Agent score improvement",
+      "path": "summary.variants.single_agent.avg_score_delta",
+      "minimum": 0.4
+    },
+    {
+      "name": "single Agent scene pass rate",
+      "path": "summary.variants.single_agent.scene_pass_rate",
+      "minimum": 1.0
+    },
+    {
+      "name": "single Agent legal tool use",
+      "path": "summary.variants.single_agent.tool_legal_rate",
+      "minimum": 1.0
+    },
+    {
+      "name": "single Agent repeated actions",
+      "path": "summary.variants.single_agent.repeated_action_rate",
+      "maximum": 0.0
+    },
+    {
+      "name": "multi Agent goal achievement",
+      "path": "summary.variants.multi_agent.goal_achieved_rate",
+      "minimum": 1.0
+    },
+    {
+      "name": "multi Agent score improvement",
+      "path": "summary.variants.multi_agent.avg_score_delta",
+      "minimum": 0.4
+    },
+    {
+      "name": "multi Agent scene pass rate",
+      "path": "summary.variants.multi_agent.scene_pass_rate",
+      "minimum": 1.0
+    },
+    {
+      "name": "multi Agent legal tool use",
+      "path": "summary.variants.multi_agent.tool_legal_rate",
+      "minimum": 1.0
+    },
+    {
+      "name": "multi Agent repeated actions",
+      "path": "summary.variants.multi_agent.repeated_action_rate",
+      "maximum": 0.0
+    }
+  ]
+}

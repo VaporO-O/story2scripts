@@ -504,6 +504,25 @@ characters: []
 scenes: []
 ```
 
+## 离线评测
+
+项目内置了版权安全的合成评测集，用于复现固定管线、单 Agent 和多 Agent 在同一批输入上的结果。`dev` 与 `holdout` 共 10 条三章样本，覆盖场景边界、人物、对白归属、Schema、一致性故障探针和 Agent 工具行为。
+
+```bash
+story2script-eval run \
+  --dataset evals/datasets/v1/dev.json \
+  --dataset evals/datasets/v1/holdout.json \
+  --baseline evals/baselines/demo-v1.json \
+  --report-prefix demo-v1 \
+  --fail-on-regression
+```
+
+也可以使用 `python -m story2script.evaluation run` 代替 `story2script-eval run`。命令会在 `evals/reports/` 生成 JSON 与 Markdown 报告；报告不提交到 Git，CI 会将它们作为 artifact 保留。
+
+`demo` 模式完全离线、结果可复现，适合 CI 回归门禁，但只验证本地规则和编排行为，不能代表真实模型的生成质量。`ai` 模式用于真实模型评测，应单独记录模型、Prompt 版本、Token 和成本，不与 Demo 分数直接比较。
+
+当前 Demo 基线下，单 Agent 与多 Agent 都能把目标达成率从固定管线的 `0%` 提升到 `100%`，平均分均从 `8.641` 提升到 `9.065`。多 Agent 没有带来额外质量提升，本机耗时约为单 Agent 的 `2.02x`；耗时受机器环境影响，因此不作为 CI 门禁。
+
 ## 测试
 
 后续 PR 的测试方式统一写成：

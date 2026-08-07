@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 story2script-mcp = "story2script.mcp_server:main"
+story2script-eval = "story2script.evaluation.__main__:main"
 
 [project.optional-dependencies]
 dev = [
