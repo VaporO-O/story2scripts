@@ -1,0 +1,4 @@
+interface:
+  display_name: "Story2Script 改编工作流"
+  short_description: "用 Story2Script MCP 编排小说导入、改编、审校、修正与导出"
+  default_prompt: "使用 $adapt-with-story2script 把这部小说改编、审校并导出为最终剧本 YAML。"
