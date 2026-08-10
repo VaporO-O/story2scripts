@@ -24,6 +24,35 @@ python -m uvicorn story2script.main:app --reload
 ```bash
 python -m uvicorn story2script.main:app --reload --port 8001
 ```
+
+## Docker 单实例部署
+
+要求 Docker Desktop 或 Docker Engine 已启动。本方式不依赖宿主机的 Python 环境：
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+容器健康后打开 <http://127.0.0.1:8000>。默认只监听宿主机回环地址；端口冲突时可在项目根目录的 `.env` 中设置 `STORY2SCRIPT_PORT=8001`。对外提供服务时，建议保持回环监听并由同机反向代理接入 HTTPS 和访问控制；确需直接监听所有网卡时再设置 `STORY2SCRIPT_BIND=0.0.0.0`。
+
+容器固定使用单个 Uvicorn worker，保证进程内任务队列与 SQLite 状态一致。任务历史、供应商配置、当前 AI 配置、LLM 缓存、Agent 会话、运行指标和文件工作区统一保存在命名卷 `story2script-data` 中。可在工作台内配置 AI 供应商，密钥不会写入镜像。
+
+常用运维命令：
+
+```bash
+# 查看日志
+docker compose logs -f story2script
+
+# 更新代码后重建并滚动替换容器，数据卷会保留
+docker compose up -d --build
+
+# 停止并移除容器，数据卷仍会保留
+docker compose down
+```
+
+不要使用 `docker compose down -v`，除非确认要连同任务历史、供应商密钥和全部运行数据一起删除。备份时可备份 Docker 命名卷；恢复后重新启动 Compose 即可。单实例模式不提供多副本扩缩容，若以后部署多个实例，需要先把进程内队列和 SQLite 迁移到共享任务系统与数据库。
+
 ## Demo演示
 
 - 健康检查：<https://www.bilibili.com/video/BV1ZyE86bEAY/>
