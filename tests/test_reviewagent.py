@@ -50,7 +50,20 @@ def test_review_request_rejects_duplicate_tools() -> None:
         ReviewRequest(repo_path=".", base_ref="main", tools=["diff", "diff"])
 
 
-@pytest.mark.parametrize("target", ["../outside.py", "-k", "C:/outside.py", "bad\x00.py"])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "../outside.py",
+        r"..\outside.py",
+        "-k",
+        "/outside.py",
+        r"\outside.py",
+        "C:/outside.py",
+        "C:outside.py",
+        r"\\server\share\outside.py",
+        "bad\x00.py",
+    ],
+)
 def test_review_request_rejects_unsafe_pytest_targets(target: str) -> None:
     with pytest.raises(ValidationError, match="pytest targets"):
         ReviewRequest(repo_path=".", base_ref="main", pytest_targets=[target])

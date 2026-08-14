@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -40,13 +40,18 @@ class ReviewRequest(ReviewModel):
             raise ValueError("Review tools must not contain duplicates.")
         for target in self.pytest_targets:
             path_text = target.split("::", 1)[0]
-            path = Path(path_text)
+            posix_path = PurePosixPath(path_text)
+            windows_path = PureWindowsPath(path_text)
             if (
                 not path_text
                 or target.startswith("-")
                 or "\x00" in target
-                or path.is_absolute()
-                or ".." in path.parts
+                or posix_path.is_absolute()
+                or windows_path.is_absolute()
+                or bool(windows_path.drive)
+                or bool(windows_path.root)
+                or ".." in posix_path.parts
+                or ".." in windows_path.parts
             ):
                 raise ValueError("pytest targets must be safe paths relative to the repository.")
         return self
