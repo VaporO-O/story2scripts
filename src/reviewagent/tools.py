@@ -301,7 +301,10 @@ class SubprocessToolRunner:
         args = [self.python_executable, "-m", "bandit", "-f", "json", "-q", *files]
         result = self._execute(args, Path(request.repo_path), request.timeout_seconds)
         findings = self._parse_bandit(result.stdout, Path(request.repo_path))
-        if result.exit_code not in {0, 1} or (result.exit_code == 1 and not findings):
+        valid_output = self._valid_bandit_output(result.stdout)
+        if result.exit_code not in {0, 1} or (
+            result.exit_code == 1 and not findings and not valid_output
+        ):
             return self._failed_result("bandit", result, request.max_output_chars)
         return ToolResult(
             tool="bandit",
@@ -412,15 +415,21 @@ class SubprocessToolRunner:
         if not isinstance(rows, list):
             return []
 
-        findings: list[ReviewFinding] = []
-        for row in rows[:MAX_FINDINGS_PER_TOOL]:
+        actionable: list[tuple[dict, str, str]] = []
+        for row in rows:
             if not isinstance(row, dict):
                 continue
+            rule_id = str(row.get("test_id") or "BANDIT")
+            filename = self._relative_file(str(row.get("filename") or ""), repo)
+            if rule_id == "B101" and Path(filename).parts[:1] == ("tests",):
+                continue
+            actionable.append((row, rule_id, filename))
+
+        findings: list[ReviewFinding] = []
+        for row, rule_id, filename in actionable[:MAX_FINDINGS_PER_TOOL]:
             raw_severity = str(row.get("issue_severity") or "LOW").lower()
             severity: Severity = raw_severity if raw_severity in {"high", "medium", "low"} else "low"  # type: ignore[assignment]
-            rule_id = str(row.get("test_id") or "BANDIT")
             message = str(row.get("issue_text") or "Bandit reported a security issue.")
-            filename = self._relative_file(str(row.get("filename") or ""), repo)
             line = int(row.get("line_number") or 0)
             findings.append(
                 make_finding(
@@ -434,9 +443,17 @@ class SubprocessToolRunner:
                     evidence=str(row.get("code") or ""),
                 )
             )
-        if len(rows) > MAX_FINDINGS_PER_TOOL:
-            findings.append(self._truncation_finding("bandit", len(rows)))
+        if len(actionable) > MAX_FINDINGS_PER_TOOL:
+            findings.append(self._truncation_finding("bandit", len(actionable)))
         return findings
+
+    @staticmethod
+    def _valid_bandit_output(output: str) -> bool:
+        try:
+            payload = json.loads(output or "{}")
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, dict) and isinstance(payload.get("results"), list)
 
     @staticmethod
     def _truncation_finding(tool: ToolName, total: int) -> ReviewFinding:

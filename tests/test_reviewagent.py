@@ -1,5 +1,6 @@
 import json
-import subprocess
+# The test creates a local repository and invokes fixed Git arguments only.
+import subprocess  # nosec B404
 import threading
 from pathlib import Path
 
@@ -143,6 +144,34 @@ def test_tool_parsers_bound_checkpoint_finding_count(tmp_path: Path) -> None:
     assert findings[-1].rule_id == "TOOL_FINDINGS_TRUNCATED"
 
 
+def test_bandit_parser_ignores_assert_rule_only_in_tests(tmp_path: Path) -> None:
+    runner = SubprocessToolRunner()
+    payload = json.dumps(
+        {
+            "results": [
+                {
+                    "test_id": "B101",
+                    "issue_severity": "LOW",
+                    "issue_text": "assert used",
+                    "filename": str(tmp_path / "tests" / "test_sample.py"),
+                    "line_number": 4,
+                },
+                {
+                    "test_id": "B101",
+                    "issue_severity": "LOW",
+                    "issue_text": "assert used",
+                    "filename": str(tmp_path / "src" / "sample.py"),
+                    "line_number": 4,
+                },
+            ]
+        }
+    )
+
+    findings = runner._parse_bandit(payload, tmp_path)
+
+    assert [(row.rule_id, row.file) for row in findings] == [("B101", "src/sample.py")]
+
+
 def test_send_fanout_and_sqlite_resume_across_graph_instances(tmp_path: Path) -> None:
     tools = ["diff", "ruff", "pytest", "bandit"]
     runner = BarrierToolRunner(len(tools))
@@ -208,7 +237,8 @@ def test_real_git_diff_and_ruff_are_limited_to_changed_python(tmp_path: Path) ->
     repo.mkdir()
 
     def git(*args: str) -> str:
-        result = subprocess.run(  # nosec B603 - fixed test-only git argv
+        # Fixed test-only Git argv; no user-controlled command or shell.
+        result = subprocess.run(  # nosec B603 B607
             ["git", *args],
             cwd=repo,
             capture_output=True,
