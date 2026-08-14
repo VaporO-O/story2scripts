@@ -647,6 +647,21 @@ story2script-eval score-pairwise \
   --output evals/reports/ai-comparison-preference.json
 ```
 
+## Code Review Agent
+
+项目另提供独立的 LangGraph Code Review Agent：并行执行 Git diff、Ruff、pytest 和
+Bandit，汇总结构化 finding 后通过 `interrupt()` 等待人工批准。demo 模式完全离线，
+SQLite checkpoint 支持关闭进程后继续审批。
+
+```bash
+story2script-review run --repo . --base origin/main --head HEAD --mode demo
+story2script-review resume --thread-id <thread-id> --approve
+```
+
+历史 PR 评测当前得到 `100%` 召回率和 `0%` 误报率（2 个真实历史 case）。架构、CLI、
+SQLite 选择、评测方法与边界见 [`docs/REVIEW_AGENT.md`](docs/REVIEW_AGENT.md) 和
+[`docs/REVIEW_AGENT_EVALUATION_REPORT.md`](docs/REVIEW_AGENT_EVALUATION_REPORT.md)。
+
 ## 测试
 
 后续 PR 的测试方式统一写成：

@@ -21,9 +21,20 @@ dependencies = [
 [project.scripts]
 story2script-mcp = "story2script.mcp_server:main"
 story2script-eval = "story2script.evaluation.__main__:main"
+story2script-review = "reviewagent.__main__:main"
 
 [project.optional-dependencies]
 dev = [
+  "bandit>=1.8,<2.0",
+  "langgraph>=1.0,<2.0",
+  "langgraph-checkpoint-sqlite>=3.0,<4.0",
+  "pytest>=8.3,<9.0",
+  "ruff>=0.8,<1.0",
+]
+review = [
+  "bandit>=1.8,<2.0",
+  "langgraph>=1.0,<2.0",
+  "langgraph-checkpoint-sqlite>=3.0,<4.0",
   "pytest>=8.3,<9.0",
   "ruff>=0.8,<1.0",
 ]
