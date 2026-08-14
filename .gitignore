@@ -14,5 +14,6 @@ __pycache__/
 !.env.example
 show/
 study1xi.pytest-tmp/
+docs/OPTIMIZATION_ROADMAP*.md
 evals/reports/*
 !evals/reports/.gitkeep
