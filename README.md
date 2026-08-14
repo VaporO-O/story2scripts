@@ -377,6 +377,11 @@ python -m story2script.mcp_server --env-file /path/to/repo/.env   # 手动启动
 claude mcp add story2script -- python -m story2script.mcp_server --env-file D:/study/1/xi/.env
 ```
 
+仓库同时提供可版本化的改编工作流 Skill：`.claude/skills/adapt-with-story2script/`。
+在 Claude Code 中使用 `/adapt-with-story2script`，可按固定流程完成小说导入、章节预检、
+前文知识库、剧本转换、审校、单 Agent / 多 Agent 修正、复评与 YAML/报告导出；Skill 会
+保留 `novel_id`、`screenplay_id` 和会话 ID，并在 MCP 服务重启后引导恢复，而不是重新盲跑。
+
 注册到 Claude Desktop（`claude_desktop_config.json`）：
 
 ```json
