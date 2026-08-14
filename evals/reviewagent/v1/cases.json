@@ -1,0 +1,28 @@
+{
+  "version": "reviewagent-eval-v1",
+  "description": "PR #66 real CI collection defect and its clean follow-up fix.",
+  "cases": [
+    {
+      "id": "pr66-cross-test-import-defect",
+      "title": "pytest console run fails on package-style cross-test import",
+      "base_ref": "3b4645c^",
+      "head_ref": "3b4645c",
+      "tools": ["pytest"],
+      "pytest_targets": ["tests/test_security.py::test_converter_prompt_contains_data_fence"],
+      "pytest_collect_only": false,
+      "pytest_import_mode": "append",
+      "expected_rules": ["PYTEST_FAILURE"]
+    },
+    {
+      "id": "pr66-cross-test-import-fixed",
+      "title": "top-level cross-test import passes pytest collection",
+      "base_ref": "3b4645c",
+      "head_ref": "f6d46c6",
+      "tools": ["pytest"],
+      "pytest_targets": ["tests/test_security.py::test_converter_prompt_contains_data_fence"],
+      "pytest_collect_only": false,
+      "pytest_import_mode": "append",
+      "expected_rules": []
+    }
+  ]
+}

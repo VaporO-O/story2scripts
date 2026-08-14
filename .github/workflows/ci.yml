@@ -42,3 +42,31 @@ jobs:
           name: story2script-demo-eval
           path: evals/reports/demo-v1.*
           if-no-files-found: error
+
+  review-agent-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Run historical code review evaluation
+        run: >-
+          story2script-review eval
+          --dataset evals/reviewagent/v1/cases.json
+          --repo .
+          --output-dir evals/reports
+          --report-prefix reviewagent-v1
+          --min-recall 1.0
+          --max-false-positive-rate 0.0
+      - name: Upload review evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story2script-review-eval
+          path: evals/reports/reviewagent-v1.*
+          if-no-files-found: error
