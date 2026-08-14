@@ -548,6 +548,36 @@ story2script-eval run \
 
 长时间评测可通过 `--checkpoint` 在每个 case 完成后原子保存进度。运行被中断后，使用完全相同的参数并追加 `--resume` 即可从最后一个已完成 case 继续；数据集、模型、Prompt 指纹、采样次数或评测参数不一致时会拒绝恢复，避免把不同实验的数据混在一起。Checkpoint 包含评测源文本与候选剧本，仅应保存在受控环境中，`evals/reports/` 默认不会提交到 Git。
 
+真实模型保留集可按 case 启动多个独立进程。每个进程必须使用唯一的 checkpoint 和
+report prefix，并保持模型、Prompt、预算和并发配置完全一致；分片运行时不要生成盲评文件：
+
+```bash
+story2script-eval run \
+  --dataset evals/datasets/v1/holdout.json \
+  --mode ai --repeats 3 --case library_clock \
+  --checkpoint evals/reports/holdout-library_clock.checkpoint.json \
+  --report-prefix holdout-library_clock
+```
+
+全部分片完成后统一合并。合并器会校验 Git 提交、数据指纹、模型与 Prompt 配置，拒绝
+缺失、重复或配置不一致的 case；汇总报告和盲评材料只在这一步生成：
+
+```bash
+story2script-eval merge-checkpoints \
+  --dataset evals/datasets/v1/holdout.json \
+  --checkpoint evals/reports/holdout-library_clock.checkpoint.json \
+  --checkpoint evals/reports/holdout-seed_vault.checkpoint.json \
+  --checkpoint evals/reports/holdout-bridge_camera.checkpoint.json \
+  --checkpoint evals/reports/holdout-school_broadcast.checkpoint.json \
+  --checkpoint evals/reports/holdout-mountain_weather.checkpoint.json \
+  --report-prefix ai-holdout-v1 \
+  --write-blind-review
+```
+
+并行报告中的 Token、成本与质量指标仍可直接汇总；延迟表示批量并发负载下的耗时，不能与
+串行评测的延迟直接比较。建议从较低的进程数和 `AI_MAX_CONCURRENCY` 开始，确认没有 429
+或网关超时后再提高并发。
+
 2026-08-08 使用 `gpt-5.6-sol`、Responses API、`high` 推理配置在 `dev` 集完成了 5 个 case × 3 次重复采样，LLM 缓存关闭。未提供价格配置，因此只统计 Token：
 
 | 方案 | 工作流完成率 | 目标达成率 | 最终分（95% CI） | p50 / p95 延迟 | 总 Tokens |

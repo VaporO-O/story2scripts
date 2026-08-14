@@ -26,6 +26,9 @@ def render_markdown(report: EvalReport) -> str:
         f"- 供应商 / 协议：`{report.provider or '-'}` / `{report.wire_api or '-'}`",
         f"- 温度 / 推理配置：`{report.temperature}` / `{report.reasoning_effort or '-'}`",
         f"- 重复次数 / LLM 缓存：`{report.repeats}` / `{'on' if report.cache_enabled else 'off'}`",
+        "- 执行策略 / 进程数 / 进程内并发："
+        f"`{report.execution.strategy}` / `{report.execution.process_count}` / "
+        f"`{report.execution.max_concurrency_per_process}`",
         f"- 质量阈值：`{report.threshold}`",
         "",
         "## Source Analysis",

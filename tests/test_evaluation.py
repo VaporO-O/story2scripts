@@ -9,6 +9,7 @@ from story2script.evaluation import (
     evaluate_datasets,
     load_baseline,
     load_dataset,
+    merge_checkpoints,
     score_blind_reviews,
     write_blind_review_files,
 )
@@ -84,6 +85,14 @@ def _single_case_dataset(tmp_path: Path) -> Path:
     payload = json.loads(DEV_DATASET.read_text(encoding="utf-8"))
     payload["cases"] = payload["cases"][:1]
     path = tmp_path / "single-case.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _two_case_dataset(tmp_path: Path) -> Path:
+    payload = json.loads(DEV_DATASET.read_text(encoding="utf-8"))
+    payload["cases"] = payload["cases"][:2]
+    path = tmp_path / "two-case.json"
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -202,6 +211,54 @@ def test_checkpoint_rejects_mismatched_run_config(tmp_path: Path) -> None:
         )
 
 
+def test_case_shard_checkpoints_merge_into_complete_report(tmp_path: Path) -> None:
+    dataset = _two_case_dataset(tmp_path)
+    case_ids = [case.id for case in load_dataset(dataset).cases]
+    checkpoints = [tmp_path / f"{case_id}.checkpoint.json" for case_id in case_ids]
+
+    for case_id, checkpoint in zip(case_ids, checkpoints, strict=True):
+        evaluate_datasets(
+            [dataset],
+            variants=("fixed_pipeline",),
+            repeats=2,
+            case_ids={case_id},
+            checkpoint_path=checkpoint,
+        )
+
+    merged = merge_checkpoints([dataset], checkpoints)
+
+    assert [(case.case_id, case.sample_index) for case in merged.cases] == [
+        (case_ids[0], 1),
+        (case_ids[1], 1),
+        (case_ids[0], 2),
+        (case_ids[1], 2),
+    ]
+    assert merged.summary["case_count"] == 4
+    assert merged.summary["unique_case_count"] == 2
+    assert merged.summary["repeat_count"] == 2
+    assert merged.execution.strategy == "case_shards"
+    assert merged.execution.process_count == 2
+    assert merged.execution.max_concurrency_per_process == 1
+
+    first_payload = json.loads(checkpoints[0].read_text(encoding="utf-8"))
+    assert first_payload["checkpoint_version"] == "2"
+    assert first_payload["config"]["git_commit"]
+    assert first_payload["config"]["datasets"][0]["case_fingerprint"]
+
+    with pytest.raises(ValueError, match="重复包含 case"):
+        merge_checkpoints([dataset], [checkpoints[0], checkpoints[0], checkpoints[1]])
+    with pytest.raises(ValueError, match="缺少 case"):
+        merge_checkpoints([dataset], [checkpoints[0]])
+
+    second_payload = json.loads(checkpoints[1].read_text(encoding="utf-8"))
+    second_payload["config"]["threshold"] = 8.8
+    checkpoints[1].write_text(
+        json.dumps(second_payload, ensure_ascii=False), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="公共运行配置不一致"):
+        merge_checkpoints([dataset], checkpoints)
+
+
 def test_variant_failure_is_recorded_without_losing_the_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -264,6 +321,7 @@ def test_ai_runtime_metadata_reads_provider_config_without_exposing_key(
         "wire_api": "responses",
         "temperature": None,
         "reasoning_effort": "high",
+        "max_concurrency": 4,
     }
     assert "secret" not in json.dumps(metadata)
 
