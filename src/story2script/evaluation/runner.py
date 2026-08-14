@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -32,6 +33,7 @@ from .models import (
     EvalCase,
     EvalFailure,
     EvalReport,
+    ExecutionMetadata,
     ScoreCounts,
     TokenPricing,
     VariantMetrics,
@@ -40,7 +42,7 @@ from .scoring import EvaluationDataError, score_behavior, score_output, score_so
 from .statistics import summarize_values
 
 VARIANTS = ("fixed_pipeline", "single_agent", "multi_agent")
-CHECKPOINT_VERSION = "1"
+CHECKPOINT_VERSION = "2"
 
 
 def _clone(screenplay: Screenplay) -> Screenplay:
@@ -607,6 +609,7 @@ def _runtime_metadata(mode: str) -> dict:
             "wire_api": "none",
             "temperature": None,
             "reasoning_effort": "",
+            "max_concurrency": 1,
         }
     client = LLMClient()
     base_url = client.base_url
@@ -620,6 +623,7 @@ def _runtime_metadata(mode: str) -> dict:
         "wire_api": client.wire_api,
         "temperature": effective_temperature,
         "reasoning_effort": reasoning_effort,
+        "max_concurrency": client.max_concurrency,
     }
 
 
@@ -635,6 +639,25 @@ def _git_commit() -> str:
     except (OSError, subprocess.SubprocessError):
         return ""
     return result.stdout.strip()
+
+
+def _case_fingerprint(case: EvalCase) -> str:
+    payload = json.dumps(
+        case.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _dataset_case_config(dataset, case: EvalCase) -> dict:
+    return {
+        "version": dataset.version,
+        "split": dataset.split,
+        "case_id": case.id,
+        "case_fingerprint": _case_fingerprint(case),
+    }
 
 
 def _checkpoint_case_payload(case: CaseReport) -> dict:
@@ -670,6 +693,13 @@ def _write_checkpoint(
 def _load_checkpoint(
     path: Path, expected_config: dict
 ) -> tuple[list[CaseReport], list[EvalFailure]]:
+    config, cases, failures = _read_checkpoint(path)
+    if config != expected_config:
+        raise ValueError("评测 checkpoint 配置与本次运行不一致，不能恢复。")
+    return cases, failures
+
+
+def _read_checkpoint(path: Path) -> tuple[dict, list[CaseReport], list[EvalFailure]]:
     if not path.is_file():
         raise ValueError(f"找不到评测 checkpoint：{path}")
     try:
@@ -677,17 +707,155 @@ def _load_checkpoint(
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"评测 checkpoint 无法读取：{path}") from exc
     if payload.get("checkpoint_version") != CHECKPOINT_VERSION:
-        raise ValueError("评测 checkpoint 版本不受支持。")
-    if payload.get("config") != expected_config:
-        raise ValueError("评测 checkpoint 配置与本次运行不一致，不能恢复。")
+        raise ValueError(f"评测 checkpoint 版本不受支持：{path}")
+    config = payload.get("config")
+    if not isinstance(config, dict):
+        raise ValueError(f"评测 checkpoint 缺少运行配置：{path}")
     try:
         cases = [CaseReport.model_validate(item) for item in payload.get("cases", [])]
         failures = [
             EvalFailure.model_validate(item) for item in payload.get("failures", [])
         ]
     except (TypeError, ValueError) as exc:
-        raise ValueError("评测 checkpoint 内容无效。") from exc
-    return cases, failures
+        raise ValueError(f"评测 checkpoint 内容无效：{path}") from exc
+    return config, cases, failures
+
+
+def _shared_checkpoint_config(config: dict) -> dict:
+    return {key: value for key, value in config.items() if key != "datasets"}
+
+
+def merge_checkpoints(
+    dataset_paths: list[str | Path], checkpoint_paths: list[str | Path]
+) -> EvalReport:
+    if not checkpoint_paths:
+        raise ValueError("至少需要一个评测 checkpoint。")
+
+    datasets = load_datasets(dataset_paths)
+    expected_descriptors = [
+        _dataset_case_config(dataset, case)
+        for dataset in datasets
+        for case in dataset.cases
+    ]
+    expected_by_id = {item["case_id"]: item for item in expected_descriptors}
+    case_order = {
+        descriptor["case_id"]: index
+        for index, descriptor in enumerate(expected_descriptors)
+    }
+
+    shared_config: dict | None = None
+    selected_case_ids: set[str] = set()
+    cases: list[CaseReport] = []
+    failures: list[EvalFailure] = []
+    for raw_path in checkpoint_paths:
+        path = Path(raw_path)
+        config, shard_cases, shard_failures = _read_checkpoint(path)
+        current_shared = _shared_checkpoint_config(config)
+        if shared_config is None:
+            shared_config = current_shared
+        elif current_shared != shared_config:
+            raise ValueError(f"checkpoint 公共运行配置不一致：{path}")
+
+        descriptors = config.get("datasets")
+        if not isinstance(descriptors, list) or not descriptors:
+            raise ValueError(f"checkpoint 未声明评测 case：{path}")
+        shard_case_ids: set[str] = set()
+        for descriptor in descriptors:
+            if not isinstance(descriptor, dict):
+                raise ValueError(f"checkpoint case 配置无效：{path}")
+            case_id = str(descriptor.get("case_id", ""))
+            if descriptor != expected_by_id.get(case_id):
+                raise ValueError(f"checkpoint case 与当前数据集不一致：{case_id or path}")
+            if case_id in selected_case_ids:
+                raise ValueError(f"多个 checkpoint 重复包含 case：{case_id}")
+            selected_case_ids.add(case_id)
+            shard_case_ids.add(case_id)
+        shard_result_ids = {
+            row.case_id for row in [*shard_cases, *shard_failures]
+        }
+        if not shard_result_ids <= shard_case_ids:
+            raise ValueError(f"checkpoint 结果超出其声明的 case：{path}")
+        cases.extend(shard_cases)
+        failures.extend(shard_failures)
+
+    if shared_config is None:
+        raise ValueError("没有可合并的 checkpoint 配置。")
+    current_commit = _git_commit()
+    if not current_commit or shared_config.get("git_commit") != current_commit:
+        raise ValueError("checkpoint 的 Git 提交与当前工作区不一致。")
+    missing_case_ids = set(expected_by_id) - selected_case_ids
+    if missing_case_ids:
+        raise ValueError(
+            f"checkpoint 缺少 case：{', '.join(sorted(missing_case_ids))}"
+        )
+    unexpected_case_ids = selected_case_ids - set(expected_by_id)
+    if unexpected_case_ids:
+        raise ValueError(
+            f"checkpoint 包含未知 case：{', '.join(sorted(unexpected_case_ids))}"
+        )
+
+    repeats = int(shared_config["repeats"])
+    expected_keys = {
+        (case_id, sample_index)
+        for case_id in expected_by_id
+        for sample_index in range(1, repeats + 1)
+    }
+    completed_rows = [
+        (case.case_id, case.sample_index) for case in cases
+    ] + [
+        (failure.case_id, failure.sample_index) for failure in failures
+    ]
+    completed_keys = set(completed_rows)
+    if len(completed_keys) != len(completed_rows):
+        raise ValueError("checkpoint 包含重复的 case/sample 结果。")
+    missing_keys = expected_keys - completed_keys
+    if missing_keys:
+        formatted = ", ".join(
+            f"{case_id}/sample-{sample_index}"
+            for case_id, sample_index in sorted(missing_keys)
+        )
+        raise ValueError(f"checkpoint 尚未完成全部运行：{formatted}")
+    unexpected_keys = completed_keys - expected_keys
+    if unexpected_keys:
+        raise ValueError("checkpoint 包含本次数据集之外的 case/sample 结果。")
+
+    def sort_key(row: CaseReport | EvalFailure) -> tuple[int, int]:
+        return row.sample_index, case_order[row.case_id]
+
+    cases.sort(key=sort_key)
+    failures.sort(key=sort_key)
+    variants = tuple(shared_config["variants"])
+    runtime = shared_config["runtime"]
+    pricing_payload = shared_config.get("pricing")
+    pricing = TokenPricing.model_validate(pricing_payload) if pricing_payload else None
+    summary = _summarize(cases, variants, attempted_run_count=len(expected_keys))
+    return EvalReport(
+        generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        git_commit=str(shared_config.get("git_commit", "")),
+        dataset_versions=sorted({dataset.version for dataset in datasets}),
+        splits=sorted({dataset.split for dataset in datasets}),
+        mode=shared_config["mode"],
+        model=runtime["model"],
+        provider=runtime["provider"],
+        wire_api=runtime["wire_api"],
+        temperature=runtime["temperature"],
+        reasoning_effort=runtime["reasoning_effort"],
+        repeats=repeats,
+        cache_enabled=shared_config["cache_enabled"],
+        pricing=pricing,
+        threshold=shared_config["threshold"],
+        max_steps=shared_config["max_steps"],
+        max_rounds=shared_config["max_rounds"],
+        execution=ExecutionMetadata(
+            strategy="case_shards",
+            process_count=len(checkpoint_paths),
+            max_concurrency_per_process=int(runtime["max_concurrency"]),
+        ),
+        cases=cases,
+        failures=failures,
+        summary=summary,
+        prompt_versions=shared_config["prompt_versions"],
+    )
 
 
 def evaluate_datasets(
@@ -742,13 +910,10 @@ def evaluate_datasets(
         prompt_versions = current_prompt_versions()
         checkpoint_config = {
             "datasets": [
-                {
-                    "version": dataset.version,
-                    "split": dataset.split,
-                    "case_id": case.id,
-                }
+                _dataset_case_config(dataset, case)
                 for dataset, case in selected
             ],
+            "git_commit": _git_commit(),
             "mode": mode,
             "variants": list(variants),
             "threshold": threshold,
@@ -875,6 +1040,11 @@ def evaluate_datasets(
         threshold=threshold,
         max_steps=max_steps,
         max_rounds=max_rounds,
+        execution=ExecutionMetadata(
+            strategy="serial",
+            process_count=1,
+            max_concurrency_per_process=int(runtime["max_concurrency"]),
+        ),
         cases=cases,
         failures=failures,
         summary=_summarize(cases, variants, attempted_run_count=len(selected) * repeats),

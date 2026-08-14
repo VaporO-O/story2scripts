@@ -165,6 +165,12 @@ class EvalFailure(EvalModel):
     error: str
 
 
+class ExecutionMetadata(EvalModel):
+    strategy: Literal["serial", "case_shards"] = "serial"
+    process_count: int = Field(default=1, ge=1)
+    max_concurrency_per_process: int = Field(default=1, ge=1)
+
+
 class GateResult(EvalModel):
     name: str
     path: str
@@ -192,6 +198,7 @@ class EvalReport(EvalModel):
     threshold: float
     max_steps: int
     max_rounds: int
+    execution: ExecutionMetadata = Field(default_factory=ExecutionMetadata)
     prompt_versions: dict[str, str] = Field(default_factory=dict)
     cases: list[CaseReport]
     failures: list[EvalFailure] = Field(default_factory=list)

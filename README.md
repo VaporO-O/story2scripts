@@ -577,6 +577,40 @@ story2script-eval run \
 
 长时间评测可通过 `--checkpoint` 在每个 case 完成后原子保存进度。运行被中断后，使用完全相同的参数并追加 `--resume` 即可从最后一个已完成 case 继续；数据集、模型、Prompt 指纹、采样次数或评测参数不一致时会拒绝恢复，避免把不同实验的数据混在一起。Checkpoint 包含评测源文本与候选剧本，仅应保存在受控环境中，`evals/reports/` 默认不会提交到 Git。
 
+真实模型保留集可按 case 启动多个独立进程。每个进程必须使用唯一的 checkpoint 和
+report prefix，并保持模型、Prompt、预算和并发配置完全一致；分片运行时不要生成盲评文件：
+
+```bash
+story2script-eval run \
+  --dataset evals/datasets/v1/holdout.json \
+  --mode ai --repeats 3 --case library_clock \
+  --checkpoint evals/reports/holdout-library_clock.checkpoint.json \
+  --report-prefix holdout-library_clock
+```
+
+全部分片完成后统一合并。合并器会校验 Git 提交、数据指纹、模型与 Prompt 配置，拒绝
+缺失、重复或配置不一致的 case；汇总报告和盲评材料只在这一步生成：
+
+```bash
+story2script-eval merge-checkpoints \
+  --dataset evals/datasets/v1/holdout.json \
+  --checkpoint evals/reports/holdout-library_clock.checkpoint.json \
+  --checkpoint evals/reports/holdout-seed_vault.checkpoint.json \
+  --checkpoint evals/reports/holdout-bridge_camera.checkpoint.json \
+  --checkpoint evals/reports/holdout-school_broadcast.checkpoint.json \
+  --checkpoint evals/reports/holdout-mountain_weather.checkpoint.json \
+  --report-prefix ai-holdout-v1 \
+  --write-blind-review
+```
+
+并行报告中的 Token、成本与质量指标仍可直接汇总；延迟表示批量并发负载下的耗时，不能与
+串行评测的延迟直接比较。建议从较低的进程数和 `AI_MAX_CONCURRENCY` 开始，确认没有 429
+或网关超时后再提高并发。
+
+2026-08-14 的正式 `holdout` 使用 5 个 case 进程、每进程 `AI_MAX_CONCURRENCY=2`。15 组
+结果全部成功落盘，墙钟约 `46.76` 分钟；报告内各阶段耗时之和为 `193.03` 分钟，进程级
+并行获得 `4.13x` 提速。并行负载下的绝对延迟不能与下方 `dev` 串行结果直接比较。
+
 2026-08-08 使用 `gpt-5.6-sol`、Responses API、`high` 推理配置在 `dev` 集完成了 5 个 case × 3 次重复采样，LLM 缓存关闭。未提供价格配置，因此只统计 Token：
 
 | 方案 | 工作流完成率 | 目标达成率 | 最终分（95% CI） | p50 / p95 延迟 | 总 Tokens |
@@ -585,9 +619,24 @@ story2script-eval run \
 | 单 Agent | 66.7% | 66.7% | 8.889（8.732–9.047） | 313.7s / 772.2s | 1,838,061 |
 | 多 Agent | 86.7% | 80.0% | 9.045（8.957–9.132） | 386.2s / 925.1s | 3,105,013 |
 
-在这组样本上，多 Agent 相比单 Agent 的平均最终分高 `0.1554`、目标达成率高 `13.33` 个百分点，但平均延迟为 `1.4757x`、Token 为 `1.6893x`、LLM 调用为 `1.7230x`。两者的质量置信区间仍有重叠，且多 Agent 的对白归属准确率低于单 Agent（`65.6%` vs `74.4%`）。
+2026-08-14 使用相同模型与评测协议完成了 `holdout` 集：
 
-15 组匿名输出的固定 Rubric AI 辅助盲评中，多 Agent 获得 9 次偏好、单 Agent 获得 6 次偏好（`60%` vs `40%`）；多 Agent 偏好率的 95% Wilson 区间为 `35.7%–80.2%`，仍跨过 `50%`。综合质量、延迟和 Token，当前产品策略是：单 Agent 作为常规默认模式，多 Agent 作为复杂、高价值任务的质量优先选项。该盲评不冒充真实用户偏好，切换默认策略前仍需真实人工盲评和保留集验证。完整方法、结果和限制见 [`docs/AI_EVALUATION_REPORT.md`](docs/AI_EVALUATION_REPORT.md)。
+| 方案 | 工作流完成率 | 目标达成率 | 最终分（95% CI） | p50 / p95 延迟 | 总 Tokens |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 固定管线 | 100.0% | 0.0% | 7.001（6.822–7.179） | 18.9s / 66.1s | 264,956 |
+| 单 Agent | 80.0% | 66.7% | 8.960（8.844–9.076） | 291.7s / 486.4s | 1,880,007 |
+| 多 Agent | 100.0% | 86.7% | 8.993（8.918–9.069） | 348.6s / 800.6s | 3,195,355 |
+
+`holdout` 中多 Agent 相比单 Agent 的平均最终分仅高 `0.0333`，质量置信区间重叠；目标
+达成率高 `20.00` 个百分点，但 Token 为 `1.6997x`、LLM 调用为 `1.7778x`。多 Agent 的
+对白归属准确率仍低于单 Agent（`68.9%` vs `74.4%`）。`dev` 与 `holdout` 因此支持同一
+产品策略：单 Agent 作为常规默认模式，多 Agent 作为复杂、高价值任务的质量优先选项。
+
+`dev` 的 15 组匿名输出固定 Rubric AI 辅助盲评中，多 Agent 获得 9 次偏好、单 Agent
+获得 6 次偏好（`60%` vs `40%`）；多 Agent 偏好率的 95% Wilson 区间为
+`35.7%–80.2%`，仍跨过 `50%`。`holdout` 盲评材料已生成，但答卷尚未由独立评审者填写。
+该盲评不冒充真实用户偏好，切换默认策略前仍需真实人工盲评。完整方法、结果和限制见
+[`docs/AI_EVALUATION_REPORT.md`](docs/AI_EVALUATION_REPORT.md)。
 
 盲测会生成候选来源已随机隐藏的 `*-blind-review.json`、可填写的 `*-blind-responses.json` 和独立的 `*-blind-key.json`。评审者只接收前两者；填写 `A`、`B` 或 `TIE` 后再用密钥汇总：
 

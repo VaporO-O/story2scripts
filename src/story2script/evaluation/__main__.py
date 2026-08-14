@@ -9,7 +9,7 @@ from .baseline import apply_baseline, load_baseline
 from .models import TokenPricing
 from .pairwise import score_blind_review_files, write_blind_review_files
 from .reporting import write_reports
-from .runner import VARIANTS, evaluate_datasets
+from .runner import VARIANTS, evaluate_datasets, merge_checkpoints
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -42,6 +42,18 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--resume", action="store_true", help="从 checkpoint 继续运行")
     run.add_argument("--fail-on-regression", action="store_true")
 
+    merge = subparsers.add_parser(
+        "merge-checkpoints", help="合并按 case 分片运行的 checkpoint"
+    )
+    merge.add_argument("--dataset", action="append", required=True, help="完整数据集 JSON")
+    merge.add_argument(
+        "--checkpoint", action="append", required=True, help="待合并 checkpoint，可重复"
+    )
+    merge.add_argument("--output-dir", default="evals/reports")
+    merge.add_argument("--report-prefix", default="merged-latest")
+    merge.add_argument("--write-blind-review", action="store_true")
+    merge.add_argument("--blind-seed", type=int, default=2025)
+
     score = subparsers.add_parser("score-pairwise", help="汇总人工 A/B 盲测答卷")
     score.add_argument("--responses", required=True)
     score.add_argument("--key", required=True)
@@ -54,6 +66,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "score-pairwise":
         path = score_blind_review_files(args.responses, args.key, args.output)
         print(f"Pairwise summary: {path}")
+        return 0
+
+    if args.command == "merge-checkpoints":
+        report = merge_checkpoints(
+            [Path(path) for path in args.dataset],
+            [Path(path) for path in args.checkpoint],
+        )
+        json_path, markdown_path = write_reports(
+            report, args.output_dir, prefix=args.report_prefix
+        )
+        print(f"JSON report: {json_path}")
+        print(f"Markdown report: {markdown_path}")
+        if args.write_blind_review:
+            review_path, responses_path, key_path = write_blind_review_files(
+                report,
+                args.output_dir,
+                args.report_prefix,
+                seed=args.blind_seed,
+            )
+            print(f"Blind review: {review_path}")
+            print(f"Blind responses: {responses_path}")
+            print(f"Blind key: {key_path}")
         return 0
 
     variants = tuple(item.strip() for item in args.variants.split(",") if item.strip())
