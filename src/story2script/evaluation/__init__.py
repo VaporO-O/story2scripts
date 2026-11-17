@@ -4,7 +4,7 @@ from .baseline import apply_baseline, load_baseline
 from .dataset import load_dataset, load_datasets
 from .pairwise import score_blind_reviews, write_blind_review_files
 from .reporting import render_markdown, write_reports
-from .runner import evaluate_datasets
+from .runner import evaluate_datasets, merge_checkpoints
 
 __all__ = [
     "apply_baseline",
@@ -12,6 +12,7 @@ __all__ = [
     "load_baseline",
     "load_dataset",
     "load_datasets",
+    "merge_checkpoints",
     "render_markdown",
     "score_blind_reviews",
     "write_blind_review_files",

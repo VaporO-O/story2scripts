@@ -1,0 +1,30 @@
+services:
+  story2script:
+    build:
+      context: .
+    image: story2script:local
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    ports:
+      - "${STORY2SCRIPT_BIND:-127.0.0.1}:${STORY2SCRIPT_PORT:-8000}:8000"
+    environment:
+      AGENT_SESSION_DIR: /data/sessions
+      STORY2SCRIPT_ENV_FILE: /data/config/.env
+      STORY2SCRIPT_FILE_ROOTS: /data/files
+      STORY2SCRIPT_JOBS_DB: /data/jobs/jobs.db
+      STORY2SCRIPT_LLM_CACHE_DIR: /data/cache/llm
+      STORY2SCRIPT_METRICS_LOG: /data/metrics/events.jsonl
+      STORY2SCRIPT_PROVIDERS_DIR: /data/config
+    volumes:
+      - story2script-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  story2script-data:
