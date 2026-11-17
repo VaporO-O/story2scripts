@@ -27,7 +27,7 @@ class ContinuityFault(EvalModel):
 
 
 class ExpectedAnnotations(EvalModel):
-    chapter_titles: list[str] = Field(min_length=3)
+    chapter_titles: list[str] = Field(min_length=1)
     character_names: list[str] = Field(default_factory=list)
     dialogue_attributions: list[DialogueAttribution] = Field(default_factory=list)
     # 边界用“本章第几个文本单元之后切场”表示，避免污染公开 Screenplay Schema。
@@ -85,6 +85,10 @@ class AttributionMetrics(EvalModel):
     matched: int = 0
     correct: int = 0
     accuracy: float = 0.0
+    quote_coverage: float = 0.0
+    matched_speaker_accuracy: float = 0.0
+    wrong_speaker: int = 0
+    unmatched: int = 0
 
 
 class SourceMetrics(EvalModel):

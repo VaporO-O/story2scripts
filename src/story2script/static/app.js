@@ -149,23 +149,8 @@ function resetConversionProgress() {
   });
 }
 
-// 与后端 parser.py 一致：只把“标题后到下一个标题之间有正文”的才算章节，
-// 这样目录里的“第一章/第二章……”这类空标题不会被误计成章节。
-const CHAPTER_HEADING_RE =
-  /^[ \t]*(第[零一二两三四五六七八九十百千万\d]+章[^\r\n]*|chapter\s+\d+[^\r\n]*)[ \t]*$/gim;
-
 function detectChapters(text) {
-  const matches = [...text.matchAll(CHAPTER_HEADING_RE)];
-  const chapters = [];
-  for (let index = 0; index < matches.length; index += 1) {
-    const start = matches[index].index + matches[index][0].length;
-    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
-    const content = text.slice(start, end).trim();
-    if (content) {
-      chapters.push({ title: matches[index][1].trim(), content });
-    }
-  }
-  return chapters;
+  return window.StoryChapters.detectChapters(text);
 }
 
 function updateChapterCount() {
@@ -181,7 +166,7 @@ function renderChapterView() {
   const chapters = detectChapters(novelInput.value);
   if (chapters.length === 0) {
     chapterView.appendChild(
-      createElement("p", "chapter-empty", "未识别到章节，请使用“第一章 标题”格式标记。"),
+      createElement("p", "chapter-empty", "请填写正文；没有章节标题也可以转换，只有空标题时请补充内容。"),
     );
     return;
   }
@@ -652,6 +637,7 @@ function renderScene(scene, index, names) {
     article.appendChild(reviewDetail);
   }
   article.appendChild(renderHumanReviewControls(scene.id));
+  if (window.Studio && latestScreenplay) window.Studio.addInlineEditor(article, scene.id);
   return article;
 }
 
@@ -731,7 +717,7 @@ function setScriptView(view) {
 
   // 门禁放宽：yaml_text 只在转换完成时才有，而流式场景在那之前就该可见。
   // 仍以 yamlOutput.value 为准会把已流出的场景渲染进隐藏面板。
-  if (!yamlOutput.value && !hasStreamedContent) {
+  if (!yamlOutput.value && !hasStreamedContent && view !== "source") {
     emptyState.classList.remove("hidden");
     scriptPreview.classList.add("hidden");
     yamlOutput.classList.add("hidden");
@@ -741,7 +727,7 @@ function setScriptView(view) {
   emptyState.classList.add("hidden");
   // 流式过程中源码还是空的：即使停在"源码"视图也先显示预览，否则用户对着
   // 空文本域，看不到正在生成的内容。
-  const showPreview = view !== "source" || !yamlOutput.value;
+  const showPreview = view !== "source" || (!yamlOutput.value && hasStreamedContent);
   scriptPreview.classList.toggle("hidden", !showPreview);
   yamlOutput.classList.toggle("hidden", showPreview);
 }
@@ -753,6 +739,7 @@ function setCurrentScene(sceneId) {
   if (chatSceneChip) {
     chatSceneChip.textContent = `当前场景：${sceneId}`;
   }
+  window.Studio?.selectScene(sceneId);
 }
 
 function showScreenplay(screenplay, yamlText) {
@@ -766,6 +753,7 @@ function showScreenplay(screenplay, yamlText) {
   }
   setScriptView(currentScriptView);
   updateScreenplayStatus();
+  window.Studio?.onScriptChanged(screenplay, yamlText);
 }
 
 // 「智能改编」视图里看不到剧本面板，用一行摘要说明当前拿什么在跑，
@@ -794,6 +782,8 @@ function setActiveView(view) {
   const views = {
     workbench: [viewWorkbenchButton, viewWorkbench],
     profiles: [viewProfilesButton, viewProfiles],
+    studio: [document.querySelector("#viewStudioButton"), document.querySelector("#viewStudio")],
+    knowledge: [document.querySelector("#viewKnowledgeButton"), document.querySelector("#viewKnowledge")],
     agents: [viewAgentsButton, viewAgents],
     providers: [viewProvidersButton, viewProviders],
     metrics: [viewMetricsButton, viewMetrics],
@@ -920,6 +910,7 @@ function conversionPayload() {
     mode: convertModeInput.value,
     novel_text: novelInput.value,
     enable_review: enableReviewInput.checked,
+    creative_brief: window.Studio?.creativeBrief() || null,
   };
 }
 
@@ -1163,12 +1154,18 @@ async function validateYaml() {
     return;
   }
 
+  const sentYaml = yamlOutput.value;
   const response = await fetch("/api/yaml/validate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ yaml_text: yamlOutput.value }),
+    body: JSON.stringify({ yaml_text: sentYaml, previous_yaml: window.Studio?.currentYaml() || "" }),
   });
   const data = await response.json();
+
+  if (yamlOutput.value !== sentYaml) {
+    setMessage("校验期间源码发生变化，已保留新编辑，请重新校验。", true);
+    return;
+  }
 
   if (!response.ok) {
     setMessage(data.detail || "YAML 校验失败", true);
@@ -1176,9 +1173,8 @@ async function validateYaml() {
   }
 
   if (data.screenplay) {
-    latestScreenplay = data.screenplay;
-    renderScreenplay(data.screenplay);
-    setScriptView(currentScriptView);
+    latestReviewReport = null;
+    showScreenplay(data.screenplay, data.yaml_text || yamlOutput.value);
   }
   setMessage(data.message);
 }
@@ -1904,6 +1900,23 @@ async function refreshMetrics() {
     metricsEmptyState.classList.add("hidden");
     metricsContent.classList.remove("hidden");
     metricsContent.innerHTML = "";
+    try {
+      const infraResponse = await fetch("/api/infrastructure");
+      const infra = await infraResponse.json();
+      if (!infraResponse.ok) throw new Error(errorMessage(infra, "基础设施状态不可用"));
+      const section = createElement("section", "metrics-section");
+      section.append(createElement("h4", "metrics-section-title", "任务与 Redis"));
+      const chips = createElement("div", "agent-metrics");
+      chips.append(agentMetric("任务后端", infra.task_backend), agentMetric("缓存", infra.cache_backend),
+        agentMetric("Redis", { connected: "已连接", unavailable: "不可用", not_required: "未启用" }[infra.redis]),
+        agentMetric("在线 Worker", infra.workers), agentMetric("等待确认的投递", infra.pending_dispatches),
+        agentMetric("生成/向量 RPM", `${infra.generation_rpm || "不限"} / ${infra.embedding_rpm || "不限"}`));
+      section.append(chips);
+      if (infra.task_backend === "redis") section.append(createElement("p", "scene-chat-hint", "任务执行在独立 Worker 中；下方调用指标是当前 Web 进程的统计，不代表所有 Worker 合计。"));
+      metricsContent.append(section);
+    } catch (error) {
+      metricsContent.append(createElement("p", "plot-error", error.message));
+    }
     const llmRows =
       data.llm_overall && data.llm_overall.calls > 0
         ? { 合计: data.llm_overall, ...data.llm }
@@ -2186,6 +2199,94 @@ async function testProvider() {
     });
   }
 }
+
+async function askStoryQuestion(event) {
+  event.preventDefault();
+  const button = document.querySelector("#askStoryButton");
+  const answer = document.querySelector("#storyAnswer");
+  const evidence = document.querySelector("#storyEvidence");
+  if (!novelInput.value.trim()) {
+    answer.textContent = "请先在工作台粘贴或导入小说。";
+    return;
+  }
+  button.disabled = true;
+  evidence.replaceChildren();
+  answer.textContent = "正在查找原文依据…";
+  try {
+    const range = document.querySelector("#storyBeforeChapter").value;
+    const response = await fetch("/api/rag/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        novel_text: novelInput.value,
+        query: document.querySelector("#storyQuestion").value,
+        mode: document.querySelector("#storyAnswerMode").value,
+        before_chapter: range ? Number(range) : null,
+        rerank: document.querySelector("#storyRerank").checked,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "请检查问题和章节范围。");
+    const storage = data.stats?.storage;
+    document.querySelector("#storyIndexStatus").textContent = storage?.persistent
+      ? `持久化索引 ${storage.index_id.slice(0, 12)} · ${storage.backend} · ${storage.dimension} 维 · ${storage.reused ? "复用已保存索引" : `已保存，本次新嵌入 ${storage.embedded_documents} 个片段`}。`
+      : `本次使用 ${data.retriever} 检索；${data.stats?.warnings?.length ? data.stats.warnings.join("；") : "未使用持久化向量索引"}。`;
+    answer.textContent = [data.answer, ...data.warnings].join("\n");
+    const citations = data.citations.length ? data.citations : data.hits.map((hit) => ({
+      chapter: hit.chapter, doc_id: hit.doc_id, quote: hit.snippet,
+    }));
+    citations.forEach((citation) => {
+      const card = document.createElement("article");
+      const heading = document.createElement("h3");
+      const quote = document.createElement("blockquote");
+      heading.textContent = citation.chapter;
+      quote.textContent = citation.quote;
+      card.append(heading, quote);
+      evidence.append(card);
+    });
+  } catch (error) {
+    answer.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.querySelector("#storyQuestionForm").addEventListener("submit", askStoryQuestion);
+document.querySelector("#ragBuildIndex").addEventListener("click", async () => {
+  const button = document.querySelector("#ragBuildIndex"), message = document.querySelector("#ragIndexMessage");
+  if (!novelInput.value.trim()) { message.textContent = "请先在工作台导入正文。"; return; }
+  button.disabled = true; message.textContent = "正在构建或读取向量索引……";
+  try {
+    const response = await fetch("/api/rag/indexes", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({novel_text:novelInput.value})});
+    const data = await response.json(); if (!response.ok) throw new Error(errorMessage(data,"索引构建失败"));
+    message.textContent = `${data.storage.reused ? "已复用" : "已保存"}索引 ${data.storage.index_id.slice(0,12)}，${data.doc_count} 个片段，${data.storage.dimension} 维。`;
+    await listRagIndexes();
+  } catch(error) { message.textContent=error.message; } finally {button.disabled=false;}
+});
+async function listRagIndexes() {
+  const box=document.querySelector("#ragIndexList");
+  const response=await fetch("/api/rag/indexes"),data=await response.json();
+  if(!response.ok)throw new Error(errorMessage(data,"索引列表读取失败"));
+  box.replaceChildren();
+  if(!data.indexes.length)box.append(createElement("p","","当前命名空间没有已保存的向量索引。"));
+  for(const item of data.indexes){
+    const row=createElement("article","plot-scene");
+    row.append(createElement("p","",`${item.index_id.slice(0,12)} · ${item.model_name}（版本 ${item.model_revision}）· ${item.doc_count} 片段 · ${item.dimension} 维`));
+    row.append(createElement("p","scene-chat-hint",`原文指纹 ${item.source_hash.slice(0,12)} · ${new Date(item.created_at).toLocaleString()}`));
+    const button=createElement("button","ghost-button","删除此索引");button.type="button";
+    button.onclick=async()=>{if(!window.confirm("删除这份向量索引及不再共享的向量？之后可重新构建，原小说和剧本不受影响。"))return;
+      try{const removed=await fetch(`/api/rag/indexes/${item.index_id}`,{method:"DELETE"});const result=await removed.json();if(!removed.ok)throw new Error(errorMessage(result,"删除失败"));document.querySelector("#ragIndexMessage").textContent=result.message;await listRagIndexes();}
+      catch(error){document.querySelector("#ragIndexMessage").textContent=error.message;}};
+    row.append(button);box.append(row);
+  }
+}
+document.querySelector("#ragListIndexes").addEventListener("click",()=>listRagIndexes().catch(error=>{document.querySelector("#ragIndexMessage").textContent=error.message;}));
+document.querySelector("#viewKnowledgeButton").addEventListener("click", () => setActiveView("knowledge"));
+document.querySelector("#storyAnswerMode").addEventListener("change", (event) => {
+  const rerank = document.querySelector("#storyRerank");
+  rerank.disabled = event.target.value !== "ai";
+  if (rerank.disabled) rerank.checked = false;
+});
 
 document.querySelector("#loadExampleButton").addEventListener("click", () => {
   loadExample().catch((error) => setMessage(error.message, true));

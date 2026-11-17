@@ -46,7 +46,7 @@ NON_NAME_WORDS = {
 PLACE_OBJECT_SUFFIX = set("店楼室局部厅案信车包枪馆院街路桥港站城村镇厂行司队组科处所园区")
 
 # 明显是动词的词尾，人名几乎不会以此收尾（如“冷声喝”来自“冷声喝道”）。
-VERB_SUFFIX = set("说喊喝吼嚷哼叹问")
+VERB_SUFFIX = set("说喊喝吼嚷哼叹问答叫")
 
 # 人名后接的称谓，用于把“吴主任 / 赵主任 / 陈法医 / 齐局长”识别成人物。
 TITLE_SUFFIXES = (
@@ -147,6 +147,8 @@ def _person_evidence(name: str, text: str) -> str:
     """返回候选词的人物证据等级：strong / title / medium / none。"""
     escaped = re.escape(name)
     if re.search(QUOTE_SPEAKER_PATTERN_TMPL.format(name=escaped), text):
+        return "strong"
+    if re.search(rf'[”\"][，,\s]*{escaped}(?:{_SPEECH_TAGS})(?:[。！？，,:：\s]|$)', text):
         return "strong"
     if re.search(rf"(?:{'|'.join(TITLE_PREFIXES)}){escaped}", text):
         return "strong"

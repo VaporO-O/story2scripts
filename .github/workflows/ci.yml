@@ -13,9 +13,37 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,redis]"
       - run: ruff check . --output-format=github
       - run: pytest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test tests/speech_queue.test.cjs
+      - run: node --test tests/chapter_parser.test.cjs
+      - run: node --check src/story2script/static/studio.js
+
+  redis-integration:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,redis]"
+      - run: pytest tests/test_redis_integration.py -q
+        env:
+          STORY2SCRIPT_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+          STORY2SCRIPT_DISABLE_DOTENV: "1"
 
   deterministic-eval:
     runs-on: ubuntu-latest
@@ -41,6 +69,22 @@ jobs:
         with:
           name: story2script-demo-eval
           path: evals/reports/demo-v1.*
+          if-no-files-found: error
+
+      - name: Run retrieval regression evaluation
+        run: >-
+          story2script-eval rag
+          --dataset evals/datasets/rag/v1/dev.json
+          --dataset evals/datasets/rag/v1/holdout.json
+          --min-recall 0.95
+          --min-mrr 0.8
+          --output evals/reports/rag-v1
+      - name: Upload retrieval reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story2script-rag-eval
+          path: evals/reports/rag-v1.*
           if-no-files-found: error
 
   review-agent-eval:

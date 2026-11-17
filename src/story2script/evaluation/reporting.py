@@ -62,6 +62,17 @@ def render_markdown(report: EvalReport) -> str:
             f"{row['total_tokens']} | {row['total_estimated_cost']} |"
         )
 
+    lines.extend(["", "## Dialogue Diagnostics", "",
+                  "原句归属成功率 = 正确归属 / 全部标注；对白匹配率 = 匹配到原句 / 全部标注。",
+                  "已匹配对白的说话人准确率单独统计。未匹配可能是省略或改写，不能直接判为归属错误。",
+                  "", "| 变体 | 对白匹配率 | 已匹配说话人准确率 | 错配 | 未匹配 |",
+                  "| --- | ---: | ---: | ---: | ---: |"])
+    for name, row in report.summary["variants"].items():
+        lines.append(f"| {name} | {_percent(row.get('dialogue_quote_coverage'))} | "
+                     f"{_percent(row.get('dialogue_matched_speaker_accuracy'))} | "
+                     f"{row.get('dialogue_wrong_speaker', '-')} | "
+                     f"{row.get('dialogue_unmatched', '-')} |")
+
     comparison = report.summary.get("single_vs_multi")
     if comparison:
         lines.extend(

@@ -27,11 +27,11 @@ def test_global_state_api_returns_cross_chapter_state_table() -> None:
     assert body["timeline"][0]["chapter"] == "第一章 雾起"
 
 
-def test_global_state_api_rejects_less_than_three_chapters() -> None:
+def test_global_state_api_accepts_two_chapters() -> None:
     response = client.post(
         "/api/consistency/global-state",
         json={"novel_text": "第一章 开始\n内容一\n第二章 结束\n内容二"},
     )
 
-    assert response.status_code == 422
-    assert "3 个章节" in response.json()["detail"]
+    assert response.status_code == 200
+    assert len(response.json()["global_state"]["timeline"]) == 2

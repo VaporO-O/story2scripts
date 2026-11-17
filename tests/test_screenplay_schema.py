@@ -226,7 +226,7 @@ def test_schema_file_is_valid_json() -> None:
     assert schema["title"] == "Story2Script Screenplay"
     assert "adaptation_type" in schema["required"]
     assert "global_state" in schema["required"]
-    assert schema["properties"]["source"]["properties"]["chapter_count"]["minimum"] == 3
+    assert schema["properties"]["source"]["properties"]["chapter_count"]["minimum"] == 1
     assert "arc" in schema["properties"]["characters"]["items"]["required"]
     scene_schema = schema["properties"]["scenes"]["items"]
     assert "characters_present" in scene_schema["required"]

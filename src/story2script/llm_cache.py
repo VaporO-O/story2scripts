@@ -18,6 +18,7 @@ import os
 import threading
 from collections import OrderedDict
 from pathlib import Path
+from .redis_runtime import cache_enabled, cache_get, cache_put
 
 CACHE_DISABLE_ENV = "STORY2SCRIPT_LLM_CACHE_DISABLE"
 CACHE_MAX_ENTRIES_ENV = "STORY2SCRIPT_LLM_CACHE_MAX_ENTRIES"
@@ -64,6 +65,14 @@ class LLMResponseCache:
     def get(self, key: str) -> object | None:
         if _cache_disabled():
             return None
+        if cache_enabled():
+            value = cache_get(key)
+            with self._lock:
+                if value is not None:
+                    self._hits += 1
+                else:
+                    self._misses += 1
+            return value  # Never let local/disk data outlive the Redis TTL.
         with self._lock:
             if key in self._entries:
                 self._entries.move_to_end(key)
@@ -80,6 +89,9 @@ class LLMResponseCache:
 
     def put(self, key: str, value: object) -> None:
         if _cache_disabled():
+            return
+        if cache_enabled():
+            cache_put(key, value)
             return
         with self._lock:
             self._store(key, value)

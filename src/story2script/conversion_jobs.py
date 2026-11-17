@@ -4,6 +4,7 @@ from .api_models import ConvertJobStatusResponse
 from .api_models import ConvertRequest
 from .api_models import ConvertResponse
 from .converter import get_converter
+from .creative_templates import configure_converter, finish_conversion
 from .job_store import DurableJobStore
 from .metrics import metrics
 from .parser import parse_chapters
@@ -52,6 +53,7 @@ class ConversionJobStore(DurableJobStore):
                 message=f"已识别 {len(chapters)} 个章节，正在准备{_mode_name(request.mode)}转换器。",
             )
             converter = get_converter(request.mode)
+            configure_converter(converter, request.creative_brief)
 
             self._update(
                 job_id,
@@ -93,6 +95,7 @@ class ConversionJobStore(DurableJobStore):
                 meta_cb=meta_cb,
             )
 
+            finish_conversion(screenplay, request.creative_brief, converter.mode)
             review_report = None
             if request.enable_review:
                 self._update(

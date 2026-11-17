@@ -536,6 +536,9 @@ def test_ai_converter_reports_skipped_failures(monkeypatch: pytest.MonkeyPatch) 
 def test_retry_uses_backoff_and_reports_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     """瞬时失败（如网关 504）应退避后重试，而不是三次挤在同一瞬间。"""
     configure_ai(monkeypatch)
+    # This asserts the retry schedule of one request. Parallel chunks can each
+    # have their first failure, legitimately yielding [1, 1] instead of [1, 3].
+    monkeypatch.setenv("AI_MAX_CONCURRENCY", "1")
     monkeypatch.setenv("AI_RETRY_BACKOFF_SECONDS", "1,3")
     slept: list[float] = []
     monkeypatch.setattr(converter_module.time, "sleep", lambda seconds: slept.append(seconds))

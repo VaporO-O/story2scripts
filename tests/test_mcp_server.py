@@ -189,8 +189,8 @@ async def test_convert_novel_with_review_attaches_report():
 
 @pytest.mark.anyio
 async def test_convert_novel_failure_raises():
-    with pytest.raises(ValueError, match="至少需要识别出 3 个章节"):
-        await convert_novel(novel_text="第一章 只有一章\n内容。")
+    with pytest.raises(ValueError, match="没有正文"):
+        await convert_novel(novel_text="第一章 空标题")
 
 
 @pytest.mark.anyio

@@ -6,7 +6,7 @@ Story2Script 的 YAML 不是最终拍摄台本，而是适合 AI 生成、作者
 
 ## 1. 设计目标
 
-1. 支持三章以上小说转换为结构化剧本 YAML。
+1. 支持单章、多章以及没有章节标题的正文转换为结构化剧本 YAML；无标题正文统一标为“正文”。
 2. 支持本地规则转换和 AI 转换共用同一套数据结构。
 3. 通过 `Screenplay.model_validate` 保证前端拿到的永远是合法结构。
 4. 显式表达小说到剧本的改编判断，而不是机械搬运叙述。
@@ -602,3 +602,19 @@ YAML 适合作为 Story2Script 的中间格式：
 - 适合前端编辑、后端校验、局部重生成和后续导出。
 
 纯文本剧本难以可靠区分场景、动作、对白和人物引用；YAML 则能把这些信息结构化保留下来。
+
+
+## 17. 剧情版本、规则与自定义事件
+
+`plot_state` 可为空，存在时保存 revision_id、历次 changes、facts 和 logic。logic 包含实体、初始事实、引用快照、逐场事件/覆盖，以及 custom_properties / custom_rules。
+
+事件 kind 包括八种内置剧情操作、内部 act/use_item 和 custom。自定义事件指定 custom_rule、actor、bindings；声明式规则提供有限值域的额外属性、requires、active_roles、steps、effects、lock_effects。effects 只能修改已注册 custom: 属性，内置状态必须经过内置步骤；参数引用仅为整个字段的 $参数名。
+
+完整协议与例子见 [CUSTOM_EVENTS.md](CUSTOM_EVENTS.md)。JSON Schema 表达字段类型和形状，跨实体引用、模板绑定、事件前提、历史时间与因果完整性由 `reason_story` 单独校验。普通 YAML 结构校验通过不等于剧情规则校验通过。
+
+
+## 18. 创作偏好 结构与编辑状态
+
+可选 creative_brief 保存模板 ID/版本、名称、tone、pacing、fidelity、instructions。可选 structure 为 SceneGroup 列表，每项有 id、kind（act/episode）、title、scene_ids、target_minutes；每套类型必须按原顺序恰好覆盖全部场景。
+
+可选 editing 保存 status（needs_check/checked）、based_on_hash、dirty_scene_ids、note。needs_check 表示旧事件/语义核验不可复用；checked 不等于作者最终批准。旧 YAML 可省略以上字段，空默认字段不改变原有哈希。完整操作见 AUTHORING_STUDIO.md。

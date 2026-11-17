@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 
 CHAPTER_HEADING_PATTERN = re.compile(
-    r"(?im)^\s*(第[零一二两三四五六七八九十百千万\d]+章[^\r\n]*|chapter\s+\d+[^\r\n]*)\s*$"
+    r"(?im)^[ \t]*(第[零一二两三四五六七八九十百千万\d]+章[^\r\n]*|chapter\s+\d+[^\r\n]*)[ \t]*$"
 )
 
 
@@ -14,9 +14,19 @@ class Chapter:
 
 
 def parse_chapters(novel_text: str) -> list[Chapter]:
-    """Split novel text into chapters using common Chinese or English headings."""
+    """Accept any nonempty story; unheaded prose is one chapter, never fabricated padding."""
+    novel_text = novel_text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    if not novel_text.strip():
+        raise ValueError("请提供非空小说正文。")
     matches = list(CHAPTER_HEADING_PATTERN.finditer(novel_text))
+    if not matches:
+        return [Chapter(title="正文", content=novel_text.strip())]
     chapters: list[Chapter] = []
+    prefix = novel_text[:matches[0].start()].strip()
+    # Do not turn a table-of-contents label into a story chapter. Real prefatory
+    # prose is retained instead of silently discarding text before chapter 1.
+    if prefix and not re.fullmatch(r"(?i)(目\s*录|contents|table\s+of\s+contents)", prefix):
+        chapters.append(Chapter(title="前言", content=prefix))
 
     for index, match in enumerate(matches):
         start = match.end()
@@ -25,10 +35,8 @@ def parse_chapters(novel_text: str) -> list[Chapter]:
         if content:
             chapters.append(Chapter(title=match.group(1).strip(), content=content))
 
-    if len(chapters) < 3:
-        raise ValueError(
-            "至少需要识别出 3 个章节。请使用“第一章 标题”或“Chapter 1 Title”格式。"
-        )
+    if not chapters:
+        raise ValueError("章节标题下没有正文，请补充小说内容。")
 
     return chapters
 

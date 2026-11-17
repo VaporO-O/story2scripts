@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 
 from .llm_cache import cache_key, llm_cache
+from .redis_runtime import rate_limit
 from .metrics import metrics
 from .security import redact_secrets
 
@@ -46,6 +47,8 @@ def is_fatal_error(exc: BaseException) -> bool:
     if isinstance(status_code, int) and 400 <= status_code < 500:
         return status_code not in RETRYABLE_STATUS_CODES
     return False
+
+
 CHAT_COMPLETIONS_WIRE_API = "chat_completions"
 RESPONSES_WIRE_API = "responses"
 WIRE_API_ALIASES = {
@@ -228,9 +231,7 @@ class LLMClient:
             return True
         if raw_value in FALSE_VALUES:
             return False
-        raise ValueError(
-            f"{self.usage_label} requires boolean AI_DISABLE_RESPONSE_STORAGE."
-        )
+        raise ValueError(f"{self.usage_label} requires boolean AI_DISABLE_RESPONSE_STORAGE.")
 
     @property
     def timeout_seconds(self) -> float:
@@ -306,11 +307,13 @@ class LLMClient:
             "generate",
             self.wire_api,
             self.base_url,
+            cache_key(self.api_key),
             self.model,
             self.reasoning_effort,
             self.disable_response_storage,
             self.max_tokens,
             resolved_temperature,
+            prompt_id,
             prompt,
         )
         if use_cache:
@@ -332,6 +335,7 @@ class LLMClient:
         error_kind = ""
         usage: dict = {}
         try:
+            rate_limit(self.base_url, self.api_key, "generation")
             try:
                 response = self.client.post(
                     request_url,
@@ -416,14 +420,14 @@ class LLMClient:
             if not content.strip():
                 error_kind = "empty"
                 raise ValueError(f"{self.usage_label} returned empty response.")
-        except ValueError:
+        except ValueError as exc:
             metrics.record_llm_call(
                 label=self.usage_label,
                 model=self.model,
                 prompt_id=prompt_id,
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 ok=False,
-                error_kind=error_kind or "unknown",
+                error_kind=error_kind or getattr(exc, "error_kind", "unknown"),
                 prompt_chars=len(prompt),
             )
             raise
@@ -559,7 +563,15 @@ class LLMClient:
             return []
 
         keys = [
-            cache_key("embed", self.base_url, self.embed_model, text) for text in texts
+            cache_key(
+                "embed",
+                self.base_url,
+                cache_key(self.api_key),
+                self.embed_model,
+                os.getenv("RAG_EMBEDDING_REVISION", "1"),
+                text,
+            )
+            for text in texts
         ]
         results: list[list[float] | None] = [None] * len(texts)
         pending: list[int] = []
@@ -600,6 +612,7 @@ class LLMClient:
         usage: dict = {}
         prompt_chars = sum(len(text) for text in batch)
         try:
+            rate_limit(self.base_url, self.api_key, "embedding")
             try:
                 response = self.client.post(
                     f"{self.base_url}/embeddings",
@@ -642,22 +655,20 @@ class LLMClient:
                 embedding = item.get("embedding") if isinstance(item, dict) else None
                 if not isinstance(embedding, list) or not embedding:
                     error_kind = "malformed"
-                    raise ValueError(
-                        f"{self.usage_label} embeddings returned malformed response."
-                    )
+                    raise ValueError(f"{self.usage_label} embeddings returned malformed response.")
                 index = item.get("index")
                 slot = index if isinstance(index, int) and 0 <= index < len(batch) else position
                 vectors[slot] = [float(value) for value in embedding]
             if any(vector is None for vector in vectors):
                 error_kind = "malformed"
                 raise ValueError(f"{self.usage_label} embeddings returned malformed response.")
-        except ValueError:
+        except ValueError as exc:
             metrics.record_llm_call(
                 label=EMBEDDINGS_METRICS_LABEL,
                 model=self.embed_model,
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 ok=False,
-                error_kind=error_kind or "unknown",
+                error_kind=error_kind or getattr(exc, "error_kind", "unknown"),
                 prompt_chars=prompt_chars,
             )
             raise

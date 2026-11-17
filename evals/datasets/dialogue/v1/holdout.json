@@ -1,0 +1,79 @@
+{
+  "version": "dialogue-v1",
+  "split": "holdout",
+  "description": "原创对白归属回归样本；覆盖多轮、听话人、后置说话人、短回答、长对白及重复原句。",
+  "cases": [
+    {
+      "id": "holdout_addressee",
+      "title": "holdout_addressee",
+      "novel_text": "第一章 开场\n苏晴对顾远说：“颜料是今年生产的。”顾远说：“画框却很旧。”\n第二章 线索\n苏晴说：“查一下采购记录。”顾远答道：“发票在这里。”\n第三章 收束\n顾远对苏晴说：“日期被修改了。”",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "苏晴",
+          "顾远"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "颜料是今年生产的",
+            "speaker": "苏晴"
+          },
+          {
+            "quote": "画框却很旧",
+            "speaker": "顾远"
+          },
+          {
+            "quote": "查一下采购记录",
+            "speaker": "苏晴"
+          },
+          {
+            "quote": "发票在这里",
+            "speaker": "顾远"
+          },
+          {
+            "quote": "日期被修改了",
+            "speaker": "顾远"
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout_postposed",
+      "title": "holdout_postposed",
+      "novel_text": "第一章 开场\n“今晚不能停播。”许安说道。\n第二章 线索\n“备用线路断了。”陈默答道。\n第三章 收束\n“先用旧设备。”许安说。陈默说：“我去接线。”",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "许安",
+          "陈默"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "今晚不能停播",
+            "speaker": "许安"
+          },
+          {
+            "quote": "备用线路断了",
+            "speaker": "陈默"
+          },
+          {
+            "quote": "先用旧设备",
+            "speaker": "许安"
+          },
+          {
+            "quote": "我去接线",
+            "speaker": "陈默"
+          }
+        ]
+      }
+    }
+  ]
+}

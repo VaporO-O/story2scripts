@@ -52,11 +52,11 @@
       "properties": {
         "chapter_count": {
           "type": "integer",
-          "minimum": 3
+          "minimum": 1
         },
         "chapter_titles": {
           "type": "array",
-          "minItems": 3,
+          "minItems": 1,
           "items": {
             "type": "string"
           }
@@ -252,24 +252,24 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-          "required": [
-            "id",
-            "heading",
-            "int_ext",
-            "time_of_day",
-            "location",
-            "source_chapter",
-            "summary",
-            "goal",
-            "conflict",
-            "beat",
-            "subtext",
-            "characters",
-            "characters_present",
-            "props",
-            "dramatization_decisions",
-            "elements"
-          ],
+        "required": [
+          "id",
+          "heading",
+          "int_ext",
+          "time_of_day",
+          "location",
+          "source_chapter",
+          "summary",
+          "goal",
+          "conflict",
+          "beat",
+          "subtext",
+          "characters",
+          "characters_present",
+          "props",
+          "dramatization_decisions",
+          "elements"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -437,9 +437,991 @@
                 }
               ]
             }
+          },
+          "timeline_mode": {
+            "type": "string",
+            "enum": [
+              "present",
+              "flashback",
+              "recording",
+              "dream"
+            ],
+            "default": "present"
+          },
+          "event_time_scene_id": {
+            "type": "string",
+            "default": "",
+            "description": "Past event anchored at scene start"
           }
         }
       }
+    },
+    "plot_state": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "revision_id": {
+              "title": "Revision Id",
+              "type": "string"
+            },
+            "changes": {
+              "items": {
+                "$ref": "#/$defs/PlotChange"
+              },
+              "title": "Changes",
+              "type": "array"
+            },
+            "facts": {
+              "items": {
+                "$ref": "#/$defs/StoryFact"
+              },
+              "title": "Facts",
+              "type": "array"
+            },
+            "logic": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/StoryLogic"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "revision_id"
+          ],
+          "title": "PlotContinuity",
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "creative_brief": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CreativeBrief"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "structure": {
+      "items": {
+        "$ref": "#/$defs/SceneGroup"
+      },
+      "title": "Structure",
+      "type": "array"
+    },
+    "editing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EditingState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "$defs": {
+    "PlotChange": {
+      "additionalProperties": false,
+      "properties": {
+        "change_id": {
+          "title": "Change Id",
+          "type": "string"
+        },
+        "instruction": {
+          "title": "Instruction",
+          "type": "string"
+        },
+        "character_id": {
+          "title": "Character Id",
+          "type": "string"
+        },
+        "effective_scene_id": {
+          "title": "Effective Scene Id",
+          "type": "string"
+        },
+        "operation": {
+          "enum": [
+            "death",
+            "exit",
+            "revive",
+            "return",
+            "transfer",
+            "move",
+            "learn",
+            "relationship",
+            "custom"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "item": {
+          "default": "",
+          "title": "Item",
+          "type": "string"
+        },
+        "destination": {
+          "default": "",
+          "title": "Destination",
+          "type": "string"
+        },
+        "secret": {
+          "default": "",
+          "title": "Secret",
+          "type": "string"
+        },
+        "relationship": {
+          "default": "",
+          "enum": [
+            "",
+            "ally",
+            "enemy",
+            "neutral"
+          ],
+          "title": "Relationship",
+          "type": "string"
+        },
+        "source_character": {
+          "default": "",
+          "title": "Source Character",
+          "type": "string"
+        },
+        "source_item": {
+          "default": "",
+          "title": "Source Item",
+          "type": "string"
+        },
+        "custom_rule": {
+          "default": "",
+          "title": "Custom Rule",
+          "type": "string"
+        },
+        "bindings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "event_time": {
+          "const": "scene_end",
+          "default": "scene_end",
+          "title": "Event Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "change_id",
+        "instruction",
+        "character_id",
+        "effective_scene_id",
+        "operation"
+      ],
+      "title": "PlotChange",
+      "type": "object"
+    },
+    "StoryFact": {
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        },
+        "predicate": {
+          "title": "Predicate",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "valid_from_scene_id": {
+          "title": "Valid From Scene Id",
+          "type": "string"
+        },
+        "source": {
+          "default": "scene",
+          "enum": [
+            "user",
+            "scene"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "revision_id": {
+          "default": "",
+          "title": "Revision Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "predicate",
+        "value",
+        "valid_from_scene_id"
+      ],
+      "title": "StoryFact",
+      "type": "object"
+    },
+    "ElementCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "element_index": {
+          "minimum": 0,
+          "title": "Element Index",
+          "type": "integer"
+        },
+        "event_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Event Ids",
+          "type": "array"
+        },
+        "context_only": {
+          "default": false,
+          "title": "Context Only",
+          "type": "boolean"
+        },
+        "explanation": {
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "element_index",
+        "explanation"
+      ],
+      "title": "ElementCoverage",
+      "type": "object"
+    },
+    "Entity": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "character",
+            "item",
+            "location",
+            "secret"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name"
+      ],
+      "title": "Entity",
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "title": "Actor",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "item": {
+          "default": "",
+          "title": "Item",
+          "type": "string"
+        },
+        "destination": {
+          "default": "",
+          "title": "Destination",
+          "type": "string"
+        },
+        "secret": {
+          "default": "",
+          "title": "Secret",
+          "type": "string"
+        },
+        "relationship": {
+          "default": "",
+          "enum": [
+            "",
+            "ally",
+            "enemy",
+            "neutral"
+          ],
+          "title": "Relationship",
+          "type": "string"
+        },
+        "source_character": {
+          "default": "",
+          "title": "Source Character",
+          "type": "string"
+        },
+        "source_item": {
+          "default": "",
+          "title": "Source Item",
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "death",
+            "exit",
+            "revive",
+            "return",
+            "transfer",
+            "move",
+            "learn",
+            "relationship",
+            "act",
+            "use_item",
+            "custom"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "custom_rule": {
+          "default": "",
+          "title": "Custom Rule",
+          "type": "string"
+        },
+        "bindings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "actor",
+        "id",
+        "kind"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "scene_id": {
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "element_index": {
+          "minimum": 0,
+          "title": "Element Index",
+          "type": "integer"
+        },
+        "quote": {
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scene_id",
+        "element_index",
+        "quote"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Fact": {
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        },
+        "predicate": {
+          "pattern": "^(alive|available|at|owner|knows|contains|relationship|custom:[a-z][a-z0-9_]{0,63})$",
+          "title": "Predicate",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "predicate",
+        "value"
+      ],
+      "title": "Fact",
+      "type": "object"
+    },
+    "InitialFact": {
+      "additionalProperties": false,
+      "properties": {
+        "fact": {
+          "$ref": "#/$defs/Fact"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "assumption": {
+          "default": false,
+          "title": "Assumption",
+          "type": "boolean"
+        },
+        "explanation": {
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact",
+        "explanation"
+      ],
+      "title": "InitialFact",
+      "type": "object"
+    },
+    "SceneLogic": {
+      "additionalProperties": false,
+      "properties": {
+        "scene_id": {
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "coverage": {
+          "items": {
+            "$ref": "#/$defs/ElementCoverage"
+          },
+          "title": "Coverage",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scene_id",
+        "events",
+        "coverage"
+      ],
+      "title": "SceneLogic",
+      "type": "object"
+    },
+    "StoryLogic": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "1",
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        },
+        "entities": {
+          "items": {
+            "$ref": "#/$defs/Entity"
+          },
+          "title": "Entities",
+          "type": "array"
+        },
+        "initial_facts": {
+          "items": {
+            "$ref": "#/$defs/InitialFact"
+          },
+          "title": "Initial Facts",
+          "type": "array"
+        },
+        "scenes": {
+          "items": {
+            "$ref": "#/$defs/SceneLogic"
+          },
+          "title": "Scenes",
+          "type": "array"
+        },
+        "initial_source": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Initial Source",
+          "type": "object"
+        },
+        "initial_source_hash": {
+          "default": "",
+          "title": "Initial Source Hash",
+          "type": "string"
+        },
+        "custom_properties": {
+          "items": {
+            "$ref": "#/$defs/CustomProperty"
+          },
+          "maxItems": 64,
+          "title": "Custom Properties",
+          "type": "array"
+        },
+        "custom_rules": {
+          "items": {
+            "$ref": "#/$defs/CustomRule"
+          },
+          "maxItems": 64,
+          "title": "Custom Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "entities",
+        "initial_facts",
+        "scenes"
+      ],
+      "title": "StoryLogic",
+      "type": "object"
+    },
+    "CustomProperty": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^custom:[a-z][a-z0-9_]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "subject_kind": {
+          "enum": [
+            "character",
+            "item",
+            "location",
+            "secret"
+          ],
+          "title": "Subject Kind",
+          "type": "string"
+        },
+        "target_kind": {
+          "default": "",
+          "enum": [
+            "",
+            "character",
+            "item",
+            "location",
+            "secret"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Values",
+          "type": "array"
+        },
+        "symmetric": {
+          "default": false,
+          "title": "Symmetric",
+          "type": "boolean"
+        },
+        "usable_values": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Usable Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "subject_kind",
+        "values"
+      ],
+      "title": "CustomProperty",
+      "type": "object"
+    },
+    "CustomRule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "enum": [
+              "character",
+              "item",
+              "location",
+              "secret"
+            ],
+            "type": "string"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "active_roles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Active Roles",
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Requires",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/RuleStep"
+          },
+          "maxItems": 16,
+          "title": "Steps",
+          "type": "array"
+        },
+        "effects": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "maxItems": 64,
+          "title": "Effects",
+          "type": "array"
+        },
+        "lock_effects": {
+          "default": false,
+          "title": "Lock Effects",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "requires"
+      ],
+      "title": "CustomRule",
+      "type": "object"
+    },
+    "RuleStep": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "title": "Actor",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "item": {
+          "default": "",
+          "title": "Item",
+          "type": "string"
+        },
+        "destination": {
+          "default": "",
+          "title": "Destination",
+          "type": "string"
+        },
+        "secret": {
+          "default": "",
+          "title": "Secret",
+          "type": "string"
+        },
+        "relationship": {
+          "default": "",
+          "enum": [
+            "",
+            "ally",
+            "enemy",
+            "neutral"
+          ],
+          "title": "Relationship",
+          "type": "string"
+        },
+        "source_character": {
+          "default": "",
+          "title": "Source Character",
+          "type": "string"
+        },
+        "source_item": {
+          "default": "",
+          "title": "Source Item",
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "death",
+            "exit",
+            "revive",
+            "return",
+            "transfer",
+            "move",
+            "learn",
+            "relationship",
+            "act",
+            "use_item"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "kind"
+      ],
+      "title": "RuleStep",
+      "type": "object"
+    },
+    "CreativeBrief": {
+      "additionalProperties": false,
+      "properties": {
+        "template_id": {
+          "default": "faithful",
+          "title": "Template Id",
+          "type": "string"
+        },
+        "template_version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Template Version",
+          "type": "integer"
+        },
+        "name": {
+          "default": "忠实改编",
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "tone": {
+          "default": "克制自然",
+          "maxLength": 500,
+          "title": "Tone",
+          "type": "string"
+        },
+        "pacing": {
+          "default": "balanced",
+          "enum": [
+            "balanced",
+            "fast",
+            "slow"
+          ],
+          "title": "Pacing",
+          "type": "string"
+        },
+        "fidelity": {
+          "default": "strict",
+          "enum": [
+            "strict",
+            "balanced",
+            "creative"
+          ],
+          "title": "Fidelity",
+          "type": "string"
+        },
+        "instructions": {
+          "default": "",
+          "maxLength": 3000,
+          "title": "Instructions",
+          "type": "string"
+        }
+      },
+      "title": "CreativeBrief",
+      "type": "object"
+    },
+    "SceneGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "act",
+            "episode"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "scene_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Scene Ids",
+          "type": "array"
+        },
+        "target_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 300,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Minutes"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "scene_ids"
+      ],
+      "title": "SceneGroup",
+      "type": "object"
+    },
+    "EditingState": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "default": "needs_check",
+          "enum": [
+            "needs_check",
+            "checked"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "based_on_hash": {
+          "title": "Based On Hash",
+          "type": "string"
+        },
+        "dirty_scene_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dirty Scene Ids",
+          "type": "array"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "based_on_hash"
+      ],
+      "title": "EditingState",
+      "type": "object"
     }
   }
 }

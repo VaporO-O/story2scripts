@@ -56,7 +56,7 @@ def test_convert_api_returns_demo_screenplay() -> None:
     assert len(body["screenplay"]["scenes"]) == 3
 
 
-def test_convert_api_rejects_less_than_three_chapters() -> None:
+def test_convert_api_accepts_two_chapters() -> None:
     response = client.post(
         "/api/convert",
         json={
@@ -64,8 +64,8 @@ def test_convert_api_rejects_less_than_three_chapters() -> None:
         },
     )
 
-    assert response.status_code == 422
-    assert "3 个章节" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["screenplay"]["source"]["chapter_count"] == 2
 
 
 def test_convert_api_rejects_unknown_adaptation_type() -> None:
@@ -148,7 +148,7 @@ def test_convert_job_api_reports_failure() -> None:
         "/api/convert/jobs",
         json={
             "mode": "demo",
-            "novel_text": "第一章 开始\n内容一\n第二章 结束\n内容二",
+            "novel_text": "第一章 开始\n第二章 结束",
         },
     )
 
@@ -157,7 +157,7 @@ def test_convert_job_api_reports_failure() -> None:
 
     assert completed["status"] == "failed"
     assert completed["stage"] == "转换失败"
-    assert "3 个章节" in completed["error"]
+    assert "没有正文" in completed["error"]
     assert completed["result"] is None
 
 

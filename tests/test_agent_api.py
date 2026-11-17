@@ -140,7 +140,7 @@ def test_agent_run_with_invalid_novel_text_fails():
         json={
             "yaml_text": sample_yaml_text(),
             "mode": "demo",
-            "novel_text": "第一章 只有一章\n内容。",
+            "novel_text": "第一章 空标题",
         },
     )
     payload = wait_for_agent_job(response.json()["job_id"])

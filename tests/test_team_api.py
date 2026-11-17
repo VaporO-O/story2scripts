@@ -146,7 +146,7 @@ def test_team_run_with_novel_text_builds_knowledge():
 
 
 def test_team_run_with_invalid_novel_text_fails():
-    start = start_team_run(novel_text="第一章 只有一章\n内容。")
+    start = start_team_run(novel_text="第一章 空标题")
 
     payload = wait_for_team_job(start["job_id"])
 

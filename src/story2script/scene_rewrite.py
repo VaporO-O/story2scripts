@@ -9,6 +9,7 @@ from .metrics import metrics
 from .prompt_catalog import SCENE_REWRITE_PROMPT
 from .screenplay import Action, Dialogue, Scene, Screenplay
 from .security import DATA_FENCE_NOTICE
+from .creative_templates import brief_prompt
 
 
 SceneRewriteOperation = Literal[
@@ -265,7 +266,19 @@ class AISceneRewriter:
         )
         if not normalized:
             raise ValueError("AI 局部重写失败：模型没有返回有效场景。")
+        from .dialogue import repair_attributions
+        repair_attributions(normalized[0]["elements"], [
+            (element.character, element.text)
+            for element in target_scene.elements if element.type == "dialogue"
+        ])
+        for element in normalized[0]["elements"]:
+            if element["type"] == "dialogue":
+                for field in ("characters", "characters_present"):
+                    if element["character"] not in normalized[0][field]:
+                        normalized[0][field].append(element["character"])
         replacement_scene = Scene.model_validate(normalized[0])
+        replacement_scene.timeline_mode = target_scene.timeline_mode
+        replacement_scene.event_time_scene_id = target_scene.event_time_scene_id
 
         if replacement_scene.id != target_scene.id:
             raise ValueError("AI scene rewrite must keep the original scene id.")
@@ -302,6 +315,7 @@ class AISceneRewriter:
                 "adaptation_type": screenplay.adaptation_type,
                 "logline": screenplay.logline,
                 "global_state": screenplay.global_state.model_dump(mode="json"),
+                "plot_state": screenplay.plot_state.model_dump(mode="json") if screenplay.plot_state else None,
                 "characters": [character.model_dump(mode="json") for character in screenplay.characters],
             },
             "target_scene": target_scene.model_dump(mode="json"),
@@ -309,6 +323,10 @@ class AISceneRewriter:
             "operation_goal": OPERATION_PROMPTS[operation],
             "character_id": character_id,
             "tone": tone,
+            "dialogue_attribution": [
+                {"character": element.character, "text": element.text}
+                for element in target_scene.elements if element.type == "dialogue"
+            ],
         }
         return (
             "你是专业影视编剧。请基于给定剧本上下文，只局部重写 target_scene。\n"
@@ -317,12 +335,16 @@ class AISceneRewriter:
             "int_ext、time_of_day、location 必须保持不变；"
             "characters 和 dialogue.character 只能引用已存在角色 id；"
             "必须遵守 global_state 中的人物表、地点表和时间线，不要改写跨章节事实；"
+            "如有 plot_state，按事件时间遵守角色、物品、知情、关系约束，只有显式复活/回归后才可恢复行动；"
+            "可以改写对白措辞，但必须保留关键剧情信息及其说话人归属，"
+            "不能为了提高冲突评分删去关键对白或把甲的证词转交给乙；"
             "必须保留 heading, int_ext, time_of_day, location, characters_present, props, "
             "dramatization_decisions, summary, goal, conflict, beat, subtext, characters, "
             "elements, camera_hints。\n"
             "本次局部操作："
             f"{OPERATION_PROMPTS[operation]}\n"
             f"{DATA_FENCE_NOTICE}\n"
+            + brief_prompt(screenplay.creative_brief)
             + (f"审校意见（请重点修正以下问题）：{feedback}\n" if feedback else "")
             + f"上下文 JSON：{json.dumps(context, ensure_ascii=False)}"
         )
@@ -369,6 +391,12 @@ def rewrite_scene(
             client=client,
             feedback=feedback,
         )
+        if screenplay.plot_state:
+            from .plot_revision import hard_issues, check_local_logic
+            issues = hard_issues(screenplay, result[0], screenplay.plot_state.changes)
+            if issues:
+                raise ValueError("局部改写违反剧情约束：" + issues[0].message)
+            check_local_logic(screenplay, result[0], scene_id, mode, client)
     except ValueError as exc:
         metrics.record_task(
             "scene_rewrite",

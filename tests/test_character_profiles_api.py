@@ -29,10 +29,10 @@ def test_character_profiles_api() -> None:
     assert "失踪真相" not in {item["name"] for item in profiles}
 
 
-def test_character_profiles_api_rejects_short_novel() -> None:
+def test_character_profiles_api_accepts_short_novel() -> None:
     response = client.post(
         "/api/characters/profiles",
         json={"novel_text": "第1章 开始\n内容一\n第2章 结束\n内容二"},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200

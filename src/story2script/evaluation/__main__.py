@@ -46,11 +46,47 @@ def _parser() -> argparse.ArgumentParser:
     score.add_argument("--responses", required=True)
     score.add_argument("--key", required=True)
     score.add_argument("--output", required=True)
+    audit = subparsers.add_parser("audit-dialogue", help="分析已保存的 AI 剧本对白归属")
+    audit.add_argument("--checkpoint", action="append", required=True)
+    audit.add_argument("--dataset", action="append", required=True)
+    audit.add_argument("--output", required=True, help="JSON/Markdown 输出前缀")
+    retrieval = subparsers.add_parser("rag", help="独立检索评测")
+    retrieval.add_argument("--dataset", action="append", required=True)
+    retrieval.add_argument("--variants", default="lexical")
+    retrieval.add_argument("--mode", choices=("demo", "ai"), default="demo")
+    retrieval.add_argument("--top-k", type=int, default=5)
+    retrieval.add_argument("--answers", action="store_true")
+    retrieval.add_argument("--min-recall", type=float)
+    retrieval.add_argument("--min-mrr", type=float)
+    retrieval.add_argument("--output", default="evals/reports/rag-latest")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "rag":
+        from .retrieval import run_retrieval_eval
+        if not 1 <= args.top_k <= 20:
+            raise SystemExit("top-k 必须在 1 到 20 之间")
+        if any(value is not None and not 0 <= value <= 1
+               for value in (args.min_recall, args.min_mrr)):
+            raise SystemExit("检索门禁阈值必须在 0 到 1 之间")
+        report = run_retrieval_eval(args.dataset, args.variants.split(","), args.mode,
+                                    args.top_k, args.output, answers=args.answers)
+        print(report["summary"])
+        failed = any(row["status"] != "completed" for row in report["summary"].values())
+        for variant in report["summary"].values():
+            for split, row in variant.get("splits", {}).items():
+                for key, minimum in ((f"recall_at_{args.top_k}", args.min_recall), ("mrr", args.min_mrr)):
+                    if minimum is not None and (row[key] is None or row[key] < minimum):
+                        print(f"检索门禁失败：{split} {key}={row[key]} < {minimum}")
+                        failed = True
+        return int(failed)
+    if args.command == "audit-dialogue":
+        from .dialogue_audit import audit_checkpoints
+        report = audit_checkpoints(args.checkpoint, args.dataset, args.output)
+        print(report["summary"])
+        return 0
     if args.command == "score-pairwise":
         path = score_blind_review_files(args.responses, args.key, args.output)
         print(f"Pairwise summary: {path}")

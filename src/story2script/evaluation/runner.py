@@ -370,6 +370,10 @@ def _aggregate_attribution(items: list[AttributionMetrics]) -> dict:
         "matched": matched,
         "correct": correct,
         "accuracy": round(correct / expected, 4) if expected else 1.0,
+        "quote_coverage": round(matched / expected, 4) if expected else 1.0,
+        "matched_speaker_accuracy": round(correct / matched, 4) if matched else 0.0,
+        "wrong_speaker": matched - correct,
+        "unmatched": expected - matched,
     }
 
 
@@ -484,6 +488,10 @@ def _summarize(
             "character_recall": characters.recall,
             "character_f1": characters.f1,
             "dialogue_accuracy": dialogue["accuracy"],
+            "dialogue_quote_coverage": dialogue["quote_coverage"],
+            "dialogue_matched_speaker_accuracy": dialogue["matched_speaker_accuracy"],
+            "dialogue_wrong_speaker": dialogue["wrong_speaker"],
+            "dialogue_unmatched": dialogue["unmatched"],
             "avg_initial_score": _mean([row.initial_avg_score for row in rows]),
             "avg_final_score": _mean([row.final_avg_score for row in rows]),
             "avg_score_delta": _mean([row.score_delta for row in rows]),

@@ -87,10 +87,14 @@ def test_workbench_exposes_chapter_view() -> None:
 
 def test_workbench_chapter_detection_skips_empty_toc_headings() -> None:
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    parser = (STATIC_DIR / "chapter_parser.js").read_text(encoding="utf-8")
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
     # 章节识别要与后端一致：标题后没有正文（目录项）的不计入章节。
     assert "function detectChapters(" in script
-    assert "if (content)" in script
+    assert "window.StoryChapters.detectChapters(text)" in script
+    assert "if (content) chapters.push" in parser
+    assert 'src="/static/chapter_parser.js"' in html
     assert "detectChapters(novelInput.value)" in script
     assert "function renderChapterView(" in script
 

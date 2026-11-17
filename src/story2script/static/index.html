@@ -26,6 +26,8 @@
           工作台
         </button>
         <button id="viewProfilesButton" class="view-nav-button" type="button">人物小传</button>
+        <button id="viewStudioButton" class="view-nav-button" type="button">创作面板</button>
+        <button id="viewKnowledgeButton" class="view-nav-button" type="button">故事问答</button>
         <button id="viewAgentsButton" class="view-nav-button" type="button">智能改编</button>
         <button id="viewProvidersButton" class="view-nav-button" type="button">API 配置</button>
         <button id="viewMetricsButton" class="view-nav-button" type="button">运行指标</button>
@@ -71,7 +73,17 @@
             </label>
           </div>
 
-          <textarea id="novelInput" placeholder="请粘贴小说正文，并使用“第一章 标题”格式标记至少三个章节……"></textarea>
+          <textarea id="novelInput" placeholder="请粘贴小说正文，单章或短篇也可以；章节标题可用“第一章 标题”，无标题时按一章处理……"></textarea>
+          <details class="creative-settings"><summary>改编风格与节奏</summary>
+            <label>模板<select id="creativeTemplate"><option value="">沿用默认改编风格</option></select></label>
+            <label>模板名称<input id="creativeName" value="我的改编风格" maxlength="80" /></label>
+            <label>语气与氛围<input id="creativeTone" value="克制自然" maxlength="500" /></label>
+            <div class="rewrite-fields"><label>节奏<select id="creativePacing"><option value="balanced">适中</option><option value="fast">紧凑</option><option value="slow">舒缓</option></select></label>
+              <label>表达保真<select id="creativeFidelity"><option value="strict">忠实</option><option value="balanced">适度改写</option><option value="creative">表达扩展</option></select></label></div>
+            <label>补充要求<textarea id="creativeInstructions" rows="3" maxlength="3000" placeholder="例如：保留线索，减少解释性独白；重大剧情变化请使用剧情改写。"></textarea></label>
+            <div class="button-row"><button id="saveCreativeTemplate" type="button" class="ghost-button">保存为模板版本</button><button id="applyCreativeBrief" type="button" class="ghost-button">应用到当前剧本</button></div>
+            <p id="creativeStatus" class="scene-chat-hint">AI 转换与后续改写使用这些偏好；本地模式仅保存偏好，不模拟风格生成。</p>
+          </details>
           <div id="chapterView" class="chapter-view hidden"></div>
 
           <div class="panel-footer">
@@ -134,6 +146,11 @@
           <textarea id="yamlOutput" class="hidden" spellcheck="false"></textarea>
 
           <div class="scene-chat">
+            <div class="view-toggle" role="group" aria-label="改写范围">
+              <button id="localRewriteTab" class="view-button is-active" type="button">局部润色</button>
+              <button id="plotRewriteTab" class="view-button" type="button">剧情改写</button>
+            </div>
+            <div id="localRewritePanel">
             <div class="scene-chat-bar">
               <span id="chatSceneChip" class="scene-chip" title="点剧本里的 SCENE 徽章可切换当前场景">
                 当前场景：scene-1
@@ -164,6 +181,48 @@
                 placeholder="直接说要改什么，例如：第三场对白太软，让林夏更强硬一点"
               ></textarea>
               <button id="chatSendButton" class="primary-button" type="button">发送</button>
+            </div>
+            </div>
+            <div id="plotRewritePanel" class="plot-panel hidden">
+              <p class="scene-chat-hint">改变角色状态、物品归属、地点、秘密或关系，并联动后续情节。先核对计划与初始事实，再生成可回退的新版本。需要已配置的 AI 模型。</p>
+              <div class="rewrite-fields">
+                <label>目标角色<select id="plotCharacter"><option value="">从指令识别</option></select></label>
+                <label>剧情变更<select id="plotOperation"><option value="death">角色死亡</option><option value="exit">角色离场</option><option value="revive">角色复活</option><option value="return">角色回归</option><option value="transfer">物品转移</option><option value="move">地点移动</option><option value="learn">获知秘密</option><option value="relationship">关系变化</option><option value="custom">自定义事件</option></select></label>
+                <label>生效场景<select id="plotScene"></select></label>
+              </div>
+              <p class="scene-chat-hint">变更发生在所选场景结尾；此前场景保留。回忆、录音或梦境需先标注故事时间。</p>
+              <label for="plotInstruction">你希望剧情怎样改变？</label>
+              <textarea id="plotInstruction" rows="3" maxlength="4000" placeholder="例如：让林夏在这一场死亡，之后由周宁从她留下的信件中发现线索，继续调查。"></textarea>
+              <p id="plotCustomHint" class="scene-chat-hint hidden">直接描述你要发生的事件，例如“林夏受重伤，直到康复前不能行动”。模型会提出前提、状态变化和影响规则，预览确认后再执行；无需手写规则。</p>
+              <div id="plotEventFields" class="plot-options">
+                <label data-operations="transfer relationship">另一角色<input id="plotTarget" placeholder="姓名或角色 ID，可从指令识别" /></label>
+                <label data-operations="transfer">物品<input id="plotItem" placeholder="例如：仓库钥匙" /></label>
+                <label data-operations="move">目的地<input id="plotDestination" placeholder="例如：仓库" /></label>
+                <label data-operations="learn">秘密或线索<input id="plotSecret" placeholder="例如：凶手的身份" /></label>
+                <label data-operations="learn">来源人物<input id="plotSourceCharacter" placeholder="人物和物品来源二选一" /></label>
+                <label data-operations="learn">来源物品<input id="plotSourceItem" placeholder="例如：信件" /></label>
+                <label data-operations="relationship">新的关系<select id="plotRelationship"><option value="">从指令识别</option><option value="ally">同盟</option><option value="enemy">敌对</option><option value="neutral">中立</option></select></label>
+              </div>
+              <details class="plot-budget"><summary>运行预算</summary><div class="rewrite-fields">
+                <label>最多模型调用<input id="plotMaxCalls" type="number" min="3" max="500" value="80" /></label>
+                <label>最长运行秒数<input id="plotTimeout" type="number" min="30" max="7200" value="1200" /></label>
+              </div><p class="scene-chat-hint">预算用于候选生成和检查；预览计划另外调用模型一次。</p></details>
+              <div class="button-row">
+                <button id="plotPlanButton" class="primary-button" type="button">预览修改计划</button>
+                <button id="plotRestoreButton" class="ghost-button" type="button">恢复上次剧情任务</button>
+              </div>
+              <p id="plotStatus" role="status" aria-live="polite">先生成剧本，再选择角色和生效场景。</p>
+              <div id="plotPlanPreview"></div>
+              <div class="button-row">
+                <button id="plotGenerateButton" class="primary-button hidden" type="button">按计划生成候选</button>
+                <button id="plotResumeButton" class="ghost-button hidden" type="button">继续中断的任务</button>
+              </div>
+              <div id="plotRevisionPreview"></div>
+              <div class="button-row">
+                <button id="plotAdoptButton" class="primary-button hidden" type="button">采用新版本</button>
+                <button id="plotRollbackButton" class="ghost-button hidden" type="button">回退到改写前</button>
+                <button id="plotDownloadButton" class="ghost-button hidden" type="button">下载候选版本</button>
+              </div>
             </div>
           </div>
 
@@ -230,6 +289,90 @@
           </div>
         </section>
       </section>
+      </div>
+
+      <div id="viewStudio" class="view hidden">
+        <section class="profile-panel studio-panel">
+          <div class="section-heading"><h2>创作面板</h2><button id="studioRefresh" type="button" class="ghost-button">读取工作台最新剧本</button></div>
+          <div class="studio-toolbar">
+            <label>查看版本<select id="studioSource"><option value="current">当前工作稿</option><option value="candidate" disabled>最近剧情候选</option><option value="base" disabled>该候选的原稿</option></select></label>
+            <label>场景<select id="studioScene"></select></label>
+            <label>状态时点<select id="studioBoundary"><option value="end">该场结束</option><option value="start">该场开始</option></select></label>
+            <label>角色筛选<select id="studioCharacter"><option value="">全部角色</option></select></label>
+          </div>
+          <p id="studioStatus" role="status" aria-live="polite">先在工作台生成或载入剧本。</p>
+          <section class="studio-job-panel" aria-label="后台创作任务">
+            <p id="studioJobStatus" role="status" aria-live="polite">AI 分组、情绪分析和重新核验会在后台执行，刷新后可恢复。</p>
+            <progress id="studioJobProgress" max="100" value="0" aria-label="创作任务进度"></progress>
+            <div class="button-row"><button id="studioRestoreJob" type="button" class="ghost-button">恢复上次创作任务</button><button id="studioResumeJob" type="button" class="ghost-button" disabled>继续中断任务</button><button id="studioCancelJob" type="button" class="ghost-button" disabled>取消排队任务</button><button id="studioLoadJobInput" type="button" class="ghost-button" disabled>载入任务原稿</button><button id="studioUseJobResult" type="button" class="primary-button" disabled>查看或应用任务结果</button><button id="studioListJobs" type="button" class="ghost-button">任务历史</button></div>
+            <details><summary>创作任务预算</summary><div class="studio-toolbar"><label>最多模型调用<input id="studioJobMaxCalls" type="number" min="1" max="500" value="80" /></label><label>最长执行秒数<input id="studioJobTimeout" type="number" min="30" max="7200" value="1200" /></label></div><p class="scene-chat-hint">检查点、调用次数和累计执行时间在恢复时保留；单任务最多执行三次。运行中的模型请求不能强行取消。</p></details>
+            <div id="studioJobHistory"></div>
+          </section>
+          <nav class="view-toggle studio-tabs" aria-label="创作工具">
+            <button type="button" data-studio-tab="graph" class="view-button is-active">剧情图谱</button>
+            <button type="button" data-studio-tab="editor" class="view-button">分幕与编辑</button>
+            <button type="button" data-studio-tab="voices" class="view-button">情绪与朗读</button>
+            <button type="button" data-studio-tab="files" class="view-button">导出与草稿</button>
+          </nav>
+          <div id="studioGraphPanel" data-studio-panel="graph">
+            <div class="studio-columns"><div><h3>人物关系</h3><p class="scene-chat-hint">关系随场景时点变化；虚线仅表示同场出现。点击角色筛选场景。</p><div id="studioGraph" class="studio-graph"></div><div id="studioCharacterFacts"></div></div>
+              <div><h3>事件与因果来源</h3><div id="studioTimeline" class="studio-timeline"></div></div></div>
+            <div id="studioEvidence" class="studio-evidence" aria-live="polite"></div>
+          </div>
+          <div data-studio-panel="editor" class="hidden">
+            <div class="studio-toolbar"><label>组织方式<select id="structureKind"><option value="act">幕</option><option value="episode">集</option></select></label>
+              <label>数量<input id="structureCount" type="number" min="1" max="100" value="3" /></label><label>每幕／集目标分钟<input id="structureMinutes" type="number" min="0.1" max="300" step="0.1" placeholder="可选" /></label>
+              <label>分组方法<select id="structureMode"><option value="balanced">均匀分组</option><option value="ai">AI 按转折建议</option></select></label><button id="structurePropose" type="button" class="ghost-button">预览分组</button></div>
+            <div id="structureProposal"></div>
+            <div class="studio-columns studio-editor-layout"><nav id="studioSceneTree" aria-label="幕集场景导航"></nav><div><h3>编辑当前场景</h3><p class="scene-chat-hint">停止输入 2 秒后保存草稿；正文改动会清除原有校验状态。Ctrl+S 可立即保存。</p><div id="studioSceneEditor"></div></div></div>
+            <div class="button-row"><button id="studioRuleCheck" class="ghost-button" type="button">检查现有事件账本</button><button id="studioAiCheck" class="primary-button" type="button">AI 重提事件并核验</button></div>
+            <div id="studioChecks"></div>
+          </div>
+          <div data-studio-panel="voices" class="hidden">
+            <div class="button-row"><button id="emotionAnnotated" type="button" class="ghost-button">读取全剧情绪标注</button><button id="emotionAI" type="button" class="ghost-button">AI 分析当前场景情绪</button></div>
+            <p class="scene-chat-hint">情绪轨迹来自对白标注或模型解释；不确定项保持空缺，不作为剧情事实。</p>
+            <div id="emotionTrajectory" class="emotion-trajectory"></div><div id="emotionEvidence"></div>
+            <h3>分角色朗读</h3><p id="speechStatus" role="status">使用浏览器提供的语音，声线取决于设备。可选择旁白与角色声线；本页提供试听，不生成音频文件。</p>
+            <div id="speechVoices" class="speech-voices"></div>
+            <div class="studio-toolbar"><label>朗读范围<select id="speechScope"><option value="scene">当前场景</option><option value="all">完整剧本</option></select></label><label><input id="speechActions" type="checkbox" checked />包含动作旁白</label>
+              <label>音量<input id="speechVolume" type="number" min="0" max="1" step="0.1" value="1" /></label>
+              <button id="speechPlay" type="button" class="primary-button">开始朗读</button><button id="speechPause" type="button" class="ghost-button">暂停</button><button id="speechResume" type="button" class="ghost-button">继续</button><button id="speechStop" type="button" class="ghost-button">停止</button></div>
+            <div id="speechCurrent" aria-live="polite"></div>
+          </div>
+          <div data-studio-panel="files" class="hidden">
+            <h3>导出当前查看的版本</h3><p class="scene-chat-hint">导出注明草稿或规则检查状态。HTML 可通过浏览器打印为 PDF；Word 文件可继续编辑。</p>
+            <label class="studio-check"><input id="exportAppendix" type="checkbox" checked />包含人物表、场景与道具表</label>
+            <div class="button-row"><button type="button" class="ghost-button" data-studio-export="txt">下载 TXT</button><button type="button" class="ghost-button" data-studio-export="html">下载 HTML</button><button type="button" class="ghost-button" data-studio-export="docx">下载 Word</button><button id="studioPrint" type="button" class="ghost-button">打开打印预览</button></div>
+            <h3>草稿与历史版本</h3><div class="button-row"><button id="studioSaveDraft" class="primary-button" type="button">保存当前草稿</button><button id="studioNewDraft" class="ghost-button" type="button">另存为独立草稿</button><button id="studioListDrafts" class="ghost-button" type="button">刷新草稿列表</button></div>
+            <p id="draftStatus" role="status">草稿保存在本机任务数据库，刷新后可载入。</p><div id="studioDrafts"></div>
+          </div>
+        </section>
+      </div>
+
+      <div id="viewKnowledge" class="view hidden">
+        <section class="profile-panel">
+          <div class="section-heading"><h2>故事问答</h2></div>
+          <p class="profile-hint">根据工作台中的小说查找人物、事件与线索。回答会附上原文章节和引用。</p>
+          <form id="storyQuestionForm" class="knowledge-form">
+            <label for="storyQuestion">你想了解什么？</label>
+            <textarea id="storyQuestion" rows="3" maxlength="2000" required placeholder="例如：林夏为什么决定去仓库？"></textarea>
+            <div class="button-row">
+              <label>回答方式 <select id="storyAnswerMode"><option value="demo">查找原文（本地）</option><option value="ai">AI 回答</option></select></label>
+              <label>阅读进度 <input id="storyBeforeChapter" type="number" min="1" placeholder="全部章节" aria-describedby="storyRangeHint" /></label>
+              <label class="review-toggle"><input id="storyRerank" type="checkbox" disabled /> 精选相关依据（AI）</label>
+              <button id="askStoryButton" class="primary-button" type="submit">查找答案</button>
+            </div>
+            <p id="storyRangeHint" class="profile-hint">填写章节序号后，只使用该章之前的原文，避免提前透露后续剧情。</p>
+          </form>
+          <div id="storyAnswer" class="knowledge-answer" aria-live="polite">请先在工作台导入小说，再输入问题。</div>
+          <p id="storyIndexStatus" class="profile-hint" aria-live="polite">AI 模式配置 Embedding 后会自动保存向量索引，重启后可复用；本地模式使用词法检索。</p>
+          <div id="storyEvidence" class="knowledge-evidence"></div>
+          <details class="creative-settings"><summary>持久化向量索引</summary>
+            <p class="profile-hint">索引保存原文片段、章节和向量。内容或模型版本变化时建立独立快照；删除索引不会删除原小说或剧本。查询仍需 Embedding 服务生成问题向量。</p>
+            <div class="button-row"><button id="ragBuildIndex" type="button" class="ghost-button">为当前小说建立索引</button><button id="ragListIndexes" type="button" class="ghost-button">查看已保存索引</button></div>
+            <p id="ragIndexMessage" role="status"></p><div id="ragIndexList"></div>
+          </details>
+        </section>
       </div>
 
       <div id="viewProfiles" class="view hidden">
@@ -544,7 +687,11 @@
       </div>
     </main>
 
+    <script src="/static/chapter_parser.js"></script>
     <script src="/static/app.js"></script>
+    <script src="/static/plot.js"></script>
+    <script src="/static/speech_queue.js"></script>
+    <script src="/static/studio.js"></script>
   </body>
 </html>
 

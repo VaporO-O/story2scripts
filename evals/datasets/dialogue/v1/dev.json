@@ -1,0 +1,227 @@
+{
+  "version": "dialogue-v1",
+  "split": "dev",
+  "description": "原创对白归属回归样本；覆盖多轮、听话人、后置说话人、短回答、长对白及重复原句。",
+  "cases": [
+    {
+      "id": "multi_turn",
+      "title": "multi_turn",
+      "novel_text": "第一章 开场\n林夏说：“钥匙在柜中。”周宁说：“我去拿钥匙。”\n第二章 线索\n林夏说：“车票是假的。”周宁说：“先查日期。”\n第三章 收束\n林夏说：“账本少了一页。”周宁说：“留下证据。”",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "周宁",
+          "林夏"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "钥匙在柜中",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "我去拿钥匙",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "车票是假的",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "先查日期",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "账本少了一页",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "留下证据",
+            "speaker": "周宁"
+          }
+        ]
+      }
+    },
+    {
+      "id": "addressed_listener",
+      "title": "addressed_listener",
+      "novel_text": "第一章 开场\n林夏对周宁说：“信封不能拆开。”周宁对林夏说：“我会保管好。”\n第二章 线索\n林夏向周宁问：“船什么时候开？”周宁答道：“今晚九点开。”\n第三章 收束\n林夏冲周宁喊：“别碰那个箱子！”周宁说：“我已经停下。”",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "周宁",
+          "林夏"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "信封不能拆开",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "我会保管好",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "船什么时候开",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "今晚九点开",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "别碰那个箱子",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "我已经停下",
+            "speaker": "周宁"
+          }
+        ]
+      }
+    },
+    {
+      "id": "postposed_speech",
+      "title": "postposed_speech",
+      "novel_text": "第一章 开场\n“门锁被换过。”林夏说道。\n第二章 线索\n“钥匙不在我手里。”周宁答道。\n第三章 收束\n“那就去找门卫。”林夏问道。",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "周宁",
+          "林夏"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "门锁被换过",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "钥匙不在我手里",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "那就去找门卫",
+            "speaker": "林夏"
+          }
+        ]
+      }
+    },
+    {
+      "id": "short_reply",
+      "title": "short_reply",
+      "novel_text": "第一章 开场\n林夏说：“好。”周宁说：“走。”\n第二章 线索\n林夏问：“谁？”周宁答：“我。”\n第三章 收束\n林夏说：“停。”周宁喊：“快！”",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "周宁",
+          "林夏"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "好",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "走",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "谁",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "我",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "停",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "快",
+            "speaker": "周宁"
+          }
+        ]
+      }
+    },
+    {
+      "id": "long_dialogue",
+      "title": "long_dialogue",
+      "novel_text": "第一章 开场\n林夏说：“账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，所以我们必须保存原件。”\n第二章 线索\n周宁说：“不要只看复印件。”\n第三章 收束\n林夏说：“原件在档案室。”",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "周宁",
+          "林夏"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，账本每一页都记录着当天的交易金额和经手人的姓名，所以我们必须保存原件。",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "不要只看复印件",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "原件在档案室",
+            "speaker": "林夏"
+          }
+        ]
+      }
+    },
+    {
+      "id": "repeated_quotes",
+      "title": "repeated_quotes",
+      "novel_text": "第一章 开场\n林夏说：“门锁被换过。”周宁说：“门锁被换过。”\n第二章 线索\n林夏说：“再确认一次。”\n第三章 收束\n周宁说：“有人回来过。”",
+      "expected": {
+        "chapter_titles": [
+          "第一章 开场",
+          "第二章 线索",
+          "第三章 收束"
+        ],
+        "character_names": [
+          "周宁",
+          "林夏"
+        ],
+        "dialogue_attributions": [
+          {
+            "quote": "门锁被换过",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "门锁被换过",
+            "speaker": "周宁"
+          },
+          {
+            "quote": "再确认一次",
+            "speaker": "林夏"
+          },
+          {
+            "quote": "有人回来过",
+            "speaker": "周宁"
+          }
+        ]
+      }
+    }
+  ]
+}

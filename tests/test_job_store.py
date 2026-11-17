@@ -58,12 +58,12 @@ def test_running_job_requeued_on_restart():
     store = ConversionJobStore()
     job_id = store.create(demo_request()).job_id
     wait_for(store, job_id)
+    store._executor.shutdown(wait=True)
 
     # 模拟进程在执行中被杀：把行改回 running 后重建 store
     with sqlite3.connect(resolve_db_path()) as conn:
         conn.execute(
-            "UPDATE jobs SET status = 'running', result_json = '', attempts = 1 "
-            "WHERE job_id = ?",
+            "UPDATE jobs SET status = 'running', result_json = '', attempts = 1 WHERE job_id = ?",
             (job_id,),
         )
 
@@ -77,16 +77,16 @@ def test_running_job_fails_after_restart_attempt_limit():
     store = ConversionJobStore()
     job_id = store.create(demo_request()).job_id
     wait_for(store, job_id)
+    store._executor.shutdown(wait=True)
 
     with sqlite3.connect(resolve_db_path()) as conn:
         conn.execute(
-            "UPDATE jobs SET status = 'running', result_json = '', attempts = 3 "
-            "WHERE job_id = ?",
+            "UPDATE jobs SET status = 'running', result_json = '', attempts = 3 WHERE job_id = ?",
             (job_id,),
         )
 
     recovered = ConversionJobStore()
-    snapshot = recovered.snapshot(job_id)
+    snapshot = wait_for(recovered, job_id)
     assert snapshot.status == "failed"
     assert "进程重启中断" in snapshot.error
 
@@ -95,6 +95,7 @@ def test_corrupt_request_row_marked_failed_on_recover():
     store = ConversionJobStore()
     job_id = store.create(demo_request()).job_id
     wait_for(store, job_id)
+    store._executor.shutdown(wait=True)
 
     with sqlite3.connect(resolve_db_path()) as conn:
         conn.execute(
@@ -103,7 +104,7 @@ def test_corrupt_request_row_marked_failed_on_recover():
         )
 
     recovered = ConversionJobStore()
-    snapshot = recovered.snapshot(job_id)
+    snapshot = wait_for(recovered, job_id)
     assert snapshot.status == "failed"
     assert "任务数据损坏" in snapshot.error
 
@@ -197,26 +198,38 @@ def test_jobs_api_and_cancel_routes():
 
 
 def test_update_skips_persist_when_nothing_changed():
-    store = ConversionJobStore()
+    class IdleStore(ConversionJobStore):
+        def _execute(self, job_id):
+            self._claim(job_id)
+
+    store = IdleStore()
     job_id = store.create(demo_request()).job_id
-    wait_for(store, job_id)
+    store._executor.shutdown(wait=True)
 
     persists: list[str] = []
     original_persist = store._persist
     store._persist = lambda row: (persists.append(row["job_id"]), original_persist(row))[1]
 
     # 首次写入四个字段都变了，应落盘
-    store._update(job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段")
+    store._update(
+        job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段"
+    )
     assert len(persists) == 1
 
     # 完全相同的重复更新不该再写磁盘：细粒度进度会把更新次数拉到几十次，
     # 而每次 _persist 都要新建连接并重写整行（含整篇小说的 request_json）。
-    store._update(job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段")
-    store._update(job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段")
+    store._update(
+        job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段"
+    )
+    store._update(
+        job_id, status="running", progress=50, stage="生成剧本", message="已处理 1/9 个片段"
+    )
     assert len(persists) == 1
 
     # 任一字段变化仍要落盘
-    store._update(job_id, status="running", progress=51, stage="生成剧本", message="已处理 2/9 个片段")
+    store._update(
+        job_id, status="running", progress=51, stage="生成剧本", message="已处理 2/9 个片段"
+    )
     assert len(persists) == 2
 
 
@@ -235,8 +248,8 @@ def test_conversion_job_reports_fine_grained_progress():
     assert snapshot.status == "succeeded"
 
     progresses = [progress for progress, _, _ in updates]
-    assert progresses == sorted(progresses)          # 单调不减
-    assert progresses[-1] == 90                      # 收尾交给 _complete 置 100
+    assert progresses == sorted(progresses)  # 单调不减
+    assert progresses[-1] == 90  # 收尾交给 _complete 置 100
 
     # 45→88 区间内应出现多个中间点，而不是只有 45 和 90 两个值
     generation = [progress for progress, stage, _ in updates if stage == "生成剧本"]

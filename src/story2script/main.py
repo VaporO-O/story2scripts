@@ -7,7 +7,8 @@ from time import perf_counter
 
 import anyio
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
+from .job_store import JobStorageError, JobConflictError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -41,6 +42,7 @@ from .api_models import ReviewReportMergeRequest
 from .api_models import ReviewReportMergeResponse
 from .api_models import RagQueryRequest
 from .api_models import RagQueryResponse
+from .api_models import StoryQuestionRequest, StoryQuestionResponse
 from .api_models import SceneChatRequest
 from .api_models import SceneChatResponse
 from .api_models import SceneReviewRequest
@@ -79,8 +81,14 @@ from .security import (
     screen_novel_text,
 )
 from .story_state import extract_global_story_state
+from .story_qa import answer_story_question
 from .yaml_export import screenplay_from_yaml
 from .yaml_export import screenplay_to_yaml
+from .plot_api import router as plot_router
+from .studio_api import router as studio_router
+from .rag_api import router as rag_router
+from .creative_templates import configure_converter, finish_conversion
+from .redis_runtime import redis_enabled, RedisUnavailable
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -91,6 +99,72 @@ app = FastAPI(
     version="0.1.0",
     description="AI-assisted novel-to-screenplay workbench.",
 )
+app.include_router(plot_router)
+app.include_router(studio_router)
+app.include_router(rag_router)
+
+
+@app.exception_handler(JobStorageError)
+async def job_storage_unavailable(request, exc):
+    return JSONResponse(status_code=503, content={"detail": str(exc)}, headers={"Retry-After": "3"})
+
+
+@app.exception_handler(JobConflictError)
+async def job_state_conflict(request, exc):
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(RedisUnavailable)
+async def redis_service_unavailable(request, exc):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.get("/api/infrastructure")
+def infrastructure_status():
+    from .redis_runtime import cache_enabled, namespace, number, redis_client, key_for
+    from .redis_dispatch import database_identity
+    from .job_store import _connect, resolve_db_path
+
+    enabled = redis_enabled()
+    report = {
+        "task_backend": "redis" if enabled else "local",
+        "cache_backend": "redis" if cache_enabled() else "local",
+        "namespace": namespace(),
+        "redis": "not_required",
+        "workers": 0,
+        "pending_dispatches": 0,
+        "generation_rpm": number("STORY2SCRIPT_LLM_RPM", 0, minimum=0, maximum=1_000_000),
+        "embedding_rpm": number("STORY2SCRIPT_EMBED_RPM", 0, minimum=0, maximum=1_000_000),
+    }
+    if enabled:
+        conn = _connect(resolve_db_path())
+        try:
+            report["pending_dispatches"] = conn.execute(
+                "SELECT COUNT(*) FROM job_outbox"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+    if enabled or cache_enabled() or report["generation_rpm"] or report["embedding_rpm"]:
+        try:
+            client = redis_client()
+            client.ping()
+            report["redis"] = "connected"
+            if enabled:
+                import itertools
+
+                report["workers"] = len(
+                    list(
+                        itertools.islice(
+                            client.scan_iter(match=key_for("workers", database_identity() + ":*")),
+                            100,
+                        )
+                    )
+                )
+        except Exception:
+            report["redis"] = "unavailable"
+    return report
+
+
 class RevalidatingStaticFiles(StaticFiles):
     """静态资源强制回源校验。
 
@@ -129,17 +203,11 @@ async def require_api_token(request: Request, call_next):
     """
     token = os.getenv(API_TOKEN_ENV, "").strip()
     path = request.url.path
-    if (
-        token
-        and path.startswith("/api/")
-        and path not in _PUBLIC_PATHS
-    ):
+    if token and path.startswith("/api/") and path not in _PUBLIC_PATHS:
         header = request.headers.get("authorization", "")
         provided = header[7:].strip() if header.lower().startswith("bearer ") else ""
         if not compare_digest(provided, token):
-            return JSONResponse(
-                status_code=401, content={"detail": "缺少或无效的 API Token。"}
-            )
+            return JSONResponse(status_code=401, content={"detail": "缺少或无效的 API Token。"})
     return await call_next(request)
 
 
@@ -147,9 +215,7 @@ async def require_api_token(request: Request, call_next):
 async def index() -> FileResponse:
     # 与 /static/* 同口径：index.html 是入口，它一旦被缓存，里面引用的
     # app.js / styles.css 版本也跟着被钉死。
-    return FileResponse(
-        STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"}
-    )
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/health")
@@ -264,6 +330,7 @@ def _convert_novel_impl(request: ConvertRequest) -> ConvertResponse:
 
     try:
         converter = get_converter(request.mode)
+        configure_converter(converter, request.creative_brief)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -278,6 +345,7 @@ def _convert_novel_impl(request: ConvertRequest) -> ConvertResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     review_report = None
+    finish_conversion(screenplay, request.creative_brief, converter.mode)
     if request.enable_review:
         try:
             screenplay, review_report = review_and_improve(screenplay, mode=converter.mode)
@@ -296,8 +364,10 @@ def _convert_novel_impl(request: ConvertRequest) -> ConvertResponse:
 
 
 @app.post("/api/convert/jobs", response_model=ConvertJobStartResponse)
-async def start_convert_job(request: ConvertRequest) -> ConvertJobStartResponse:
-    snapshot = conversion_jobs.create(request)
+def start_convert_job(
+    request: ConvertRequest, idempotency_key: str = Header(default="")
+) -> ConvertJobStartResponse:
+    snapshot = conversion_jobs.create(request, idempotency_key=idempotency_key)
     return ConvertJobStartResponse(
         job_id=snapshot.job_id,
         status=snapshot.status,
@@ -308,14 +378,14 @@ async def start_convert_job(request: ConvertRequest) -> ConvertJobStartResponse:
 
 
 @app.get("/api/convert/jobs/{job_id}", response_model=ConvertJobStatusResponse)
-async def get_convert_job(job_id: str) -> ConvertJobStatusResponse:
+def get_convert_job(job_id: str) -> ConvertJobStatusResponse:
     if not conversion_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="转换任务不存在。")
     return conversion_jobs.snapshot(job_id)
 
 
 @app.post("/api/convert/jobs/{job_id}/cancel", response_model=ConvertJobStatusResponse)
-async def cancel_convert_job(job_id: str) -> ConvertJobStatusResponse:
+def cancel_convert_job(job_id: str) -> ConvertJobStatusResponse:
     if not conversion_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="转换任务不存在。")
     try:
@@ -346,6 +416,10 @@ async def stream_convert_job_events(job_id: str, request: Request) -> StreamingR
     """
     if not conversion_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="转换任务不存在。")
+    if redis_enabled():
+        from .redis_events import shared_job_stream
+
+        return shared_job_stream(conversion_jobs, job_id, request)
 
     async def event_stream():
         queue, backlog = conversion_jobs.subscribe(job_id)
@@ -413,13 +487,15 @@ async def stream_convert_job_events(job_id: str, request: Request) -> StreamingR
 
 
 @app.get("/api/jobs", response_model=JobListResponse)
-async def list_all_jobs(limit: int = 50) -> JobListResponse:
+def list_all_jobs(limit: int = 50) -> JobListResponse:
     return JobListResponse(jobs=list_recent_jobs(limit=limit))
 
 
 @app.post("/api/agent/runs", response_model=AgentJobStartResponse)
-async def start_agent_run(request: AgentRunRequest) -> AgentJobStartResponse:
-    snapshot = agent_jobs.create(request)
+def start_agent_run(
+    request: AgentRunRequest, idempotency_key: str = Header(default="")
+) -> AgentJobStartResponse:
+    snapshot = agent_jobs.create(request, idempotency_key=idempotency_key)
     return AgentJobStartResponse(
         job_id=snapshot.job_id,
         status=snapshot.status,
@@ -430,14 +506,14 @@ async def start_agent_run(request: AgentRunRequest) -> AgentJobStartResponse:
 
 
 @app.get("/api/agent/runs/{job_id}", response_model=AgentJobStatusResponse)
-async def get_agent_run(job_id: str) -> AgentJobStatusResponse:
+def get_agent_run(job_id: str) -> AgentJobStatusResponse:
     if not agent_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="Agent 任务不存在。")
     return agent_jobs.snapshot(job_id)
 
 
 @app.post("/api/agent/runs/{job_id}/cancel", response_model=AgentJobStatusResponse)
-async def cancel_agent_run(job_id: str) -> AgentJobStatusResponse:
+def cancel_agent_run(job_id: str) -> AgentJobStatusResponse:
     if not agent_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="Agent 任务不存在。")
     try:
@@ -453,8 +529,10 @@ async def list_agent_sessions() -> AgentSessionListResponse:
 
 
 @app.post("/api/agent/teams/runs", response_model=TeamJobStartResponse)
-async def start_team_run(request: TeamRunRequest) -> TeamJobStartResponse:
-    snapshot = team_jobs.create(request)
+def start_team_run(
+    request: TeamRunRequest, idempotency_key: str = Header(default="")
+) -> TeamJobStartResponse:
+    snapshot = team_jobs.create(request, idempotency_key=idempotency_key)
     return TeamJobStartResponse(
         job_id=snapshot.job_id,
         status=snapshot.status,
@@ -465,14 +543,14 @@ async def start_team_run(request: TeamRunRequest) -> TeamJobStartResponse:
 
 
 @app.get("/api/agent/teams/runs/{job_id}", response_model=TeamJobStatusResponse)
-async def get_team_run(job_id: str) -> TeamJobStatusResponse:
+def get_team_run(job_id: str) -> TeamJobStatusResponse:
     if not team_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="协作任务不存在。")
     return team_jobs.snapshot(job_id)
 
 
 @app.post("/api/agent/teams/runs/{job_id}/cancel", response_model=TeamJobStatusResponse)
-async def cancel_team_run(job_id: str) -> TeamJobStatusResponse:
+def cancel_team_run(job_id: str) -> TeamJobStatusResponse:
     if not team_jobs.has_job(job_id):
         raise HTTPException(status_code=404, detail="协作任务不存在。")
     try:
@@ -506,9 +584,7 @@ async def list_provider_profiles() -> ProviderListResponse:
 @app.post("/api/providers", response_model=ProviderListResponse)
 async def save_provider_profile(request: ProviderSaveRequest) -> ProviderListResponse:
     try:
-        data = provider_config.save_profile(
-            request.name, request.fields, activate=request.activate
-        )
+        data = provider_config.save_profile(request.name, request.fields, activate=request.activate)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ProviderListResponse(**data)
@@ -569,8 +645,11 @@ async def test_provider_profile(request: ProviderNameRequest) -> ProviderTestRes
         # 探测失败是预期结果之一（配置写错就是要看到失败），不该让端点 500，
         # 所以这里刻意捕获得比 ValueError 更宽。
         except Exception as exc:
-            return False, redact_secrets(str(exc)), fields.get("AI_MODEL", ""), int(
-                (perf_counter() - started) * 1000
+            return (
+                False,
+                redact_secrets(str(exc)),
+                fields.get("AI_MODEL", ""),
+                int((perf_counter() - started) * 1000),
             )
         finally:
             llm.client.close()
@@ -586,21 +665,40 @@ async def test_provider_profile(request: ProviderNameRequest) -> ProviderTestRes
 
 
 @app.post("/api/rag/query", response_model=RagQueryResponse)
-async def query_story_knowledge(request: RagQueryRequest) -> RagQueryResponse:
+def query_story_knowledge(request: RagQueryRequest) -> RagQueryResponse:
     try:
         chapters = parse_chapters(request.novel_text)
+        if request.before_chapter and request.before_chapter > len(chapters) + 1:
+            raise ValueError("前文范围超出小说章节。")
         knowledge = build_story_knowledge(
-            chapters, extract_global_story_state(chapters), mode=request.mode
+            chapters,
+            extract_global_story_state(chapters),
+            mode=request.mode,
+            retrieval=request.retrieval,
         )
         hits = knowledge.search(
-            request.query, top_k=request.top_k, before_chapter=request.before_chapter
+            request.query,
+            top_k=request.top_k,
+            before_chapter=request.before_chapter,
+            rerank=request.rerank,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"RAG 查询失败：{exc}") from exc
 
-    return RagQueryResponse(
-        retriever=knowledge.retriever_kind, stats=knowledge.stats(), hits=hits
-    )
+    return RagQueryResponse(retriever=knowledge.retriever_kind, stats=knowledge.stats(), hits=hits)
+
+
+@app.post("/api/rag/answer", response_model=StoryQuestionResponse)
+async def answer_novel_question(request: StoryQuestionRequest) -> StoryQuestionResponse:
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: answer_story_question(**request.model_dump())
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"故事问答失败：{redact_secrets(str(exc))}"
+        ) from exc
+    return StoryQuestionResponse(**result)
 
 
 @app.get("/api/agent/sessions/{session_id}", response_model=AgentSessionDetailResponse)
@@ -625,6 +723,33 @@ async def get_agent_session(session_id: str) -> AgentSessionDetailResponse:
 async def validate_yaml(request: ValidateYamlRequest) -> ValidateYamlResponse:
     try:
         screenplay = screenplay_from_yaml(request.yaml_text)
+        if request.previous_yaml and request.previous_yaml != request.yaml_text:
+            from .creative_models import EditingState
+            from .plot_state import screenplay_hash
+
+            previous = screenplay_from_yaml(request.previous_yaml)
+            old_scenes = {s.id: s for s in previous.scenes}
+            changed = [s.id for s in screenplay.scenes if old_scenes.get(s.id) != s]
+            if (
+                screenplay.characters != previous.characters
+                or screenplay.plot_state != previous.plot_state
+            ):
+                changed = [s.id for s in screenplay.scenes]
+            if changed:
+                valid_ids = {s.id for s in screenplay.scenes}
+                screenplay.editing = EditingState(
+                    based_on_hash=screenplay_hash(previous),
+                    dirty_scene_ids=[
+                        sid
+                        for sid in dict.fromkeys(
+                            changed + (previous.editing.dirty_scene_ids if previous.editing else [])
+                        )
+                        if sid in valid_ids
+                    ],
+                    note="源码已修改，旧事件账本需要重新核验。",
+                )
+            elif previous.editing and previous.editing.status == "needs_check":
+                screenplay.editing = previous.editing.model_copy(deep=True)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"YAML 校验失败：{exc}") from exc
 
@@ -632,6 +757,7 @@ async def validate_yaml(request: ValidateYamlRequest) -> ValidateYamlResponse:
         valid=True,
         message="YAML 符合 Story2Script 剧本 Schema。",
         screenplay=screenplay,
+        yaml_text=screenplay_to_yaml(screenplay),
     )
 
 

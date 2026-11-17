@@ -4,6 +4,9 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .plot_state import PlotContinuity
+from .creative_models import CreativeBrief, SceneGroup, EditingState
+
 
 AdaptationType = Literal["短剧", "影视剧", "舞台剧", "广播剧", "分镜脚本"]
 SUPPORTED_ADAPTATION_TYPES: tuple[AdaptationType, ...] = (
@@ -21,8 +24,8 @@ class StrictModel(BaseModel):
 
 
 class SourceInfo(StrictModel):
-    chapter_count: int = Field(ge=3, description="Number of source novel chapters")
-    chapter_titles: list[str] = Field(min_length=3)
+    chapter_count: int = Field(ge=1, description="Number of nonempty source chapters")
+    chapter_titles: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
     def chapter_count_matches_titles(self) -> Self:
@@ -139,6 +142,8 @@ class Scene(StrictModel):
     )
     elements: list[SceneElement] = Field(min_length=1)
     camera_hints: list[str] = Field(default_factory=list)
+    timeline_mode: Literal["present", "flashback", "recording", "dream"] = "present"
+    event_time_scene_id: str = Field(default="", description="Past event anchored at scene start")
 
     @model_validator(mode="after")
     def slug_line_matches_production_fields(self) -> Self:
@@ -163,6 +168,10 @@ class Screenplay(StrictModel):
     global_state: GlobalStoryState
     characters: list[Character]
     scenes: list[Scene] = Field(min_length=1)
+    plot_state: PlotContinuity | None = None
+    creative_brief: CreativeBrief | None = None
+    structure: list[SceneGroup] = Field(default_factory=list)
+    editing: EditingState | None = None
 
     @model_validator(mode="after")
     def references_are_valid(self) -> Self:
@@ -176,6 +185,28 @@ class Screenplay(StrictModel):
 
         known_characters = set(character_ids)
         known_chapters = set(self.source.chapter_titles)
+        group_ids = [g.id for g in self.structure]
+        if len(set(group_ids)) != len(group_ids):
+            raise ValueError("幕/集 ID 不能重复")
+        for kind in ("act", "episode"):
+            groups = [g for g in self.structure if g.kind == kind]
+            if groups and [sid for g in groups for sid in g.scene_ids] != scene_ids:
+                raise ValueError("每套幕/集分组必须按原顺序完整覆盖场景，不得重复或遗漏")
+        if self.editing and set(self.editing.dirty_scene_ids) - set(scene_ids):
+            raise ValueError("待检查编辑引用了不存在的场景")
+
+        for scene in self.scenes:
+            if scene.event_time_scene_id and scene.event_time_scene_id not in scene_ids:
+                raise ValueError(f"{scene.id} 的事件时间引用了不存在的场景")
+        if self.plot_state:
+            for change in self.plot_state.changes:
+                if change.character_id not in known_characters:
+                    raise ValueError("剧情变更引用了不存在的角色")
+                if change.effective_scene_id not in scene_ids:
+                    raise ValueError("剧情变更引用了不存在的生效场景")
+            for fact in self.plot_state.facts:
+                if fact.valid_from_scene_id not in scene_ids:
+                    raise ValueError("剧情事实引用了不存在的生效场景")
 
         global_character_ids = {character.id for character in self.global_state.characters}
         unknown_global_characters = global_character_ids - known_characters

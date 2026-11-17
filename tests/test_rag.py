@@ -180,6 +180,7 @@ def test_embedding_retriever_ranks_by_semantic_vector(
     knowledge = build_story_knowledge(
         chapters,
         mode="ai",
+        retrieval="embedding",
         client=httpx.Client(transport=httpx.MockTransport(embedding_handler)),
     )
 
@@ -217,6 +218,7 @@ def test_embedding_index_failure_falls_back_to_lexical(
         parse_chapters(NOVEL),
         mode="ai",
         client=httpx.Client(transport=httpx.MockTransport(handler)),
+        retrieval="embedding",
     )
 
     assert knowledge.retriever_kind == "lexical"
@@ -237,6 +239,7 @@ def test_embedding_query_failure_returns_empty(monkeypatch: pytest.MonkeyPatch) 
         parse_chapters(NOVEL),
         mode="ai",
         client=httpx.Client(transport=httpx.MockTransport(handler)),
+        retrieval="embedding",
     )
     assert knowledge.retriever_kind == "embedding"
 
@@ -287,6 +290,6 @@ def test_rag_query_api() -> None:
     assert data["hits"]
     assert len(data["hits"]) <= 2
 
-    bad = client.post("/api/rag/query", json={"novel_text": "第一章 一\n内容", "query": "x"})
+    bad = client.post("/api/rag/query", json={"novel_text": "第一章 一", "query": "x"})
     assert bad.status_code == 422
     assert "RAG 查询失败" in bad.json()["detail"]

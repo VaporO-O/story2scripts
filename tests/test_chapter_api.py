@@ -21,11 +21,11 @@ def test_preview_chapters_api() -> None:
     assert body["chapters"][0]["title"] == "第一章 开始"
 
 
-def test_preview_chapters_api_rejects_short_text() -> None:
+def test_preview_chapters_api_accepts_short_text() -> None:
     response = client.post(
         "/api/chapters/preview",
         json={"novel_text": "第一章 开始\n内容一\n第二章 结束\n内容二"},
     )
 
-    assert response.status_code == 422
-    assert "3 个章节" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["chapter_count"] == 2

@@ -259,7 +259,7 @@ def test_sync_convert_api_records_success_and_failure():
     ok = client.post("/api/convert", json={"novel_text": NOVEL, "mode": "demo"})
     assert ok.status_code == 200
 
-    bad = client.post("/api/convert", json={"novel_text": "第一章 只有一章\n内容。", "mode": "demo"})
+    bad = client.post("/api/convert", json={"novel_text": "第一章 空标题", "mode": "demo"})
     assert bad.status_code == 422
 
     row = metrics.summary()["tasks"]["convert"]

@@ -82,39 +82,55 @@ def _normalized_text(text: str) -> str:
 def score_dialogue_attribution(
     screenplay: Screenplay, expected_annotations
 ) -> AttributionMetrics:
+    rows = diagnose_dialogue_attribution(screenplay, expected_annotations)
+    matched = sum(row["status"] != "unmatched" for row in rows)
+    correct = sum(row["status"] == "correct" for row in rows)
+    return AttributionMetrics(
+        expected=len(rows), matched=matched, correct=correct,
+        accuracy=_ratio(correct, len(rows)),
+        quote_coverage=_ratio(matched, len(rows)),
+        matched_speaker_accuracy=_ratio(correct, matched, empty=1.0 if not rows else 0.0),
+        wrong_speaker=matched - correct, unmatched=len(rows) - matched,
+    )
+
+
+def diagnose_dialogue_attribution(screenplay: Screenplay, expected_annotations) -> list[dict]:
+    """Unmatched means missing OR paraphrased; it is not a speaker error.
+
+    Exact matches precede substring matches. Matching never uses the gold
+    speaker to select a candidate, and each actual utterance is used once.
+    """
     names = {character.id: character.name for character in screenplay.characters}
-    actual: list[tuple[str, str]] = []
+    actual: list[tuple[str, str, str, str]] = []
     for scene in screenplay.scenes:
         for element in scene.elements:
             if isinstance(element, Dialogue):
-                actual.append((_normalized_text(element.text), names.get(element.character, "")))
+                actual.append((_normalized_text(element.text), names.get(element.character, ""),
+                               scene.id, element.text))
 
     used: set[int] = set()
-    matched = 0
-    correct = 0
+    rows = []
     for annotation in expected_annotations:
         quote = _normalized_text(annotation.quote)
-        candidate_index = next(
-            (
-                index
-                for index, (text, _speaker) in enumerate(actual)
-                if index not in used and (text == quote or (text and quote and (text in quote or quote in text)))
-            ),
-            None,
-        )
+        candidates = [
+            (0 if text == quote else 1, index)
+            for index, (text, _speaker, _scene, _raw) in enumerate(actual)
+            if index not in used and quote and text
+            and (text == quote or (min(len(text), len(quote)) >= 4
+                                  and (text in quote or quote in text)))
+        ]
+        candidate_index = min(candidates)[1] if candidates else None
         if candidate_index is None:
+            rows.append({"quote": annotation.quote, "expected_speaker": annotation.speaker,
+                         "status": "unmatched", "scene_id": "", "actual_speaker": "",
+                         "actual_text": ""})
             continue
         used.add(candidate_index)
-        matched += 1
-        if actual[candidate_index][1] == annotation.speaker:
-            correct += 1
-    expected_count = len(expected_annotations)
-    return AttributionMetrics(
-        expected=expected_count,
-        matched=matched,
-        correct=correct,
-        accuracy=_ratio(correct, expected_count),
-    )
+        _text, speaker, scene_id, raw = actual[candidate_index]
+        rows.append({"quote": annotation.quote, "expected_speaker": annotation.speaker,
+                     "status": "correct" if speaker == annotation.speaker else "wrong_speaker",
+                     "scene_id": scene_id, "actual_speaker": speaker, "actual_text": raw})
+    return rows
 
 
 def score_output(screenplay: Screenplay, expected: ExpectedAnnotations) -> OutputMetrics:

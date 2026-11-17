@@ -9,6 +9,8 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from .character_profiles_ai import PROFILE_PLACEHOLDERS, AICharacterProfiler
+from .dialogue import extract_dialogues, repair_attributions
+from .creative_templates import brief_prompt
 from .llm_client import LLMClient, is_fatal_error, loads_json_object
 from .parser import Chapter
 from .prompt_catalog import CONVERSION_CHUNK_PROMPT
@@ -349,24 +351,8 @@ def _resolve_known_name(raw: str, known_names: set[str]) -> str | None:
 
 
 def _dialogue_from_text(text: str, known_names: set[str]) -> tuple[str, str] | None:
-    for quote in re.finditer(r"[“\"]([^”\"]{2,100})[”\"]", text):
-        prefix = text[max(0, quote.start() - 12) : quote.start()]
-        speaker_match = re.search(
-            r"([\u4e00-\u9fff]{2,5})(?:说|问|喊|答道|低声道)[，,:：]?$", prefix
-        )
-        if speaker_match:
-            speaker = _resolve_known_name(speaker_match.group(1), known_names)
-            if speaker:
-                return speaker, quote.group(1)
-        # 说话人后置：原文常写成 “……”方超手持枪 / “……”，方超说。引号后紧跟的已知
-        # 人物名同样视为说话人，避免这类对白被当成动作行。
-        suffix = text[quote.end() : quote.end() + 8]
-        post_match = re.match(r"^[，,、：:\s]*([一-鿿]{2,5})", suffix)
-        if post_match:
-            speaker = _resolve_known_name(post_match.group(1), known_names)
-            if speaker:
-                return speaker, quote.group(1)
-    return None
+    dialogues = extract_dialogues(text, known_names)
+    return (dialogues[0].speaker, dialogues[0].text) if dialogues else None
 
 
 def _first_action_sentence(text: str, limit: int = 100) -> str:
@@ -1242,7 +1228,8 @@ class DemoConverter:
         scene_index = 1
         for chapter_no, (chapter, scene_slices) in enumerate(chapter_slices, start=1):
             for scene_slice in scene_slices:
-                dialogue = _dialogue_from_text(scene_slice.text, known_names)
+                dialogues = extract_dialogues(scene_slice.text, known_names)
+                dialogue = (dialogues[0].speaker, dialogues[0].text) if dialogues else None
                 inner_state = _inner_state_from_text(scene_slice.text, known_names)
                 action_text = _first_action_sentence(scene_slice.text) or _first_sentence(
                     scene_slice.text
@@ -1257,15 +1244,15 @@ class DemoConverter:
                     if state.name in scene_slice.text:
                         _append_character_id(scene_characters, state.id)
 
-                if dialogue:
-                    character_id = character_ids[dialogue[0]]
+                for source_dialogue in dialogues:
+                    character_id = character_ids[source_dialogue.speaker]
                     _append_character_id(scene_characters, character_id)
                     elements.append(
                         Dialogue(
                             type="dialogue",
                             character=character_id,
                             parenthetical="",
-                            text=dialogue[1],
+                            text=source_dialogue.text,
                         )
                     )
 
@@ -1488,21 +1475,33 @@ class AIConverter:
         # 代价是队头阻塞：慢的片段 0 会挡住 1-3 的显示。4 worker 下这是有界的
         # 小停顿，换来编号稳定，值得。
         watermark = 0
+        attribution_repairs = 0
         flush_lock = threading.Lock()
 
         def flush_ready() -> None:
             """把水位之后已完成的连续片段归一化、编号并逐场景上报。"""
-            nonlocal watermark
+            nonlocal watermark, attribution_repairs
             with flush_lock:
                 while watermark < len(tasks) and finished[watermark]:
                     raw_scenes = results[watermark]
                     chapter_title = tasks[watermark][0].title
+                    source_text = tasks[watermark][1]
                     watermark += 1
                     if raw_scenes is None:
                         continue  # 该片段失败，跳过但不阻塞后续片段
                     for scene in _normalize_screenplay_scene_data(
                         raw_scenes, known_ids, name_to_id, [chapter_title], location_names
                     ):
+                        evidence = [
+                            (name_to_id[item.speaker], item.text)
+                            for item in extract_dialogues(source_text, set(name_to_id))
+                            if item.explicit
+                        ]
+                        attribution_repairs += repair_attributions(scene["elements"], evidence)
+                        speakers = [item["character"] for item in scene["elements"]
+                                    if item["type"] == "dialogue"]
+                        _append_unique(scene["characters"], speakers)
+                        _append_unique(scene["characters_present"], speakers)
                         scene["id"] = f"scene-{len(scenes) + 1}"
                         scenes.append(scene)
                         if scene_cb is None:
@@ -1595,6 +1594,10 @@ class AIConverter:
                 f"{len(failures)}/{total} 个片段转换失败已跳过，"
                 f"剧本内容不完整。最后一个错误：{failures[-1][:160]}"
             )
+        if attribution_repairs:
+            self.last_run_warnings.append(
+                f"已依据原文的明确说话人修正 {attribution_repairs} 处对白归属。"
+            )
         report(total, "正在归一化场景并校验剧本结构")
 
         # 用 AI 人物小传补全 global_state 的 arc/goal/性格，再据此重建顶层 characters。
@@ -1644,6 +1647,12 @@ class AIConverter:
             {"chapter": hit.get("chapter", ""), "snippet": hit.get("snippet", "")}
             for hit in (retrieved or [])
         ]
+        dialogue_evidence = [
+            {"character": next(item["id"] for item in roster if item["name"] == line.speaker),
+             "quote": line.text}
+            for line in extract_dialogues(chunk_text, {item["name"] for item in roster})
+            if line.explicit
+        ]
         prompt = (
             "你是专业影视编剧。请只把【本章】中的【当前片段】小说改编成 Story2Script 的场景列表。"
             "只返回可被 json.loads 解析的 JSON 对象，形如 {\"scenes\": [...]}，"
@@ -1654,8 +1663,12 @@ class AIConverter:
             "每个片段返回 1 到 3 个 scene，保持 JSON 精简完整，避免超长响应。\n"
             f"改编类型：{adaptation_type}\n"
             f"改编要求：{style.prompt_instruction}\n"
+            f"{brief_prompt(getattr(self, 'creative_brief', None))}"
             "稳定人物表（characters 和 dialogue.character 只能引用这里的 id，不要新造人物）："
             f"{json.dumps(roster, ensure_ascii=False)}\n"
+            "原文明确标注的对白归属（不要把听话人当成说话人；保留多轮对白，"
+            "措辞可改，原有信息仍由原说话人表达）："
+            f"{json.dumps(dialogue_evidence, ensure_ascii=False)}\n"
             "全局状态表是固定上下文，必须保持人物、地点和时间线跨章一致："
             f"{json.dumps(_compact_global_state(global_state), ensure_ascii=False)}\n"
             "相关前文备忘（按语义检索出的前文片段，仅用于保持剧情连续性，禁止复写其内容）："

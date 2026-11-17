@@ -1,8 +1,21 @@
 # Story2Script
 
-Story2Script 是一个“小说章节 -> 结构化剧本 YAML”的改编工作台。它面向三章以上的长文本小说，先识别章节、人物、地点和时间线，再把小说叙述改写成可预览、可编辑、可校验的剧本初稿。
+Story2Script 是一个“小说 -> 结构化剧本 YAML”的改编工作台。它接受单章、多章或没有章节标题的正文，识别人物、地点和时间线，再把小说叙述改写成可预览、可编辑、可校验的剧本初稿。
 
 项目当前内置示例为《低智商犯罪》（悬疑 / 犯罪）。文档和演示都以这个示例为准。
+
+## 功能与更新文档
+
+- [Redis 与独立 Worker](docs/REDIS_GUIDE.md)：Celery 队列、共享缓存、全局限流、跨进程进度、补投与启动脚本。
+
+- [任务层与恢复](docs/TASK_LAYER_GUIDE.md)：可靠落盘、创作 AI 后台任务、请求去重、检查点与预算。
+
+- [创作面板使用说明](docs/AUTHORING_STUDIO.md)：图谱、导出、风格模板、分幕编辑、情绪与朗读。
+- [当前功能清单](docs/FEATURES.md)：统一记录已实现能力、使用入口、边界与更新记录。
+- [持久化故事检索](docs/RAG_STORAGE.md)：SQLite/`sqlite-vec` 索引、命名空间、环境配置与删除规则。
+- [自定义剧情事件](docs/CUSTOM_EVENTS.md)：用自然语言定义事件，预览前提、状态变化和组合步骤。
+- [参考项目分析与更新路线](docs/REFERENCE_PROJECT_REVIEW.md)：两个公开项目的源码对比、可采纳功能与优先级。
+- [剧情改写使用说明](docs/PLOT_REVISION_GUIDE.md) / [逻辑引擎验证报告](docs/LOGIC_ENGINE_VALIDATION.md)。
 
 ## 快速运行
 
@@ -26,7 +39,7 @@ python -m uvicorn story2script.main:app --reload --port 8001
 ```
 ## Demo演示
 
-- 健康检查：<https://www.bilibili.com/video/BV1ZyE86bEAY/>
+<https://www.bilibili.com/video/BV1ZyE86bEAY/>
 
 ## 工作台能力
 
@@ -40,8 +53,11 @@ Web 工作台支持完整演示链路：
 - 顶部分区导航：「工作台」（输入 → 转换 → 编辑 → 审校）、「智能改编」（改编 Agent 与多智能体协作）、「运行指标」；状态栏全局常驻，切换分区后仍能看到进度与提示。
 - 转换进度逐步推进：切分片段数、建立前文索引、逐段检索、已处理片段数、重试与跳过的片段、归一化与校验阶段都会实时显示，而不是几个固定百分比。
 - 右侧提供分场预览和 YAML 源码视图。
-- 支持 YAML 校验、下载 `screenplay.yaml`。
+- 支持 YAML 校验、下载 `screenplay.yaml`，以及 TXT/HTML/Word 导出和浏览器打印。
+- 「创作面板」提供场景时点图谱、人物关系与证据跳转、版本对照、幕/集导航、内联编辑与草稿历史、情绪轨迹及分角色朗读。
+- 工作台「改编风格与节奏」提供版本化模板，可控制 AI 转换与后续改写的语气、节奏和表达保真。
 - 支持人物小传提取。
+- 故事问答和语义/混合检索支持 SQLite/`sqlite-vec` 持久化索引；可在工作台建立、查看和删除索引。
 - 支持局部重生成：重新生成本场对白、加强戏剧冲突、改成短剧节奏、增加镜头提示、减少旁白、调整人物语气。
 - 支持机审打分与逐场景人审，审校报告可下载；每个场景可展开「评分明细」看四项得分与判定依据，机审工具区可展开完整的「评分规则」。
 - 「改编 Agent」面板：设定目标后一键启动自主改编代理，实时进度、逐步决策轨迹、前后分数对比，可保存 / 载入历史会话。
@@ -91,7 +107,7 @@ Story2Script 的核心原则是“叙述 -> 戏剧化”。小说可以依靠心
 
 默认 `mode: "demo"`，无需 API Key，适合比赛现场演示和离线验收。本地转换器会：
 
-- 解析三章以上小说。
+- 解析单章、多章或无章节标题的小说正文。
 - 抽取全局人物、地点、时间线。
 - 按时间变化、地点变化、人物进出、情节转折、冲突变化拆分 scene。
 - 识别前置和后置说话人，例如“方超说：……”和“……”方超转身。
@@ -119,6 +135,10 @@ AI_REVIEW_MAX_ROUNDS=2
 AI_EMBED_MODEL=your-embedding-model
 AI_EMBED_BATCH_SIZE=16
 RAG_TOP_K=3
+RAG_STORAGE=sqlite
+STORY2SCRIPT_RAG_DB=
+RAG_NAMESPACE=story2script
+RAG_EMBEDDING_REVISION=1
 ```
 
 说明：
@@ -134,7 +154,9 @@ RAG_TOP_K=3
 - `AI_CHAPTER_CHUNK_CHARS` 控制单个分块的字符上限，默认 `1800`（下限 200）。调小可缩短单次请求的输入与输出，代价是分块数与总调用次数上升。
 - `AI_RETRY_BACKOFF_SECONDS` 是分块重试之间的等待秒数，逗号分隔，默认 `1,3`；设为 `0` 关闭等待。
 - `AI_REVIEW_THRESHOLD` / `AI_REVIEW_MAX_ROUNDS` 控制机审及格线（0-10）与自动修正轮次上限。
-- `AI_EMBED_MODEL` 可选；配置后 RAG 前文检索使用语义 embedding，否则用本地词法检索。
+- `AI_EMBED_MODEL` 可选；配置后 RAG 使用语义/混合检索，否则用本地词法检索。
+- `RAG_STORAGE=sqlite`（默认）使用 SQLite/`sqlite-vec` 保存原文片段与向量；`RAG_STORAGE=memory` 关闭持久化。
+- `STORY2SCRIPT_RAG_DB` 可指定向量库文件路径；`RAG_NAMESPACE` 隔离索引集合；更新 Embedding 模型行为时可递增 `RAG_EMBEDDING_REVISION`。
 - 没有 API Key 时继续使用本地模式即可演示。
 
 ### 转换失败排查
@@ -308,14 +330,22 @@ REST 用法：`POST /api/agent/teams/runs` 提交
 
 ## RAG 前文检索
 
+工作台新增「故事问答」：本地模式查找原文，AI 模式生成带章节与逐字引用的回答；可限制只使用某章之前的内容。接口为 `POST /api/rag/answer`。
+
+检索支持词法、Embedding、RRF 混合检索和可选 AI 重排序。问答与查询请求可指定 `retrieval: "lexical" | "embedding" | "hybrid" | "auto"` 及 `rerank: true`；AI 自动模式在配置 Embedding 后使用混合检索，否则使用词法。重排序需要 AI 模式。SQLite 索引支持在工作台建立、查看和删除，也可通过 `GET/POST/DELETE /api/rag/indexes` 管理。详细存储行为和限制见 [持久化故事检索](docs/RAG_STORAGE.md)。
+
+对白修复、72 题检索基准及复现命令见 [优化与评测记录](docs/QUALITY_AND_RAG_REPORT.md)。
+
+工作台「剧情改写」支持死亡/离场、复活/回归、物品转移、地点移动、获知秘密、关系变化，并新增自然语言自定义事件：模型编译额外状态、前提与组合步骤，用户核对后执行。模型提取事件与生成正文，确定性规则引擎检查前提、原子更新状态、追溯因果来源；未知前提阻止事件执行。流程为预览计划与初始事实 → 确认或修正账本 → 逐场联动生成与规则校验 → 查看证据及差异 → 采用或回退。采用前重新推演，检查点保留事件账本。原稿受版本校验保护；生成需要配置 AI 模型。自然语言抽取仍可能遗漏，规则校验不能证明所有文学因果。详见 [剧情改写使用说明](docs/PLOT_REVISION_GUIDE.md) 和 [设计说明](docs/PLOT_REVISION_DESIGN.md)。
+
 长篇转换的痛点是"每个分块都要携带全量跨章上下文"：此前 timeline 随章节数线性膨胀。现在项目把**章节分块 + 全局事实（人物/地点/时间线）**建成可检索的故事知识库（`story2script/rag.py`）：
 
 - **AI 转换集成**：转换第 N 章片段时，用片段文本检索 top-k（`RAG_TOP_K`，默认 3）相关前文，以「相关前文备忘」注入提示词；固定上下文只保留人物表与地点名单。跨章上下文成本从 O(章节数) 降到 O(top_k)。
 - **防未来泄漏**：检索第 N 章时严格排除第 N 章及之后的片段与时间线事件，人物/地点等全局事实不受影响。
-- **双检索器**：默认本地词法检索（字符 bigram TF-IDF + 余弦，零依赖、确定性、离线可演示）；配置 `AI_EMBED_MODEL` 后自动切换语义检索（OpenAI-compatible `/embeddings`，批量建库，调用计入 "AI embeddings" 指标维度），embedding 不可用时静默降级词法，主链路永不因 RAG 中断。
+- **双检索器**：默认本地词法检索（字符 bigram TF-IDF + 余弦，零依赖、确定性、离线可演示）；配置 `AI_EMBED_MODEL` 后使用持久化语义/混合检索（OpenAI-compatible `/embeddings`，查询前先按章节范围过滤）；Embedding 不可用时记录警告并降级词法，不阻断主流程。
 - **Agent 集成**：运行改编 Agent 时提供小说原文（REST `novel_text` / MCP `novel_id`），planner 即可用 `search_story_context` 工具在重写前核对剧情连续性与人物设定。
 - **独立查询**：REST `POST /api/rag/query`（`{novel_text, query, mode, top_k, before_chapter}`）与 MCP 工具 `build_novel_knowledge` / `search_novel_knowledge`。
-- 环境变量：`AI_EMBED_MODEL`、`AI_EMBED_BATCH_SIZE`（默认 16）、`RAG_TOP_K`（默认 3）、`RAG_CHUNK_CHARS`（索引分块长度，默认 600）。
+- 环境变量：`AI_EMBED_MODEL`、`AI_EMBED_BATCH_SIZE`（默认 16）、`RAG_TOP_K`（默认 3）、`RAG_CHUNK_CHARS`（索引分块长度，默认 600）、`RAG_STORAGE`、`STORY2SCRIPT_RAG_DB`、`RAG_NAMESPACE`、`RAG_EMBEDDING_REVISION`。
 
 ## 可观测性
 
@@ -604,3 +634,10 @@ pytest
 `pytest` 控制台脚本不会。`tests/` 不是包，测试之间若写成 `from tests.xxx import ...`
 只能在前者下通过，在 CI 会于收集阶段直接 `ModuleNotFoundError`。跨测试复用请写顶层
 导入（`from test_ai_converter import scene_dict`）。
+
+
+## Redis 可选运行模式
+
+默认仍可只启动原本的 Web 服务。需要独立后台执行进程时，安装 `pip install -e ".[redis]"`，运行 `docker compose -f compose.redis.yml up -d`，再分别启动 `scripts/run_redis.ps1 -Mode worker` 与 `scripts/run_redis.ps1 -Mode web`。Windows 脚本可指定 -Python 和 -RedisPort。
+
+Redis 负责 Celery 队列、共享缓存、全局模型请求限额和进度 Streams；正式任务、剧本及检查点仍在同一个 SQLite 文件。同主机 Web/Worker 必须使用相同数据库和命名空间，跨机器部署暂不支持。运行指标可查看 Redis 和 Worker 状态。完整配置、恢复边界见 [Redis 使用说明](docs/REDIS_GUIDE.md)，真实联调证据见 [验证记录](docs/REDIS_VALIDATION.md)。

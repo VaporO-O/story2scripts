@@ -6,6 +6,7 @@ from .screenplay import DEFAULT_ADAPTATION_TYPE
 from .screenplay import AdaptationType
 from .screenplay import GlobalStoryState
 from .screenplay import Screenplay
+from .creative_models import CreativeBrief
 from .agent.models import AgentRunResult
 from .agent.models import TeamRunResult
 from .continuity import ContinuityFinding
@@ -61,6 +62,7 @@ class ConvertRequest(BaseModel):
     adaptation_type: AdaptationType = DEFAULT_ADAPTATION_TYPE
     mode: str = "demo"
     enable_review: bool = False
+    creative_brief: CreativeBrief | None = None
 
 
 class ConvertResponse(BaseModel):
@@ -97,12 +99,14 @@ class ConvertJobStatusResponse(BaseModel):
 
 class ValidateYamlRequest(BaseModel):
     yaml_text: str = Field(min_length=1)
+    previous_yaml: str = Field(default="", max_length=2_000_000)
 
 
 class ValidateYamlResponse(BaseModel):
     valid: bool
     message: str
     screenplay: Screenplay | None = None
+    yaml_text: str = ""
 
 
 class SceneRewriteRequest(BaseModel):
@@ -338,15 +342,38 @@ class MetricsEventsResponse(BaseModel):
 class RagQueryRequest(BaseModel):
     novel_text: str = Field(min_length=1)
     query: str = Field(min_length=1)
-    mode: str = "demo"
-    top_k: int | None = None
-    before_chapter: int | None = None
+    mode: Literal["demo", "ai"] = "demo"
+    top_k: int | None = Field(default=None, ge=1, le=20)
+    before_chapter: int | None = Field(default=None, ge=1)
+    retrieval: Literal["auto", "lexical", "embedding", "hybrid"] = "auto"
+    rerank: bool = False
 
 
 class RagQueryResponse(BaseModel):
     retriever: str
     stats: dict
     hits: list[dict]
+
+
+class StoryQuestionRequest(BaseModel):
+    novel_text: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=2000)
+    mode: Literal["demo", "ai"] = "demo"
+    retrieval: Literal["auto", "lexical", "embedding", "hybrid"] = "auto"
+    top_k: int = Field(default=5, ge=1, le=20)
+    before_chapter: int | None = Field(default=None, ge=1)
+    rerank: bool = False
+
+
+class StoryQuestionResponse(BaseModel):
+    answer: str
+    abstained: bool
+    answer_kind: Literal["excerpts", "generated"]
+    retriever: str
+    citations: list[dict]
+    hits: list[dict]
+    warnings: list[str] = Field(default_factory=list)
+    stats: dict = Field(default_factory=dict)
 
 
 class JobListResponse(BaseModel):
